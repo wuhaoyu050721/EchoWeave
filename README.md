@@ -4,6 +4,8 @@
   <img src="static/zhiyu-logo.png" width="128" alt="EchoWeave 织语 Logo">
 </p>
 
+织语，为中国宝宝量身打造的类酒馆安卓 APP。
+
 织语是一款本地优先的自定义 AI 角色对话应用，基于 Vue 3 和 uni-app 构建，可在浏览器中预览并打包为 Android 应用。
 
 ## 主要功能
