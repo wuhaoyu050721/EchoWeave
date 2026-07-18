@@ -1,0 +1,11 @@
+export type AiChatKeystoreReady = () => boolean
+export type AiChatKeystoreEncrypt = (value: string) => string
+export type AiChatKeystoreDecrypt = (recordJson: string) => string
+export type AiChatSecureRandom = (byteLength: number) => string
+
+interface Uni {
+  aiChatKeystoreReady(): boolean
+  aiChatKeystoreEncrypt(value: string): string
+  aiChatKeystoreDecrypt(recordJson: string): string
+  aiChatSecureRandom(byteLength: number): string
+}

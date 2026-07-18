@@ -1,0 +1,16 @@
+@font-face {
+  font-family: 'AIChatIcons';
+  src: url('./uniicons.ttf') format('truetype');
+  font-style: normal;
+  font-weight: normal;
+  font-display: block;
+}
+
+.app-icon {
+  display: inline-block;
+  flex: 0 0 auto;
+  overflow: hidden;
+  text-align: center;
+  text-decoration: none;
+  vertical-align: middle;
+}

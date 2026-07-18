@@ -1,0 +1,97 @@
+import KeyGenParameterSpec from 'android.security.keystore.KeyGenParameterSpec'
+import KeyProperties from 'android.security.keystore.KeyProperties'
+import Base64 from 'android.util.Base64'
+import KeyStore from 'java.security.KeyStore'
+import SecureRandom from 'java.security.SecureRandom'
+import Cipher from 'javax.crypto.Cipher'
+import KeyGenerator from 'javax.crypto.KeyGenerator'
+import SecretKey from 'javax.crypto.SecretKey'
+import GCMParameterSpec from 'javax.crypto.spec.GCMParameterSpec'
+import JSONObject from 'org.json.JSONObject'
+
+import {
+  AiChatKeystoreReady,
+  AiChatKeystoreEncrypt,
+  AiChatKeystoreDecrypt,
+  AiChatSecureRandom
+} from '../interface.uts'
+
+const KEYSTORE_PROVIDER = 'AndroidKeyStore'
+const KEY_ALIAS = 'ai-chat-custom-device-key-v1'
+const CIPHER_TRANSFORMATION = 'AES/GCM/NoPadding'
+const GCM_TAG_BITS : Int = 128
+
+type CipherRecord = {
+  version: number,
+  algorithm: string,
+  iv: string,
+  ciphertext: string
+}
+
+function openKeyStore(): KeyStore {
+  const keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER)
+  keyStore.load(null)
+  return keyStore
+}
+
+function getOrCreateKey(): SecretKey {
+  const keyStore = openKeyStore()
+  if (keyStore.containsAlias(KEY_ALIAS)) {
+    return keyStore.getKey(KEY_ALIAS, null) as SecretKey
+  }
+
+  const generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE_PROVIDER)
+  const spec = new KeyGenParameterSpec.Builder(
+    KEY_ALIAS,
+    KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT
+  )
+    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+    .setKeySize(256)
+    .build()
+  generator.init(spec)
+  return generator.generateKey()
+}
+
+export const aiChatKeystoreReady: AiChatKeystoreReady = function (): boolean {
+  getOrCreateKey()
+  return true
+}
+
+export const aiChatKeystoreEncrypt: AiChatKeystoreEncrypt = function (value: string): string {
+  const cipher = Cipher.getInstance(CIPHER_TRANSFORMATION)
+  cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
+  const ciphertext = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
+  const record: CipherRecord = {
+    version: 1,
+    algorithm: 'AES-GCM',
+    iv: Base64.encodeToString(cipher.getIV(), Base64.NO_WRAP),
+    ciphertext: Base64.encodeToString(ciphertext, Base64.NO_WRAP)
+  }
+  return JSON.stringify(record)
+}
+
+export const aiChatKeystoreDecrypt: AiChatKeystoreDecrypt = function (recordJson: string): string {
+  const record = new JSONObject(recordJson)
+  if (record.getInt('version') != 1 || record.getString('algorithm') != 'AES-GCM') {
+    throw new Error('Unsupported ciphertext record')
+  }
+
+  const cipher = Cipher.getInstance(CIPHER_TRANSFORMATION)
+  const iv = Base64.decode(record.getString('iv'), Base64.NO_WRAP)
+  cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), new GCMParameterSpec(GCM_TAG_BITS, iv))
+  const plaintext = cipher.doFinal(Base64.decode(record.getString('ciphertext'), Base64.NO_WRAP))
+  return plaintext.toString(Charsets.UTF_8)
+}
+
+export const aiChatSecureRandom: AiChatSecureRandom = function (byteLength: number): string {
+  const length : Int = byteLength.toInt()
+  if (length <= 0 || length > 1024) {
+    throw new Error('Invalid secure random byte length')
+  }
+
+  const bytes = ByteArray(length)
+  const random = new SecureRandom()
+  random.nextBytes(bytes)
+  return Base64.encodeToString(bytes, Base64.NO_WRAP)
+}

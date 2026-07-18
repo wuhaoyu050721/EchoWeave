@@ -1,0 +1,48 @@
+{
+  "id": "ai-chat-streaming",
+  "displayName": "AI Chat Android Streaming",
+  "version": "1.0.0",
+  "description": "Native Android HTTP streaming bridge for AI Chat Custom",
+  "keywords": [
+    "android",
+    "http-streaming",
+    "sse"
+  ],
+  "engines": {
+    "HBuilderX": "^5.0.0"
+  },
+  "dcloudext": {
+    "type": "uts",
+    "sale": {
+      "regular": { "price": "0.00" },
+      "sourcecode": { "price": "0.00" }
+    },
+    "contact": { "qq": "" },
+    "declaration": {
+      "ads": "none",
+      "data": "Sends model requests only to the endpoint configured by the user; no data is collected.",
+      "permissions": "Network access."
+    }
+  },
+  "uni_modules": {
+    "dependencies": [],
+    "encrypt": [],
+    "uni-ext-api": {
+      "uni": {
+        "onAiChatStreamEvent": "onAiChatStreamEvent",
+        "offAiChatStreamEvent": "offAiChatStreamEvent",
+        "aiChatStreamRequest": "aiChatStreamRequest",
+        "aiChatStreamCancel": "aiChatStreamCancel"
+      }
+    },
+    "platforms": {
+      "client": {
+        "Vue": { "vue2": "n", "vue3": "y" },
+        "App": {
+          "app-android": { "minVersion": "23" },
+          "app-ios": "n"
+        }
+      }
+    }
+  }
+}

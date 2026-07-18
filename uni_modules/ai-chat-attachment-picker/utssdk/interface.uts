@@ -1,0 +1,67 @@
+export type AiChatNativePreparedAttachment = {
+  dataUrl ?: string
+  textContent ?: string
+  mimeType ?: string
+  byteSize : number
+  width ?: number
+  height ?: number
+}
+
+export type AiChatNativeSelectedFile = {
+  name : string
+  type : string
+  size : number
+  nativePrepared : AiChatNativePreparedAttachment
+}
+
+export type AiChatPickAttachmentsResult = {
+  files : Array<AiChatNativeSelectedFile>
+}
+
+export type AiChatPickAttachmentsErrorCode = 9101001 | 9101002 | 9101003 | 9101004 | 9101005
+
+export interface AiChatPickAttachmentsFail extends IUniError {
+  errCode : AiChatPickAttachmentsErrorCode
+}
+
+export type AiChatPickAttachmentsOptions = {
+  mode : string
+  maxCount : number
+  success ?: (res : AiChatPickAttachmentsResult) => void
+  fail ?: (res : AiChatPickAttachmentsFail) => void
+  complete ?: (res : any) => void
+}
+
+export type AiChatPickAttachments = (options : AiChatPickAttachmentsOptions) => void
+
+export type AiChatWriteDownloadFileResult = {
+  sessionId : string
+  filePath : string
+  uri ?: string
+  byteSize : number
+}
+
+export type AiChatWriteDownloadFileErrorCode = 9101101 | 9101102 | 9101103 | 9101104
+
+export interface AiChatWriteDownloadFileFail extends IUniError {
+  errCode : AiChatWriteDownloadFileErrorCode
+}
+
+export type AiChatWriteDownloadFileOptions = {
+  operation : string
+  sessionId ?: string
+  fileName ?: string
+  base64 ?: string
+  mimeType ?: string
+  totalBytes ?: number
+  success ?: (res : AiChatWriteDownloadFileResult) => void
+  fail ?: (res : AiChatWriteDownloadFileFail) => void
+  complete ?: (res : any) => void
+}
+
+export type AiChatWriteDownloadFile = (options : AiChatWriteDownloadFileOptions) => void
+
+interface Uni {
+  aiChatPickAttachments(options : AiChatPickAttachmentsOptions) : void
+  aiChatWriteDownloadFile(options : AiChatWriteDownloadFileOptions) : void
+}

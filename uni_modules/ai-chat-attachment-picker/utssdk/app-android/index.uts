@@ -1,0 +1,932 @@
+import Activity from 'android.app.Activity'
+import Context from 'android.content.Context'
+import ContentResolver from 'android.content.ContentResolver'
+import ContentValues from 'android.content.ContentValues'
+import Intent from 'android.content.Intent'
+import Bitmap from 'android.graphics.Bitmap'
+import CompressFormat from 'android.graphics.Bitmap.CompressFormat'
+import BitmapFactory from 'android.graphics.BitmapFactory'
+import Color from 'android.graphics.Color'
+import Uri from 'android.net.Uri'
+import Build from 'android.os.Build'
+import Environment from 'android.os.Environment'
+import Handler from 'android.os.Handler'
+import Looper from 'android.os.Looper'
+import MediaStore from 'android.provider.MediaStore'
+import OpenableColumns from 'android.provider.OpenableColumns'
+import Base64 from 'android.util.Base64'
+import ByteArrayOutputStream from 'java.io.ByteArrayOutputStream'
+import File from 'java.io.File'
+import FileOutputStream from 'java.io.FileOutputStream'
+import OutputStream from 'java.io.OutputStream'
+import ByteBuffer from 'java.nio.ByteBuffer'
+import CodingErrorAction from 'java.nio.charset.CodingErrorAction'
+import StandardCharsets from 'java.nio.charset.StandardCharsets'
+import ConcurrentHashMap from 'java.util.concurrent.ConcurrentHashMap'
+import Executors from 'java.util.concurrent.Executors'
+import UUID from 'java.util.UUID'
+
+import {
+  AiChatNativePreparedAttachment,
+  AiChatNativeSelectedFile,
+  AiChatPickAttachments,
+  AiChatPickAttachmentsOptions,
+  AiChatPickAttachmentsResult,
+  AiChatWriteDownloadFile,
+  AiChatWriteDownloadFileOptions,
+  AiChatWriteDownloadFileResult
+} from '../interface.uts'
+import { AiChatPickAttachmentsFailImpl, AiChatWriteDownloadFileFailImpl } from '../unierror.uts'
+
+const REQUEST_CODE : Int = 24117
+const MAX_IMAGE_DIMENSION : Int = 1600
+const MAX_IMAGE_BYTES : Int = 2 * 1024 * 1024
+const MAX_IMAGE_SOURCE_BYTES : Int = 40 * 1024 * 1024
+const MAX_CHARACTER_CARD_BYTES : Int = 50 * 1024 * 1024
+const MAX_WORLD_BOOK_BYTES : Int = 5 * 1024 * 1024
+const MAX_BACKUP_JSON_BYTES : Int = 50 * 1024 * 1024
+const MAX_TEXT_BYTES : Int = 200 * 1024
+const MAX_DOWNLOAD_BYTES : Int = 50 * 1024 * 1024
+const MAX_DOWNLOAD_CHUNK_BASE64_CHARS : Int = 1024 * 1024
+const MAX_DOWNLOAD_FILE_NAME_BYTES : Int = 255
+const MAX_DOWNLOAD_EXTENSION_BYTES : Int = 32
+const DOWNLOAD_FOLDER = '织语'
+const LEGACY_PART_PREFIX = '.ai-chat-export-'
+const LEGACY_PART_SUFFIX = '.part'
+const JPEG_QUALITIES : Array<Int> = [86, 78, 70, 62, 54]
+const TEXT_EXTENSIONS = [
+  'txt', 'md', 'markdown', 'json', 'jsonl', 'csv', 'xml', 'yaml', 'yml', 'html', 'htm', 'css',
+  'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'vue', 'py', 'php', 'java', 'kt', 'kts', 'swift',
+  'c', 'h', 'cpp', 'hpp', 'cc', 'cs', 'go', 'rs', 'rb', 'sh', 'bash', 'zsh', 'sql', 'ini',
+  'toml', 'conf', 'properties', 'env', 'log'
+]
+const TEXT_MIME_TYPES = [
+  'text/plain', 'text/markdown', 'text/csv', 'text/xml', 'text/html', 'text/css',
+  'text/javascript', 'application/json', 'application/ld+json', 'application/xml',
+  'application/javascript', 'application/x-javascript', 'application/x-yaml', 'application/yaml'
+]
+
+let activeOptions : AiChatPickAttachmentsOptions | null = null
+let resultCallback : ((requestCode : Int, resultCode : Int, data ?: Intent) => void) | null = null
+let pendingCameraUri : Uri | null = null
+let modernDownloadCleanupComplete = false
+let legacyDownloadCleanupComplete = false
+const downloadMainHandler = new Handler(Looper.getMainLooper())
+const downloadExecutor = Executors.newSingleThreadExecutor()
+
+class DownloadCallbackRunnable extends Runnable {
+  private action : () => void
+
+  constructor(action : () => void) {
+    super()
+    this.action = action
+  }
+
+  override run() : void {
+    this.action()
+  }
+}
+
+function postDownloadCallback(action : () => void) : void {
+  downloadMainHandler.post(new DownloadCallbackRunnable(action))
+}
+
+function emitFailure(options : AiChatPickAttachmentsOptions, code : 9101001 | 9101002 | 9101003 | 9101004 | 9101005, message : string = '') : void {
+  const error = new AiChatPickAttachmentsFailImpl(code, message)
+  options.fail?.(error)
+  options.complete?.(error)
+}
+
+function emitSuccess(options : AiChatPickAttachmentsOptions, files : Array<AiChatNativeSelectedFile>) : void {
+  const result : AiChatPickAttachmentsResult = { files }
+  options.success?.(result)
+  options.complete?.(result)
+}
+
+function resetActivePicker() : void {
+  if (resultCallback != null) UTSAndroid.offAppActivityResult(resultCallback)
+  resultCallback = null
+  activeOptions = null
+  pendingCameraUri = null
+}
+
+function readBytes(resolver : ContentResolver, uri : Uri, maximumBytes : Int) : ByteArray {
+  const input = resolver.openInputStream(uri)
+  if (input == null) throw new Error('无法读取所选文件')
+  const output = new ByteArrayOutputStream()
+  const buffer = ByteArray(8192)
+  try {
+    while (true) {
+      const count = input.read(buffer)
+      if (count < 0) break
+      if (count == 0) continue
+      output.write(buffer, 0, count)
+      if (output.size() > maximumBytes) throw new Error('所选文件过大')
+    }
+    return output.toByteArray()
+  } finally {
+    input.close()
+    output.close()
+  }
+}
+
+function selectedFileName(resolver : ContentResolver, uri : Uri) : string {
+  const cursor = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+  if (cursor != null) {
+    try {
+      if (cursor.moveToFirst()) {
+        const index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+        if (index >= 0) {
+          const value = cursor.getString(index)
+          if (value != null && value.trim().length > 0) return value
+        }
+      }
+    } finally {
+      cursor.close()
+    }
+  }
+  return uri.getLastPathSegment() ?? '未命名附件'
+}
+
+function scaleBitmap(source : Bitmap) : Bitmap {
+  const sourceWidth = source.getWidth()
+  const sourceHeight = source.getHeight()
+  const longest : Int = Math.max(sourceWidth, sourceHeight).toInt()
+  if (longest <= MAX_IMAGE_DIMENSION) return source
+  const scale = MAX_IMAGE_DIMENSION.toDouble() / longest.toDouble()
+  const width : Int = Math.max(1, Math.round(sourceWidth.toDouble() * scale)).toInt()
+  const height : Int = Math.max(1, Math.round(sourceHeight.toDouble() * scale)).toInt()
+  return Bitmap.createScaledBitmap(source, width, height, true)
+}
+
+function bitmapHasTransparency(bitmap : Bitmap) : boolean {
+  if (!bitmap.hasAlpha()) return false
+  const width = bitmap.getWidth()
+  const row = IntArray(width)
+  for (let y : Int = 0; y < bitmap.getHeight(); y++) {
+    bitmap.getPixels(row, 0, width, 0, y, width, 1)
+    for (const pixel of row) {
+      if (Color.alpha(pixel) < 255) return true
+    }
+  }
+  return false
+}
+
+function encodeBitmap(bitmap : Bitmap, format : CompressFormat, quality : Int) : ByteArray {
+  const output = new ByteArrayOutputStream()
+  try {
+    if (!bitmap.compress(format, quality, output)) throw new Error('图片编码失败')
+    return output.toByteArray()
+  } finally {
+    output.close()
+  }
+}
+
+function prepareImage(resolver : ContentResolver, uri : Uri) : AiChatNativeSelectedFile {
+  const sourceBytes = readBytes(resolver, uri, MAX_IMAGE_SOURCE_BYTES)
+  const decoded = BitmapFactory.decodeByteArray(sourceBytes, 0, sourceBytes.size)
+  if (decoded == null) throw new Error('图片已损坏或无法解码')
+  const scaled = scaleBitmap(decoded)
+  if (scaled !== decoded) decoded.recycle()
+  try {
+    const transparent = bitmapHasTransparency(scaled)
+    let encoded : ByteArray | null = null
+    let mimeType = 'image/jpeg'
+    if (transparent) {
+      mimeType = 'image/png'
+      encoded = encodeBitmap(scaled, CompressFormat.PNG, 100)
+    } else {
+      for (const quality of JPEG_QUALITIES) {
+        const candidate = encodeBitmap(scaled, CompressFormat.JPEG, quality)
+        if (candidate.size <= MAX_IMAGE_BYTES) {
+          encoded = candidate
+          break
+        }
+      }
+    }
+    if (encoded == null || encoded.size > MAX_IMAGE_BYTES) throw new Error('图片压缩后仍超过 2 MB')
+    const prepared : AiChatNativePreparedAttachment = {
+      dataUrl: 'data:' + mimeType + ';base64,' + Base64.encodeToString(encoded, Base64.NO_WRAP),
+      mimeType,
+      byteSize: encoded.size,
+      width: scaled.getWidth(),
+      height: scaled.getHeight()
+    }
+    return {
+      name: selectedFileName(resolver, uri),
+      type: resolver.getType(uri) ?? mimeType,
+      size: sourceBytes.size,
+      nativePrepared: prepared
+    }
+  } finally {
+    scaled.recycle()
+  }
+}
+
+function prepareText(resolver : ContentResolver, uri : Uri) : AiChatNativeSelectedFile {
+  const name = selectedFileName(resolver, uri)
+  const mimeType = resolver.getType(uri) ?? ''
+  if (!isSupportedTextFile(name, mimeType)) throw new Error('不支持的文件类型：' + name)
+  const bytes = readBytes(resolver, uri, MAX_TEXT_BYTES)
+  const decoder = StandardCharsets.UTF_8.newDecoder()
+  decoder.onMalformedInput(CodingErrorAction.REPORT)
+  decoder.onUnmappableCharacter(CodingErrorAction.REPORT)
+  const text = decoder.decode(ByteBuffer.wrap(bytes)).toString()
+  const prepared : AiChatNativePreparedAttachment = {
+    textContent: text,
+    byteSize: bytes.size
+  }
+  return {
+    name,
+    type: mimeType,
+    size: bytes.size,
+    nativePrepared: prepared
+  }
+}
+
+function prepareCharacterCard(resolver : ContentResolver, uri : Uri) : AiChatNativeSelectedFile {
+  const selectedName = selectedFileName(resolver, uri)
+  const bytes = readBytes(resolver, uri, MAX_CHARACTER_CARD_BYTES)
+  if (
+    bytes.size < 8 || bytes[0].toInt() != -119 || bytes[1].toInt() != 80 ||
+    bytes[2].toInt() != 78 || bytes[3].toInt() != 71 || bytes[4].toInt() != 13 ||
+    bytes[5].toInt() != 10 || bytes[6].toInt() != 26 || bytes[7].toInt() != 10
+  ) throw new Error('所选文件不是有效 PNG')
+  const prepared : AiChatNativePreparedAttachment = {
+    dataUrl: 'data:image/png;base64,' + Base64.encodeToString(bytes, Base64.NO_WRAP),
+    mimeType: 'image/png',
+    byteSize: bytes.size
+  }
+  const name = selectedName.toLowerCase().endsWith('.png') ? selectedName : selectedName + '.png'
+  return { name, type: 'image/png', size: bytes.size, nativePrepared: prepared }
+}
+
+function prepareWorldBook(resolver : ContentResolver, uri : Uri) : AiChatNativeSelectedFile {
+  const name = selectedFileName(resolver, uri)
+  if (!name.toLowerCase().endsWith('.json')) throw new Error('世界书文件扩展名必须是 .json')
+  const bytes = readBytes(resolver, uri, MAX_WORLD_BOOK_BYTES)
+  const decoder = StandardCharsets.UTF_8.newDecoder()
+  decoder.onMalformedInput(CodingErrorAction.REPORT)
+  decoder.onUnmappableCharacter(CodingErrorAction.REPORT)
+  const text = decoder.decode(ByteBuffer.wrap(bytes)).toString()
+  const prepared : AiChatNativePreparedAttachment = { textContent: text, byteSize: bytes.size }
+  return { name, type: 'application/json', size: bytes.size, nativePrepared: prepared }
+}
+
+function prepareBackupJson(resolver : ContentResolver, uri : Uri) : AiChatNativeSelectedFile {
+  const name = selectedFileName(resolver, uri)
+  if (!name.toLowerCase().endsWith('.json')) throw new Error('备份文件扩展名必须是 .json')
+  const bytes = readBytes(resolver, uri, MAX_BACKUP_JSON_BYTES)
+  const decoder = StandardCharsets.UTF_8.newDecoder()
+  decoder.onMalformedInput(CodingErrorAction.REPORT)
+  decoder.onUnmappableCharacter(CodingErrorAction.REPORT)
+  const text = decoder.decode(ByteBuffer.wrap(bytes)).toString()
+  const prepared : AiChatNativePreparedAttachment = { textContent: text, byteSize: bytes.size }
+  return { name, type: 'application/json', size: bytes.size, nativePrepared: prepared }
+}
+
+function fileExtension(name : string) : string {
+  const normalized = name.trim().toLowerCase()
+  if (normalized == '.env' || normalized.endsWith('/.env')) return 'env'
+  const dot = normalized.lastIndexOf('.')
+  return dot >= 0 && dot < normalized.length - 1 ? normalized.substring(dot + 1) : ''
+}
+
+function isSupportedTextFile(name : string, mimeType : string) : boolean {
+  const normalizedMime = mimeType.trim().toLowerCase()
+  return TEXT_EXTENSIONS.includes(fileExtension(name)) || normalizedMime.startsWith('text/') || TEXT_MIME_TYPES.includes(normalizedMime)
+}
+
+function isCharacterCardMode(mode : string) : boolean {
+  return mode == 'character-card' || mode == 'character-card-file' || mode == 'character-card-gallery'
+}
+
+function collectUris(data ?: Intent) : Array<Uri> {
+  const uris : Array<Uri> = []
+  if (pendingCameraUri != null) {
+    uris.push(pendingCameraUri!)
+    return uris
+  }
+  if (data == null) return uris
+  const clip = data.getClipData()
+  if (clip != null) {
+    for (let index : Int = 0; index < clip.getItemCount(); index++) {
+      const uri = clip.getItemAt(index).getUri()
+      if (uri != null) uris.push(uri)
+    }
+    return uris
+  }
+  const uri = data.getData()
+  if (uri != null) uris.push(uri)
+  return uris
+}
+
+function finishCameraCapture(resolver : ContentResolver, success : boolean) : void {
+  const uri = pendingCameraUri
+  if (uri == null) return
+  if (!success) {
+    resolver.delete(uri, null, null)
+    return
+  }
+  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+    const values = new ContentValues()
+    values.put(MediaStore.Images.Media.IS_PENDING, 0)
+    resolver.update(uri, values, null, null)
+  }
+}
+
+function handleActivityResult(requestCode : Int, resultCode : Int, data ?: Intent) : void {
+  if (requestCode != REQUEST_CODE || activeOptions == null) return
+  const options = activeOptions!
+  const activity = UTSAndroid.getUniActivity()
+  const resolver = activity?.getContentResolver()
+  if (resolver == null) {
+    resetActivePicker()
+    emitFailure(options, 9101004, '无法访问 Android 文件系统')
+    return
+  }
+  if (resultCode != Activity.RESULT_OK) {
+    finishCameraCapture(resolver, false)
+    resetActivePicker()
+    emitSuccess(options, [])
+    return
+  }
+
+  try {
+    const uris = collectUris(data)
+    if (uris.length > options.maxCount) {
+      finishCameraCapture(resolver, false)
+      resetActivePicker()
+      emitFailure(options, 9101005, '最多选择 ' + options.maxCount + ' 个附件')
+      return
+    }
+    const files : Array<AiChatNativeSelectedFile> = []
+    for (const uri of uris) {
+      if (options.mode == 'image-file') files.push(prepareImage(resolver, uri))
+      else if (options.mode == 'file') files.push(prepareText(resolver, uri))
+      else if (isCharacterCardMode(options.mode)) files.push(prepareCharacterCard(resolver, uri))
+      else if (options.mode == 'world-book') files.push(prepareWorldBook(resolver, uri))
+      else if (options.mode == 'backup-json') files.push(prepareBackupJson(resolver, uri))
+      else files.push(prepareImage(resolver, uri))
+    }
+    finishCameraCapture(resolver, true)
+    resetActivePicker()
+    emitSuccess(options, files)
+  } catch (error) {
+    finishCameraCapture(resolver, false)
+    resetActivePicker()
+    emitFailure(options, 9101004, (error as Error).message)
+  }
+}
+
+function startDocumentPicker(options : AiChatPickAttachmentsOptions) : void {
+  const activity = UTSAndroid.getUniActivity()
+  if (activity == null) throw new Error('Android Activity 不可用')
+  const intent = new Intent(Intent.ACTION_OPEN_DOCUMENT)
+  intent.addCategory(Intent.CATEGORY_OPENABLE)
+  intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+  if (options.mode == 'image' || options.mode == 'image-file') {
+    intent.setType('image/*')
+  } else if (isCharacterCardMode(options.mode)) {
+    // Download providers often label PNG files as application/octet-stream.
+    intent.setType('*/*')
+  } else if (options.mode == 'world-book' || options.mode == 'backup-json') {
+    intent.setType('application/json')
+  } else {
+    intent.setType('*/*')
+  }
+  intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, options.maxCount > 1)
+  if (intent.resolveActivity(activity.getPackageManager()) == null) {
+    throw new Error('设备上没有可用的系统文件选择器')
+  }
+  const title = options.mode == 'image' || options.mode == 'image-file' ? '选择图片' : isCharacterCardMode(options.mode) ? '选择角色卡 PNG' : options.mode == 'world-book' ? '选择世界书 JSON' : options.mode == 'backup-json' ? '选择备份 JSON' : '选择文本文件'
+  activity.startActivityForResult(Intent.createChooser(intent, title), REQUEST_CODE)
+}
+
+function startCharacterCardGalleryPicker() : void {
+  const activity = UTSAndroid.getUniActivity()
+  if (activity == null) throw new Error('Android Activity 不可用')
+  const intent = new Intent(Intent.ACTION_PICK)
+  intent.setDataAndType(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, 'image/*')
+  intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+  if (intent.resolveActivity(activity.getPackageManager()) == null) {
+    throw new Error('设备上没有可用的系统相册')
+  }
+  activity.startActivityForResult(Intent.createChooser(intent, '从相册选择角色卡'), REQUEST_CODE)
+}
+
+function startImageGalleryPicker(options : AiChatPickAttachmentsOptions) : void {
+  const activity = UTSAndroid.getUniActivity()
+  if (activity == null) throw new Error('Android Activity 不可用')
+  const intent = new Intent(Intent.ACTION_PICK)
+  intent.setDataAndType(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, 'image/*')
+  intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+  intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, options.maxCount > 1)
+  if (intent.resolveActivity(activity.getPackageManager()) == null) {
+    throw new Error('设备上没有可用的系统相册')
+  }
+  activity.startActivityForResult(Intent.createChooser(intent, '从相册选择图片'), REQUEST_CODE)
+}
+
+function startCameraPicker() : void {
+  const activity = UTSAndroid.getUniActivity()
+  if (activity == null) throw new Error('Android Activity 不可用')
+  const resolver = activity.getContentResolver()
+  const values = new ContentValues()
+  values.put(MediaStore.Images.Media.DISPLAY_NAME, 'ai-chat-' + System.currentTimeMillis() + '.jpg')
+  values.put(MediaStore.Images.Media.MIME_TYPE, 'image/jpeg')
+  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+    values.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + '/AIChat')
+    values.put(MediaStore.Images.Media.IS_PENDING, 1)
+  }
+  const uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+  if (uri == null) throw new Error('无法创建相机输出文件')
+  pendingCameraUri = uri
+
+  const intent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+  intent.putExtra(MediaStore.EXTRA_OUTPUT, uri)
+  intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+  if (intent.resolveActivity(activity.getPackageManager()) == null) {
+    resolver.delete(uri, null, null)
+    pendingCameraUri = null
+    throw new Error('设备上没有可用的相机应用')
+  }
+  activity.startActivityForResult(intent, REQUEST_CODE)
+}
+
+function startCameraWithPermission(options : AiChatPickAttachmentsOptions) : void {
+  const activity = UTSAndroid.getUniActivity()
+  if (activity == null) throw new Error('Android Activity 不可用')
+  const permissions : Array<string> = ['android.permission.CAMERA']
+  if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) permissions.push('android.permission.WRITE_EXTERNAL_STORAGE')
+  UTSAndroid.requestSystemPermission(
+    activity,
+    permissions,
+    (allRight : boolean, _ : string[]) => {
+      if (activeOptions == null) return
+      if (!allRight) {
+        const current = activeOptions!
+        resetActivePicker()
+        emitFailure(current, 9101003, '需要相机权限才能拍照')
+        return
+      }
+      try {
+        startCameraPicker()
+      } catch (error) {
+        const current = activeOptions!
+        resetActivePicker()
+        emitFailure(current, 9101003, (error as Error).message)
+      }
+    },
+    (_ : boolean, _ : string[]) => {
+      if (activeOptions == null) return
+      const current = activeOptions!
+      resetActivePicker()
+      emitFailure(current, 9101003, '需要相机权限才能拍照')
+    }
+  )
+}
+
+function emitDownloadFailure(options : AiChatWriteDownloadFileOptions, code : 9101101 | 9101102 | 9101103 | 9101104, message : string = '') : void {
+  const error = new AiChatWriteDownloadFileFailImpl(code, message)
+  options.fail?.(error)
+  options.complete?.(error)
+}
+
+function emitDownloadSuccess(options : AiChatWriteDownloadFileOptions, result : AiChatWriteDownloadFileResult) : void {
+  options.success?.(result)
+  options.complete?.(result)
+}
+
+function validDownloadFileName(value : string) : boolean {
+  if (
+    value.length < 1 || value.length > 180 || value == '.' || value == '..' ||
+    value.toByteArray(StandardCharsets.UTF_8).size > MAX_DOWNLOAD_FILE_NAME_BYTES
+  ) return false
+  const forbidden = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
+  for (const character of forbidden) {
+    if (value.includes(character)) return false
+  }
+  for (let index : Int = 0; index < value.length; index++) {
+    if ((value.charCodeAt(index) ?? -1) < 32) return false
+  }
+  return true
+}
+
+function validBase64Character(code : number) : boolean {
+  return (
+    (code >= 65 && code <= 90) ||
+    (code >= 97 && code <= 122) ||
+    (code >= 48 && code <= 57) ||
+    code == 43 || code == 47
+  )
+}
+
+function validDownloadBase64(value : string) : boolean {
+  if (value.length < 4 || value.length % 4 != 0) return false
+  let paddingStarted = false
+  let paddingCount : Int = 0
+  for (let index : Int = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index) ?? -1
+    if (code == 61) {
+      paddingStarted = true
+      paddingCount++
+      if (paddingCount > 2 || index < value.length - 2) return false
+    } else if (paddingStarted || !validBase64Character(code)) {
+      return false
+    }
+  }
+  return true
+}
+
+function normalizedDownloadMimeType(value : string) : string {
+  const mimeType = value.trim().toLowerCase()
+  if (mimeType.length < 3 || mimeType.length > 128 || !mimeType.includes('/') || mimeType.includes('\r') || mimeType.includes('\n')) {
+    return 'application/octet-stream'
+  }
+  return mimeType
+}
+
+function closeOutputQuietly(output : OutputStream | null) : void {
+  if (output == null) return
+  try {
+    output.close()
+  } catch (ignored) {
+  }
+}
+
+function deleteMediaUriQuietly(resolver : ContentResolver | null, uri : Uri | null) : boolean {
+  if (resolver == null || uri == null) return true
+  try {
+    return resolver.delete(uri, null, null) > 0
+  } catch (ignored) {
+    return false
+  }
+}
+
+function deleteFileQuietly(file : File | null) : boolean {
+  if (file == null) return true
+  try {
+    return !file.exists() || file.delete()
+  } catch (ignored) {
+    return false
+  }
+}
+
+function utf8Prefix(value : string, maximumBytes : Int) : string {
+  if (maximumBytes < 1) return ''
+  let end : Int = value.length
+  while (end > 0 && value.substring(0, end).toByteArray(StandardCharsets.UTF_8).size > maximumBytes) end--
+  if (end > 0 && end < value.length) {
+    const previous = value.charCodeAt(end - 1) ?? -1
+    const next = value.charCodeAt(end) ?? -1
+    if (previous >= 0xd800 && previous <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) end--
+  }
+  return value.substring(0, end)
+}
+
+function legacyCollisionFileName(fileName : string, index : Int) : string {
+  const suffix = ' (' + index + ')'
+  const dot = fileName.lastIndexOf('.')
+  const stem = dot > 0 ? fileName.substring(0, dot) : fileName
+  const rawExtension = dot > 0 ? fileName.substring(dot) : ''
+  const extension = utf8Prefix(rawExtension, MAX_DOWNLOAD_EXTENSION_BYTES)
+  const maximumStemBytes = MAX_DOWNLOAD_FILE_NAME_BYTES -
+    suffix.toByteArray(StandardCharsets.UTF_8).size - extension.toByteArray(StandardCharsets.UTF_8).size
+  const safeStem = utf8Prefix(stem, maximumStemBytes)
+  return (safeStem.length > 0 ? safeStem : 'download') + suffix + extension
+}
+
+function cleanupModernDownloadPartials(resolver : ContentResolver, ownerPackageName : string, hasActiveSessions : boolean) : void {
+  if (modernDownloadCleanupComplete || hasActiveSessions) return
+  const relativePath = Environment.DIRECTORY_DOWNLOADS + '/' + DOWNLOAD_FOLDER
+  try {
+    resolver.delete(
+      MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+      '(' + MediaStore.Downloads.RELATIVE_PATH + ' = ? OR ' + MediaStore.Downloads.RELATIVE_PATH + ' = ?) AND ' +
+        MediaStore.Downloads.IS_PENDING + ' = ? AND ' + MediaStore.Downloads.OWNER_PACKAGE_NAME + ' = ?',
+      arrayOf(relativePath, relativePath + '/', '1', ownerPackageName)
+    )
+    modernDownloadCleanupComplete = true
+  } catch (ignored) {
+  }
+}
+
+function cleanupLegacyDownloadPartials(folder : File, hasActiveSessions : boolean) : void {
+  if (legacyDownloadCleanupComplete || hasActiveSessions) return
+  try {
+    const files = folder.listFiles()
+    if (files == null) return
+    let complete = true
+    for (const file of files) {
+      const name = file.getName()
+      if (name.startsWith(LEGACY_PART_PREFIX) && name.endsWith(LEGACY_PART_SUFFIX) && !deleteFileQuietly(file)) complete = false
+    }
+    legacyDownloadCleanupComplete = complete
+  } catch (ignored) {
+  }
+}
+
+function availableLegacyFile(folder : File, fileName : string) : File {
+  let candidate = new File(folder, fileName)
+  if (!candidate.exists()) return candidate
+  const dot = fileName.lastIndexOf('.')
+  const stem = dot > 0 ? fileName.substring(0, dot) : fileName
+  const extension = dot > 0 ? fileName.substring(dot) : ''
+  for (let index : Int = 1; index <= 9999; index++) {
+    candidate = new File(folder, legacyCollisionFileName(stem + extension, index))
+    if (!candidate.exists()) return candidate
+  }
+  throw new Error('下载目录中的同名文件过多')
+}
+
+class DownloadSession {
+  readonly sessionId : string
+  readonly fileName : string
+  readonly expectedBytes : Int
+  private output : OutputStream | null
+  private resolver : ContentResolver | null
+  private uri : Uri | null
+  private legacyFolder : File | null
+  private partialFile : File | null
+  private writtenBytes : Int = 0
+
+  constructor(
+    sessionId : string,
+    fileName : string,
+    expectedBytes : Int,
+    output : OutputStream,
+    resolver : ContentResolver | null,
+    uri : Uri | null,
+    legacyFolder : File | null,
+    partialFile : File | null
+  ) {
+    this.sessionId = sessionId
+    this.fileName = fileName
+    this.expectedBytes = expectedBytes
+    this.output = output
+    this.resolver = resolver
+    this.uri = uri
+    this.legacyFolder = legacyFolder
+    this.partialFile = partialFile
+  }
+
+  private currentPath() : string {
+    return this.uri?.toString() ?? ''
+  }
+
+  result(filePath : string = this.currentPath()) : AiChatWriteDownloadFileResult {
+    const uriValue = this.uri?.toString()
+    if (uriValue != null) {
+      return { sessionId: this.sessionId, filePath, uri: uriValue, byteSize: this.writtenBytes }
+    }
+    return { sessionId: this.sessionId, filePath, byteSize: this.writtenBytes }
+  }
+
+  append(bytes : ByteArray) : void {
+    const output = this.output
+    if (output == null) throw new Error('下载写入会话已经结束')
+    if (bytes.size < 1 || this.writtenBytes + bytes.size > this.expectedBytes || this.writtenBytes + bytes.size > MAX_DOWNLOAD_BYTES) {
+      throw new Error('下载文件分块大小无效')
+    }
+    output.write(bytes)
+    this.writtenBytes += bytes.size
+  }
+
+  commit() : AiChatWriteDownloadFileResult {
+    if (this.writtenBytes != this.expectedBytes) throw new Error('下载文件数据不完整')
+    const output = this.output
+    if (output == null) throw new Error('下载写入会话已经结束')
+    output.flush()
+    output.close()
+    this.output = null
+
+    const resolver = this.resolver
+    const uri = this.uri
+    if (resolver != null && uri != null) {
+      const completed = new ContentValues()
+      completed.put(MediaStore.Downloads.IS_PENDING, 0)
+      if (resolver.update(uri, completed, null, null) < 1) throw new Error('无法完成系统下载文件写入')
+      return this.result(uri.toString())
+    }
+
+    const folder = this.legacyFolder
+    const partial = this.partialFile
+    if (folder == null || partial == null) throw new Error('旧版 Android 下载会话无效')
+    const destination = availableLegacyFile(folder, this.fileName)
+    if (!partial.renameTo(destination)) throw new Error('无法提交下载文件')
+    this.partialFile = null
+    return this.result(destination.getAbsolutePath())
+  }
+
+  abort(requireCleanup : boolean = false) : void {
+    closeOutputQuietly(this.output)
+    this.output = null
+    const mediaDeleted = deleteMediaUriQuietly(this.resolver, this.uri)
+    const partialDeleted = deleteFileQuietly(this.partialFile)
+    if (mediaDeleted) {
+      this.resolver = null
+      this.uri = null
+    }
+    if (partialDeleted) {
+      this.legacyFolder = null
+      this.partialFile = null
+    }
+    if (mediaDeleted && partialDeleted) this.writtenBytes = 0
+    if (requireCleanup && (!mediaDeleted || !partialDeleted)) throw new Error('无法清理已取消的下载文件')
+  }
+}
+
+const downloadSessions = new ConcurrentHashMap<string, DownloadSession>()
+
+function createModernDownloadSession(sessionId : string, fileName : string, mimeType : string, totalBytes : Int) : DownloadSession {
+  const appContext = UTSAndroid.getAppContext()
+  if (appContext == null) throw new Error('Android 应用上下文不可用')
+  const context = appContext as Context
+  const resolver = context.getContentResolver()
+  cleanupModernDownloadPartials(resolver, context.getPackageName(), !downloadSessions.isEmpty())
+  const values = new ContentValues()
+  values.put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+  values.put(MediaStore.Downloads.MIME_TYPE, mimeType)
+  values.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + '/' + DOWNLOAD_FOLDER)
+  values.put(MediaStore.Downloads.IS_PENDING, 1)
+  let uri : Uri | null = null
+  let output : OutputStream | null = null
+  try {
+    uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+    if (uri == null) throw new Error('无法在系统下载目录创建文件')
+    output = resolver.openOutputStream(uri)
+    if (output == null) throw new Error('无法打开系统下载文件')
+    return new DownloadSession(sessionId, fileName, totalBytes, output, resolver, uri, null, null)
+  } catch (error) {
+    closeOutputQuietly(output)
+    deleteMediaUriQuietly(resolver, uri)
+    throw error
+  }
+}
+
+function createLegacyDownloadSession(sessionId : string, fileName : string, totalBytes : Int) : DownloadSession {
+  const downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+  const folder = new File(downloads, DOWNLOAD_FOLDER)
+  if (!folder.exists() && !folder.mkdirs()) throw new Error('无法创建应用下载目录')
+  cleanupLegacyDownloadPartials(folder, !downloadSessions.isEmpty())
+  const partial = new File(folder, LEGACY_PART_PREFIX + sessionId + LEGACY_PART_SUFFIX)
+  let output : OutputStream | null = null
+  try {
+    output = new FileOutputStream(partial, false)
+    return new DownloadSession(sessionId, fileName, totalBytes, output, null, null, folder, partial)
+  } catch (error) {
+    closeOutputQuietly(output)
+    deleteFileQuietly(partial)
+    throw error
+  }
+}
+
+function requiredSession(options : AiChatWriteDownloadFileOptions) : DownloadSession {
+  const sessionId = (options.sessionId ?? '').trim()
+  const session = downloadSessions.get(sessionId)
+  if (session == null) throw new Error('下载写入会话不存在或已经结束')
+  return session
+}
+
+class DownloadOperationRunnable extends Runnable {
+  private options : AiChatWriteDownloadFileOptions
+
+  constructor(options : AiChatWriteDownloadFileOptions) {
+    super()
+    this.options = options
+  }
+
+  override run() : void {
+    const options = this.options
+    const operation = options.operation.trim().toLowerCase()
+    let cleanup : DownloadSession | null = null
+    try {
+      let result : AiChatWriteDownloadFileResult
+      if (operation == 'begin') {
+        const sessionId = (options.sessionId ?? '').trim()
+        const fileName = (options.fileName ?? '').trim()
+        const totalBytes = (options.totalBytes ?? 0).toInt()
+        const mimeType = normalizedDownloadMimeType(options.mimeType ?? '')
+        const session = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+          ? createModernDownloadSession(sessionId, fileName, mimeType, totalBytes)
+          : createLegacyDownloadSession(sessionId, fileName, totalBytes)
+        cleanup = session
+        downloadSessions.put(sessionId, session)
+        result = session.result()
+      } else if (operation == 'append') {
+        const session = requiredSession(options)
+        cleanup = session
+        const encoded = (options.base64 ?? '').trim()
+        if (encoded.length > MAX_DOWNLOAD_CHUNK_BASE64_CHARS || !validDownloadBase64(encoded)) {
+          throw new Error('下载文件分块编码无效')
+        }
+        session.append(Base64.decode(encoded, Base64.NO_WRAP))
+        result = session.result()
+      } else if (operation == 'commit') {
+        const session = requiredSession(options)
+        cleanup = session
+        result = session.commit()
+        downloadSessions.remove(session.sessionId)
+      } else if (operation == 'abort') {
+        const sessionId = (options.sessionId ?? '').trim()
+        const session = downloadSessions.get(sessionId)
+        session?.abort(true)
+        if (session != null) downloadSessions.remove(sessionId)
+        result = { sessionId, filePath: '', byteSize: 0 }
+      } else {
+        throw new Error('下载写入操作无效')
+      }
+      cleanup = null
+      postDownloadCallback(() => emitDownloadSuccess(options, result))
+    } catch (error) {
+      const sessionId = (options.sessionId ?? '').trim()
+      if (operation != 'abort') {
+        if (cleanup == null && sessionId.length > 0) cleanup = downloadSessions.get(sessionId)
+        if (cleanup != null) {
+          try {
+            cleanup!.abort(true)
+            downloadSessions.remove(cleanup!.sessionId)
+          } catch (ignored) {
+          }
+        }
+      }
+      const message = error.toString()
+      postDownloadCallback(() => emitDownloadFailure(options, 9101103, message.length > 0 ? message : '下载文件写入失败'))
+    }
+  }
+}
+
+function enqueueDownloadOperation(options : AiChatWriteDownloadFileOptions) : void {
+  downloadExecutor.execute(new DownloadOperationRunnable(options))
+}
+
+export const aiChatWriteDownloadFile : AiChatWriteDownloadFile = function (options : AiChatWriteDownloadFileOptions) : void {
+  const operation = options.operation.trim().toLowerCase()
+  if (!['begin', 'append', 'commit', 'abort'].includes(operation)) {
+    emitDownloadFailure(options, 9101101)
+    return
+  }
+  if (operation != 'begin') {
+    if ((options.sessionId ?? '').trim().length < 1) {
+      emitDownloadFailure(options, 9101101)
+      return
+    }
+    enqueueDownloadOperation(options)
+    return
+  }
+
+  const fileName = (options.fileName ?? '').trim()
+  const totalBytes = options.totalBytes ?? 0
+  if (!validDownloadFileName(fileName) || totalBytes < 1 || totalBytes > MAX_DOWNLOAD_BYTES || Math.floor(totalBytes) != totalBytes) {
+    const code = totalBytes > MAX_DOWNLOAD_BYTES ? 9101104 : 9101101
+    emitDownloadFailure(options, code, code == 9101104 ? '下载文件不能超过 50 MB' : '')
+    return
+  }
+  options.sessionId = UUID.randomUUID().toString()
+  if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
+    enqueueDownloadOperation(options)
+    return
+  }
+  const activity = UTSAndroid.getUniActivity()
+  if (activity == null) {
+    emitDownloadFailure(options, 9101103, 'Android Activity 不可用')
+    return
+  }
+  UTSAndroid.requestSystemPermission(
+    activity,
+    ['android.permission.WRITE_EXTERNAL_STORAGE'],
+    (allRight : boolean, _ : string[]) => {
+      if (allRight) enqueueDownloadOperation(options)
+      else emitDownloadFailure(options, 9101102)
+    },
+    (_ : boolean, _ : string[]) => emitDownloadFailure(options, 9101102)
+  )
+}
+
+export const aiChatPickAttachments : AiChatPickAttachments = function (options : AiChatPickAttachmentsOptions) : void {
+  if (!['image', 'image-file', 'camera', 'file', 'character-card', 'character-card-file', 'character-card-gallery', 'world-book', 'backup-json'].includes(options.mode) || options.maxCount < 1) {
+    emitFailure(options, 9101001)
+    return
+  }
+  if (activeOptions != null) {
+    emitFailure(options, 9101002)
+    return
+  }
+
+  activeOptions = options
+  resultCallback = (requestCode : Int, resultCode : Int, data ?: Intent) => {
+    handleActivityResult(requestCode, resultCode, data)
+  }
+  UTSAndroid.onAppActivityResult(resultCallback!)
+  try {
+    if (options.mode == 'camera') startCameraWithPermission(options)
+    else if (options.mode == 'image') startImageGalleryPicker(options)
+    else if (options.mode == 'character-card-gallery') startCharacterCardGalleryPicker()
+    else startDocumentPicker(options)
+  } catch (error) {
+    const current = activeOptions!
+    resetActivePicker()
+    emitFailure(current, 9101003, (error as Error).message)
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "id": "ai-chat-attachment-picker",
+  "displayName": "AI Chat Android Attachment Picker",
+  "version": "1.1.2",
+  "description": "Android attachment picker and native Downloads writer for AI Chat Custom",
+  "keywords": [
+    "android",
+    "attachment-picker",
+    "camera"
+  ],
+  "engines": {
+    "HBuilderX": "^5.0.0"
+  },
+  "dcloudext": {
+    "type": "uts",
+    "sale": {
+      "regular": { "price": "0.00" },
+      "sourcecode": { "price": "0.00" }
+    },
+    "contact": { "qq": "" },
+    "declaration": {
+      "ads": "none",
+      "data": "Reads files explicitly selected by the user and writes user-requested exports to public Downloads; no data is collected.",
+      "permissions": "Camera, user-selected document access, and public Downloads write access on Android 9 and older."
+    }
+  },
+  "uni_modules": {
+    "dependencies": [],
+    "encrypt": [],
+    "uni-ext-api": {
+      "uni": {
+        "aiChatPickAttachments": "aiChatPickAttachments",
+        "aiChatWriteDownloadFile": "aiChatWriteDownloadFile"
+      }
+    },
+    "platforms": {
+      "client": {
+        "Vue": { "vue2": "n", "vue3": "y" },
+        "App": {
+          "app-android": { "minVersion": "23" },
+          "app-ios": "n"
+        }
+      }
+    }
+  }
+}

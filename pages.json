@@ -1,0 +1,25 @@
+{
+	"pages": [ //pages数组中第一项表示应用启动页，参考：https://uniapp.dcloud.io/collocation/pages
+		{
+			"path": "pages/index/index",
+			"style": {
+				"navigationStyle": "custom",
+				"navigationBarTitleText": "织语"
+			}
+		},
+		{
+			"path": "pages/android-diagnostics/index",
+			"style": {
+				"navigationStyle": "custom",
+				"navigationBarTitleText": "Android 流式诊断"
+			}
+		}
+	],
+	"globalStyle": {
+		"navigationBarTextStyle": "black",
+		"navigationBarTitleText": "织语",
+		"navigationBarBackgroundColor": "#FFFFFF",
+		"backgroundColor": "#FFFFFF"
+	},
+	"uniIdRouter": {}
+}

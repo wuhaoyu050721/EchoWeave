@@ -1,0 +1,58 @@
+{
+  "id": "ai-chat-keystore",
+  "displayName": "AI Chat Android Keystore",
+  "version": "1.0.0",
+  "description": "Android Keystore AES-GCM bridge for AI Chat Custom",
+  "keywords": [
+    "android-keystore",
+    "aes-gcm"
+  ],
+  "engines": {
+    "HBuilderX": "^5.0.0"
+  },
+  "dcloudext": {
+    "type": "uts",
+    "sale": {
+      "regular": {
+        "price": "0.00"
+      },
+      "sourcecode": {
+        "price": "0.00"
+      }
+    },
+    "contact": {
+      "qq": ""
+    },
+    "declaration": {
+      "ads": "none",
+      "data": "Encrypts app secrets locally with Android Keystore; no data is collected.",
+      "permissions": "none"
+    }
+  },
+  "uni_modules": {
+    "dependencies": [],
+    "encrypt": [],
+    "uni-ext-api": {
+      "uni": {
+        "aiChatKeystoreReady": "aiChatKeystoreReady",
+        "aiChatKeystoreEncrypt": "aiChatKeystoreEncrypt",
+        "aiChatKeystoreDecrypt": "aiChatKeystoreDecrypt",
+        "aiChatSecureRandom": "aiChatSecureRandom"
+      }
+    },
+    "platforms": {
+      "client": {
+        "Vue": {
+          "vue2": "n",
+          "vue3": "y"
+        },
+        "App": {
+          "app-android": {
+            "minVersion": "23"
+          },
+          "app-ios": "n"
+        }
+      }
+    }
+  }
+}

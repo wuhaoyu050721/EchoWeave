@@ -1,0 +1,88 @@
+{
+    "name" : "织语",
+    "appid" : "__UNI__019AC26",
+    "description" : "本地优先的自定义 AI 角色对话应用",
+    "versionName" : "1.0.1",
+    "versionCode" : "101",
+    "transformPx" : false,
+    /* 5+App特有相关 */
+    "app-plus" : {
+        "usingComponents" : true,
+        "nvueStyleCompiler" : "uni-app",
+        "compilerVersion" : 3,
+        "splashscreen" : {
+            "alwaysShowBeforeRender" : true,
+            "waiting" : false,
+            "autoclose" : true,
+            "delay" : 0
+        },
+        /* 模块配置 */
+        "modules" : {
+            "Gallery" : {},
+            "SQLite" : {},
+            "Speech" : {},
+            "Push" : {}
+        },
+        /* 应用发布信息 */
+        "distribute" : {
+            /* android打包配置 */
+            "android" : {
+                "minSdkVersion" : 23,
+                "abiFilters" : [ "arm64-v8a", "armeabi-v7a" ],
+                "usesCleartextTraffic" : true,
+                "permissions" : [
+                    "<uses-permission android:name=\"android.permission.INTERNET\"/>",
+                    "<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>",
+                    "<uses-permission android:name=\"android.permission.CAMERA\"/>",
+                    "<uses-permission android:name=\"android.permission.RECORD_AUDIO\"/>",
+                    "<uses-feature android:name=\"android.hardware.camera\" android:required=\"false\"/>",
+                    "<uses-feature android:name=\"android.hardware.camera.autofocus\" android:required=\"false\"/>"
+                ]
+            },
+            /* ios打包配置 */
+            "ios" : {
+                "dSYMs" : false
+            },
+            "icons" : {
+                "android" : {
+                    "ldpi" : "unpackage/res/icons/36x36.png",
+                    "mdpi" : "unpackage/res/icons/48x48.png",
+                    "hdpi" : "unpackage/res/icons/72x72.png",
+                    "xhdpi" : "unpackage/res/icons/96x96.png",
+                    "xxhdpi" : "unpackage/res/icons/144x144.png",
+                    "xxxhdpi" : "unpackage/res/icons/192x192.png"
+                }
+            },
+            /* SDK配置 */
+            "sdkConfigs" : {},
+            "splashscreen" : {
+                "androidStyle" : "default",
+                "android" : {
+                    "hdpi" : "unpackage/res/splash/android/echo-weave-hdpi-480x762.png",
+                    "xhdpi" : "unpackage/res/splash/android/echo-weave-xhdpi-720x1242.png",
+                    "xxhdpi" : "unpackage/res/splash/android/echo-weave-xxhdpi-1080x1882.png"
+                }
+            }
+        }
+    },
+    /* 快应用特有相关 */
+    "quickapp" : {},
+    /* 小程序特有相关 */
+    "mp-weixin" : {
+        "appid" : "",
+        "setting" : {
+            "urlCheck" : false
+        },
+        "usingComponents" : true
+    },
+    "mp-alipay" : {
+        "usingComponents" : true
+    },
+    "mp-baidu" : {
+        "usingComponents" : true
+    },
+    "mp-toutiao" : {
+        "usingComponents" : true
+    },
+    "vueVersion" : "3"
+}

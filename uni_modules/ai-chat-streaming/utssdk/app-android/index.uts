@@ -1,0 +1,220 @@
+import Base64 from 'android.util.Base64'
+import Handler from 'android.os.Handler'
+import Looper from 'android.os.Looper'
+import ByteArrayOutputStream from 'java.io.ByteArrayOutputStream'
+import InputStream from 'java.io.InputStream'
+import HttpURLConnection from 'java.net.HttpURLConnection'
+import URL from 'java.net.URL'
+import Arrays from 'java.util.Arrays'
+import ConcurrentHashMap from 'java.util.concurrent.ConcurrentHashMap'
+
+import {
+  AiChatStreamEvent,
+  AiChatStreamEventCallback,
+  AiChatStreamHeader,
+  AiChatStreamRequestOptions
+} from '../interface.uts'
+
+const MAX_ERROR_BODY_BYTES : Int = 1024 * 1024
+const activeConnections = new ConcurrentHashMap<string, HttpURLConnection>()
+const cancelledRequests = new ConcurrentHashMap<string, boolean>()
+const mainHandler = new Handler(Looper.getMainLooper())
+let streamEventListener : AiChatStreamEventCallback | null = null
+
+class CallbackRunnable extends Runnable {
+  private action : () => void
+
+  constructor(action : () => void) {
+    super()
+    this.action = action
+  }
+
+  override run() : void {
+    this.action()
+  }
+}
+
+function postToMain(action : () => void) : void {
+  mainHandler.post(new CallbackRunnable(action))
+}
+
+function collectResponseHeaders(connection : HttpURLConnection) : Array<AiChatStreamHeader> {
+  const result : Array<AiChatStreamHeader> = []
+  const names = ['Content-Type', 'Content-Length', 'Transfer-Encoding', 'Server']
+  for (const name of names) {
+    const value = connection.getHeaderField(name)
+    if (value != null && value.length > 0) result.push({ name, value })
+  }
+  return result
+}
+
+function readErrorBody(input : InputStream | null) : string {
+  if (input == null) return ''
+  const output = new ByteArrayOutputStream()
+  const buffer = ByteArray(4096)
+  try {
+    while (output.size() < MAX_ERROR_BODY_BYTES) {
+      const count = input.read(buffer)
+      if (count < 0) break
+      if (count == 0) continue
+      const remaining = MAX_ERROR_BODY_BYTES - output.size()
+      output.write(buffer, 0, Math.min(count, remaining).toInt())
+    }
+    return output.toByteArray().toString(Charsets.UTF_8)
+  } finally {
+    input.close()
+    output.close()
+  }
+}
+
+function emitEvent(event : AiChatStreamEvent) : void {
+  postToMain(() => {
+    streamEventListener?.(event)
+  })
+}
+
+function emitFailure(options : AiChatStreamRequestOptions, code : string, message : string, statusCode : number = 0, body : string = '') : void {
+  emitEvent({
+    requestId: options.requestId,
+    eventType: 'failure',
+    statusCode,
+    headers: [],
+    data: '',
+    code,
+    message,
+    body
+  })
+}
+
+class StreamRequestRunnable extends Runnable {
+  private options : AiChatStreamRequestOptions
+
+  constructor(options : AiChatStreamRequestOptions) {
+    super()
+    this.options = options
+  }
+
+  override run() : void {
+    const options = this.options
+    let connection : HttpURLConnection | null = null
+    let statusCode : number = 0
+    try {
+      connection = new URL(options.url).openConnection() as HttpURLConnection
+      activeConnections.put(options.requestId, connection)
+      if (cancelledRequests.containsKey(options.requestId)) {
+        connection.disconnect()
+        emitFailure(options, 'request_aborted', '模型请求已停止')
+        return
+      }
+
+      const timeout = Math.max(1, options.timeout).toInt()
+      connection.setConnectTimeout(timeout)
+      connection.setReadTimeout(timeout)
+      connection.setRequestMethod(options.method.toUpperCase())
+      connection.setDoInput(true)
+      connection.setUseCaches(false)
+      connection.setInstanceFollowRedirects(true)
+      for (const header of options.headers) {
+        connection.setRequestProperty(header.name, header.value)
+      }
+
+      if (options.body.length > 0 && options.method.toUpperCase() != 'GET' && options.method.toUpperCase() != 'HEAD') {
+        const bodyBytes = options.body.toByteArray(Charsets.UTF_8)
+        connection.setDoOutput(true)
+        connection.setFixedLengthStreamingMode(bodyBytes.size)
+        const output = connection.getOutputStream()
+        try {
+          output.write(bodyBytes)
+          output.flush()
+        } finally {
+          output.close()
+        }
+      }
+
+      statusCode = connection.getResponseCode()
+      const responseHeaders = collectResponseHeaders(connection)
+      emitEvent({
+        requestId: options.requestId,
+        eventType: 'headers',
+        statusCode,
+        headers: responseHeaders,
+        data: '',
+        code: '',
+        message: '',
+        body: ''
+      })
+
+      if (statusCode < 200 || statusCode >= 300) {
+        const body = readErrorBody(connection.getErrorStream())
+        emitFailure(options, 'http_error', '模型接口返回 HTTP ' + statusCode, statusCode, body)
+        return
+      }
+
+      const input = connection.getInputStream()
+      const buffer = ByteArray(8192)
+      try {
+        while (true) {
+          const count = input.read(buffer)
+          if (count < 0) break
+          if (count == 0) continue
+          const encoded = Base64.encodeToString(Arrays.copyOf(buffer, count), Base64.NO_WRAP)
+          emitEvent({
+            requestId: options.requestId,
+            eventType: 'chunk',
+            statusCode,
+            headers: [],
+            data: encoded,
+            code: '',
+            message: '',
+            body: ''
+          })
+        }
+      } finally {
+        input.close()
+      }
+
+      emitEvent({
+        requestId: options.requestId,
+        eventType: 'success',
+        statusCode,
+        headers: responseHeaders,
+        data: '',
+        code: '',
+        message: '',
+        body: ''
+      })
+    } catch (error) {
+      if (cancelledRequests.containsKey(options.requestId)) {
+        emitFailure(options, 'request_aborted', '模型请求已停止', statusCode)
+      } else {
+        const errorMessage = error.toString()
+        emitFailure(options, 'network_error', errorMessage.length > 0 ? errorMessage : 'Android 网络请求失败', statusCode)
+      }
+    } finally {
+      activeConnections.remove(options.requestId)
+      cancelledRequests.remove(options.requestId)
+      connection?.disconnect()
+    }
+  }
+}
+
+@UTSJS.keepAlive
+export function onAiChatStreamEvent(callback : AiChatStreamEventCallback) : void {
+  streamEventListener = callback
+}
+
+export function offAiChatStreamEvent() : void {
+  streamEventListener = null
+}
+
+export function aiChatStreamRequest(options : AiChatStreamRequestOptions) : void {
+  cancelledRequests.remove(options.requestId)
+  new Thread(new StreamRequestRunnable(options), 'ai-chat-stream-' + options.requestId).start()
+}
+
+export function aiChatStreamCancel(requestId : string) : boolean {
+  cancelledRequests.put(requestId, true)
+  const connection = activeConnections.remove(requestId)
+  connection?.disconnect()
+  return connection != null
+}

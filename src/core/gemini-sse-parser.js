@@ -1,0 +1,94 @@
+import { extractImageOutputs } from './image-output.js'
+
+export class GeminiSseParser {
+  constructor(handlers = {}) {
+    this.handlers = handlers
+    this.decoder = new TextDecoder('utf-8', { fatal: false })
+    this.currentLine = ''
+    this.dataLines = []
+    this.pendingCarriageReturn = false
+    this.done = false
+    this.finished = false
+  }
+
+  feed(bytes) {
+    if (this.done || this.finished || !bytes?.length) return
+    this.#consumeText(this.decoder.decode(bytes, { stream: true }))
+  }
+
+  finish() {
+    if (this.finished) return
+    this.finished = true
+    this.#consumeText(this.decoder.decode())
+    if (this.pendingCarriageReturn) {
+      this.pendingCarriageReturn = false
+      this.#finishLine()
+    }
+    if (this.currentLine) this.#finishLine()
+    this.#dispatchEvent()
+  }
+
+  #consumeText(text) {
+    for (const character of text) {
+      if (this.pendingCarriageReturn) {
+        this.pendingCarriageReturn = false
+        this.#finishLine()
+        if (character === '\n') continue
+      }
+      if (character === '\r') this.pendingCarriageReturn = true
+      else if (character === '\n') this.#finishLine()
+      else this.currentLine += character
+    }
+  }
+
+  #finishLine() {
+    const line = this.currentLine
+    this.currentLine = ''
+    if (!line) {
+      this.#dispatchEvent()
+      return
+    }
+    if (line.startsWith(':')) return
+    const separator = line.indexOf(':')
+    const field = separator === -1 ? line : line.slice(0, separator)
+    let value = separator === -1 ? '' : line.slice(separator + 1)
+    if (value.startsWith(' ')) value = value.slice(1)
+    if (field === 'data') this.dataLines.push(value)
+  }
+
+  #dispatchEvent() {
+    if (!this.dataLines.length || this.done) {
+      this.dataLines = []
+      return
+    }
+    const data = this.dataLines.join('\n')
+    this.dataLines = []
+    this.handlers.onEvent?.(data)
+    if (data.trim() === '[DONE]') {
+      this.done = true
+      this.handlers.onDone?.()
+      return
+    }
+
+    try {
+      const payload = JSON.parse(data)
+      if (payload?.error) throw new Error(String(payload.error.message || 'Gemini 流式请求失败'))
+      for (const candidate of Array.isArray(payload?.candidates) ? payload.candidates : []) {
+        for (const part of Array.isArray(candidate?.content?.parts) ? candidate.content.parts : []) {
+          if (!part?.thought && typeof part?.text === 'string' && part.text) {
+            this.handlers.onDelta?.(part.text, payload)
+          }
+        }
+        if (candidate?.finishReason) this.handlers.onFinishReason?.(candidate.finishReason, payload)
+      }
+      for (const image of extractImageOutputs(payload, { baseUrl: this.handlers.imageBaseUrl })) {
+        this.handlers.onImage?.(image, payload)
+      }
+    } catch (error) {
+      const parserError = new Error(`无法解析 Gemini SSE 数据: ${error.message}`)
+      parserError.cause = error
+      parserError.data = data
+      this.handlers.onError?.(parserError)
+    }
+  }
+}

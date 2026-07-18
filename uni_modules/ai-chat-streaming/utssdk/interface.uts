@@ -1,0 +1,37 @@
+export type AiChatStreamHeader = {
+  name : string
+  value : string
+}
+
+export type AiChatStreamEvent = {
+  requestId : string
+  eventType : string
+  statusCode : number
+  headers : Array<AiChatStreamHeader>
+  data : string
+  code : string
+  message : string
+  body : string
+}
+
+export type AiChatStreamRequestOptions = {
+  requestId : string
+  url : string
+  method : string
+  headers : Array<AiChatStreamHeader>
+  body : string
+  timeout : number
+}
+
+export type AiChatStreamEventCallback = (event : AiChatStreamEvent) => void
+export type AiChatOnStreamEvent = (callback : AiChatStreamEventCallback) => void
+export type AiChatOffStreamEvent = () => void
+export type AiChatStreamRequest = (options : AiChatStreamRequestOptions) => void
+export type AiChatStreamCancel = (requestId : string) => boolean
+
+interface Uni {
+  onAiChatStreamEvent(callback : AiChatStreamEventCallback) : void
+  offAiChatStreamEvent() : void
+  aiChatStreamRequest(options : AiChatStreamRequestOptions) : void
+  aiChatStreamCancel(requestId : string) : boolean
+}

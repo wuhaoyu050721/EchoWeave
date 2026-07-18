@@ -1,0 +1,45 @@
+import {
+  AiChatPickAttachmentsErrorCode,
+  AiChatPickAttachmentsFail,
+  AiChatWriteDownloadFileErrorCode,
+  AiChatWriteDownloadFileFail
+} from './interface.uts'
+
+export const UniErrorSubject = 'aiChatPickAttachments'
+
+export const AiChatPickAttachmentsErrors : Map<AiChatPickAttachmentsErrorCode, string> = new Map([
+  [9101001, '附件选择参数无效'],
+  [9101002, '另一个附件选择操作仍在进行'],
+  [9101003, '无法打开系统附件选择器'],
+  [9101004, '附件读取或处理失败'],
+  [9101005, '选择的附件数量超过限制']
+])
+
+export class AiChatPickAttachmentsFailImpl extends UniError implements AiChatPickAttachmentsFail {
+  override errCode : AiChatPickAttachmentsErrorCode
+
+  constructor(errCode : AiChatPickAttachmentsErrorCode, message ?: string) {
+    super()
+    this.errSubject = UniErrorSubject
+    this.errCode = errCode
+    this.errMsg = message ?? AiChatPickAttachmentsErrors.get(errCode) ?? ''
+  }
+}
+
+export const AiChatWriteDownloadFileErrors : Map<AiChatWriteDownloadFileErrorCode, string> = new Map([
+  [9101101, '下载文件参数无效'],
+  [9101102, '没有下载目录写入权限'],
+  [9101103, '下载文件写入失败'],
+  [9101104, '下载文件超过大小限制']
+])
+
+export class AiChatWriteDownloadFileFailImpl extends UniError implements AiChatWriteDownloadFileFail {
+  override errCode : AiChatWriteDownloadFileErrorCode
+
+  constructor(errCode : AiChatWriteDownloadFileErrorCode, message ?: string) {
+    super()
+    this.errSubject = 'aiChatWriteDownloadFile'
+    this.errCode = errCode
+    this.errMsg = message ?? AiChatWriteDownloadFileErrors.get(errCode) ?? ''
+  }
+}

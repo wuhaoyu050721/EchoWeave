@@ -1,0 +1,35 @@
+# Dependencies and generated output
+node_modules/
+dist-preview/
+unpackage/*
+!unpackage/res/
+!unpackage/res/**
+
+# Local IDE and agent state
+.hbuilderx/
+.idea/
+.codex-runtime/
+.superpowers/
+
+# Local environment and signing material
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+
+# Runtime and verification artifacts
+*.apk
+*.log
+*.zip
+/*.png
+/*.xml
+/design-qa.md
+
+# Operating system files
+.DS_Store
+Thumbs.db
