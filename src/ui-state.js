@@ -1,4 +1,5 @@
 import { normalizeProviderAvatar } from './core/provider-avatar.js'
+import { extractAssistantStatus } from './core/assistant-status.js'
 import {
   defaultProviderBaseUrl,
   normalizeProviderProtocol,
@@ -163,12 +164,18 @@ export function openSettingsDetails(state) {
   state.settingsView = 'details'
 }
 
+export function openNsfwSettings(state) {
+  state.activeTab = 'settings'
+  state.screen = 'settings'
+  state.settingsView = 'nsfw'
+}
+
 export function closeSettingsDetails(state) {
   state.settingsView = 'overview'
 }
 
 export function resolveAppBackAction(state) {
-  if (state?.screen === 'settings' && state?.settingsView === 'details') {
+  if (state?.screen === 'settings' && state?.settingsView !== 'overview') {
     return 'settings-overview'
   }
 
@@ -251,9 +258,17 @@ function formatConversationTime(value, now) {
 
 export function summarizeConversation(conversation, latestMessage, now = new Date()) {
   const timestamp = latestMessage?.updatedAt || conversation.lastMessageAt || conversation.updatedAt
+  const rawContent = String(latestMessage?.content ?? '')
+  const presentation = latestMessage?.role === 'assistant'
+    ? extractAssistantStatus(rawContent)
+    : { content: rawContent, status: null }
   return {
     ...conversation,
-    preview: String(latestMessage?.content ?? '').trim() || (latestMessage?.attachmentIds?.length ? '[附件]' : '开始一段新的 AI 对话'),
+    preview: presentation.content.trim() || (
+      presentation.status
+        ? '[角色状态已更新]'
+        : (latestMessage?.attachmentIds?.length ? '[附件]' : '开始一段新的 AI 对话')
+    ),
     time: formatConversationTime(timestamp, now),
     icon: 'MessageCircle'
   }

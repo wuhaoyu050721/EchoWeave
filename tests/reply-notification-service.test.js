@@ -29,6 +29,11 @@ test('builds compact reply notification titles and previews', () => {
   assert.equal(createReplyNotificationContent({ generationMode: 'image', content: '' }), '发来了一张图片')
   assert.equal(createReplyNotificationContent({ attachments: [{ kind: 'image' }, { kind: 'image' }] }), '发来了 2 张图片')
   assert.equal(createReplyNotificationContent({ content: 'x'.repeat(40) }, 20), `${'x'.repeat(17)}...`)
+  assert.equal(
+    createReplyNotificationContent({ content: '她回来了。\n<status>[位置|门口]</status>' }),
+    '她回来了。'
+  )
+  assert.equal(createReplyNotificationContent({ content: '<status>[位置|门口]</status>' }), '角色状态已更新')
 })
 
 test('shows completed replies outside the visible conversation and skips the active chat', async () => {

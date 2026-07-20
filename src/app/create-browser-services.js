@@ -21,6 +21,7 @@ import {
 } from '../workspace/workspace-id.js'
 import { WorkspaceServiceManager } from '../workspace/workspace-service-manager.js'
 import { createChatInstructionResolver, createUserNameResolver } from './create-character-instructions.js'
+import { getRuntimeDiagnosticLogStore } from '../core/runtime-diagnostic-log.js'
 
 export function browserProxyPath(pathname = globalThis.location?.pathname) {
   return String(pathname ?? '').startsWith('/preview/') ? '/__ai_proxy' : null
@@ -101,6 +102,7 @@ export async function createBrowserServices({
   const getUserName = createUserNameResolver(repository)
   const getSystemPrompt = createChatInstructionResolver({ repository, vault, getUserName })
   const replyNotificationService = new ReplyNotificationService()
+  const diagnosticLogStore = getRuntimeDiagnosticLogStore()
 
   const chatService = new ChatService({
     repository,
@@ -108,7 +110,8 @@ export async function createBrowserServices({
     provider: providerRouter,
     getSystemPrompt,
     getUserName,
-    replyNotificationService
+    replyNotificationService,
+    diagnosticLogStore
   })
   const backupService = new BackupService({ repository })
   const dispose = createWorkspaceDisposer({
@@ -136,6 +139,7 @@ export async function createBrowserServices({
     backupService,
     attachmentService,
     replyNotificationService,
+    diagnosticLogStore,
     dispose,
     close: dispose,
     platform: {

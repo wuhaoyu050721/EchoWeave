@@ -13,6 +13,7 @@ import {
   closeSettingsDetails,
   closeCharacterDetails,
   openCharacterDetails,
+  openNsfwSettings,
   openSettingsDetails,
   openConversation,
   resolveAppBackAction,
@@ -91,6 +92,20 @@ test('settings opens details and returns to overview', () => {
   assert.equal(state.screen, 'settings')
   assert.equal(state.activeTab, 'settings')
   assert.equal(state.settingsView, 'details')
+
+  closeSettingsDetails(state)
+  assert.equal(state.settingsView, 'overview')
+})
+
+test('NSFW settings opens as a second-level settings view', () => {
+  const state = createInitialUiState()
+
+  openNsfwSettings(state)
+
+  assert.equal(state.screen, 'settings')
+  assert.equal(state.activeTab, 'settings')
+  assert.equal(state.settingsView, 'nsfw')
+  assert.equal(resolveAppBackAction(state), 'settings-overview')
 
   closeSettingsDetails(state)
   assert.equal(state.settingsView, 'overview')
@@ -250,4 +265,19 @@ test('conversation summary uses the latest message and stable fallback values', 
   assert.equal(summary.preview, 'Latest reply')
   assert.equal(summary.time, '09:29')
   assert.equal(summary.icon, 'MessageCircle')
+})
+
+test('conversation summary hides a trailing assistant status block', () => {
+  const summary = summarizeConversation(
+    { id: 'c1', title: '角色会话' },
+    {
+      role: 'assistant',
+      content: '她向你挥了挥手。\n<character_status>[心情|开心]</character_status>',
+      updatedAt: '2026-07-13T09:29:00.000+08:00'
+    },
+    new Date('2026-07-13T10:00:00.000+08:00')
+  )
+
+  assert.equal(summary.preview, '她向你挥了挥手。')
+  assert.doesNotMatch(summary.preview, /character_status/)
 })

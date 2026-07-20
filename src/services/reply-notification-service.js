@@ -1,3 +1,5 @@
+import { extractAssistantStatus } from '../core/assistant-status.js'
+
 export const REPLY_NOTIFICATION_SETTING_KEY = 'replyNotificationsEnabled'
 
 const DEFAULT_PREVIEW_LENGTH = 120
@@ -7,9 +9,12 @@ function trimmedText(value) {
 }
 
 export function createReplyNotificationContent(message = {}, maximumLength = DEFAULT_PREVIEW_LENGTH) {
-  const content = trimmedText(message.content)
+  const presentation = extractAssistantStatus(message.content)
+  const content = trimmedText(presentation.content)
   const limit = Math.max(16, Number(maximumLength) || DEFAULT_PREVIEW_LENGTH)
   if (content) return content.length > limit ? `${content.slice(0, limit - 3)}...` : content
+
+  if (presentation.status) return '角色状态已更新'
 
   const attachments = Array.isArray(message.attachments) ? message.attachments : []
   const imageCount = attachments.filter(attachment => attachment?.kind === 'image').length

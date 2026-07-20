@@ -1,10 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { IDBFactory } from 'fake-indexeddb'
+import { createDiagnosticLogStore } from '../src/core/diagnostic-log.js'
 import { IndexedDbRepository } from '../src/platform/browser/indexeddb-repository.js'
 import { ChatService } from '../src/services/chat-service.js'
 
-async function setup(streamChat, providerOverrides = {}, conversationOverrides = {}) {
+async function setup(streamChat, providerOverrides = {}, conversationOverrides = {}, serviceOverrides = {}) {
   const repository = new IndexedDbRepository({ indexedDB: new IDBFactory(), databaseName: `chat-${crypto.randomUUID()}` })
   await repository.init()
   await repository.saveConversation({
@@ -23,7 +24,8 @@ async function setup(streamChat, providerOverrides = {}, conversationOverrides =
     provider: { streamChat, ...providerOverrides },
     getSystemPrompt: async () => '回答简洁',
     idFactory: () => `message-${++id}`,
-    now: () => '2026-07-13T01:00:00.000Z'
+    now: () => '2026-07-13T01:00:00.000Z',
+    ...serviceOverrides
   })
   return { repository, service }
 }
@@ -50,6 +52,35 @@ test('creates a message pair, streams content, completes, and titles the convers
   assert.deepEqual(messages.map((item) => item.role), ['user', 'assistant'])
   assert.equal(conversation.title, '请解释量子计算的实际用途')
   assert.deepEqual(states, [true, false])
+})
+
+test('logs whether the character status protocol was sent and what the model returned', async () => {
+  const logStore = createDiagnosticLogStore({ now: () => 1000, maxDetailLength: 1600 })
+  const { service } = await setup(async (profile, request, handlers) => {
+    handlers.onDelta('正文回复，但没有状态块。')
+    return { finishReason: 'stop' }
+  }, {}, { characterId: 'char-1' }, {
+    diagnosticLogStore: logStore,
+    getSystemPrompt: async () => ({
+      systemPrompt: '[统一状态栏输出协议：每轮强制]\n<sumo_monitor>固定格式</sumo_monitor>',
+      postHistoryPrompt: '[状态栏最终提醒]\n必须返回状态',
+      userTurnPrompt: '[应用内部状态输出要求]\n<sumo_monitor>固定格式</sumo_monitor>'
+    })
+  })
+
+  await service.send({ conversationId: 'conversation-1', content: '继续' })
+
+  const requestLog = logStore.entries().find(entry => entry.type === 'chat_status_request')
+  const responseLog = logStore.entries().find(entry => entry.type === 'chat_status_response')
+  assert.equal(requestLog.statusProtocolInFirstSystem, true)
+  assert.equal(requestLog.finalReminderInLastSystem, true)
+  assert.equal(requestLog.statusProtocolInLatestUser, true)
+  assert.equal(requestLog.messageRoles, 'system,user,system')
+  assert.equal(responseLog.finishReason, 'stop')
+  assert.equal(responseLog.canonicalOpenCount, 0)
+  assert.equal(responseLog.statusParsed, false)
+  assert.match(responseLog.responseTail, /没有状态块/)
+  assert.doesNotMatch(JSON.stringify(logStore.exportData()), /secret/)
 })
 
 test('notifies only after a completed assistant reply is persisted', async () => {

@@ -66,6 +66,19 @@ test('places post-history instructions after selected conversation messages', ()
   ])
 })
 
+test('adds a request-only turn instruction to the latest user message', () => {
+  const messages = [
+    message('1', 'user', '旧问题'),
+    message('2', 'assistant', '旧回答'),
+    message('3', 'user', '本轮问题')
+  ]
+  const result = buildChatContext({ messages, userTurnPrompt: '必须输出状态块' })
+
+  assert.equal(result[0].content, '旧问题')
+  assert.equal(result[2].content, '本轮问题\n\n必须输出状态块')
+  assert.equal(messages[2].content, '本轮问题')
+})
+
 test('keeps attachment-only user messages with ordered attachment records', () => {
   const result = buildChatContext({
     messages: [{ id: 'm1', role: 'user', content: '', status: 'completed', sequence: 1, attachmentIds: ['a2', 'a1'] }],

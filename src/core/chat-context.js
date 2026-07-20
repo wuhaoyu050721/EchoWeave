@@ -16,11 +16,13 @@ export function buildChatContext({
   attachments = [],
   systemPrompt = '',
   postHistoryPrompt = '',
+  userTurnPrompt = '',
   maxMessages = 40,
   maxCharacters = 60000
 } = {}) {
   const prompt = String(systemPrompt ?? '').trim()
   const trailingPrompt = String(postHistoryPrompt ?? '').trim()
+  const turnPrompt = String(userTurnPrompt ?? '').trim()
   const characterBudget = Math.max(0, Number(maxCharacters) || 0)
   const countBudget = Math.max(1, Number(maxMessages) || 1)
   const eligible = messages
@@ -35,7 +37,7 @@ export function buildChatContext({
   ]))
 
   const selected = []
-  let usedCharacters = prompt.length + trailingPrompt.length
+  let usedCharacters = prompt.length + trailingPrompt.length + turnPrompt.length
   for (let index = eligible.length - 1; index >= 0 && selected.length < countBudget; index -= 1) {
     const message = eligible[index]
     const content = String(message.content ?? '')
@@ -65,6 +67,14 @@ export function buildChatContext({
     if (related.length) result.attachments = related
     return result
   })
+  if (turnPrompt) {
+    for (let index = context.length - 1; index >= 0; index -= 1) {
+      if (context[index].role !== 'user') continue
+      const content = String(context[index].content ?? '')
+      context[index] = { ...context[index], content: content ? `${content}\n\n${turnPrompt}` : turnPrompt }
+      break
+    }
+  }
   if (prompt) {
     context.unshift({ role: 'system', content: prompt })
   }

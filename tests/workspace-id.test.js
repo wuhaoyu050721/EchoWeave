@@ -38,6 +38,35 @@ test('includes the cloud service namespace to isolate equal ids from different s
   )
 })
 
+test('normalizes cloud service URLs without the URL constructor used by some App runtimes', () => {
+  const originalUrl = globalThis.URL
+  try {
+    globalThis.URL = undefined
+    assert.equal(
+      normalizeAccountNamespace('HTTP://118.145.98.165:8018/'),
+      'http://118.145.98.165:8018'
+    )
+    assert.equal(
+      normalizeAccountNamespace('HTTPS://CLOUD.EXAMPLE:443/api/?ignored=yes#fragment'),
+      'https://cloud.example/api'
+    )
+    assert.equal(
+      normalizeAccountNamespace('http://[::1]:8080/cloud/'),
+      'http://[::1]:8080/cloud'
+    )
+    assert.throws(
+      () => normalizeAccountNamespace('https://user:password@cloud.example'),
+      /凭据/
+    )
+    assert.throws(
+      () => normalizeAccountNamespace('http://cloud.example:70000'),
+      /服务域无效/
+    )
+  } finally {
+    globalThis.URL = originalUrl
+  }
+})
+
 test('never places account input directly in a database name or SQLite path', () => {
   const workspaceId = deriveAccountWorkspaceId({ id: "../../x'; DROP TABLE messages; --" })
   const browserName = browserDatabaseNameForWorkspace(workspaceId)

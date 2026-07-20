@@ -79,7 +79,7 @@
 		FileText, History, LockKeyhole, MoreVertical, Play, RotateCcw, Server, Square, Trash2
 	} from '../../src/components/app-icons.js'
 	import { preserveServiceIdentity } from '../../src/app/vue-service-container.js'
-	import { createDiagnosticLogStore } from '../../src/core/diagnostic-log.js'
+	import { getRuntimeDiagnosticLogStore } from '../../src/core/runtime-diagnostic-log.js'
 	import { PROVIDER_PROTOCOLS, defaultProviderBaseUrl, getProviderProtocol } from '../../src/core/provider-protocol.js'
 	import { NativeStreamingTransport } from '../../src/platform/app/native-streaming-transport.js'
 	import { AndroidDiagnosticService } from '../../src/services/android-diagnostic-service.js'
@@ -191,7 +191,7 @@
 				const uniApi = getUniApi()
 				const plusApi = getPlusApi()
 				this.isAndroidApp = Boolean(uniApi?.request && String(plusApi?.os?.name || '').toLowerCase() === 'android')
-				this.logStore = preserveServiceIdentity(createDiagnosticLogStore())
+				this.logStore = preserveServiceIdentity(getRuntimeDiagnosticLogStore())
 				if (this.isAndroidApp) {
 					const nativeApi = getNativeStreamingApi()
 					if (nativeApi) {

@@ -1,5 +1,6 @@
 import { buildChatContext } from '../core/chat-context.js'
 import { createAbortController, createAbortError } from '../core/abort-controller-polyfill.js'
+import { extractAssistantStatus } from '../core/assistant-status.js'
 import { normalizeImageOutput } from '../core/image-output.js'
 import { renderCharacterTemplate } from '../core/character-prompt.js'
 import { createRuntimeId } from '../core/runtime-id.js'
@@ -13,6 +14,11 @@ function createTitle(content) {
   return normalized.slice(0, 24) || '新对话'
 }
 
+function textTail(value, maximumLength = 1200) {
+  const text = String(value ?? '')
+  return text.slice(-Math.max(0, Number(maximumLength) || 0))
+}
+
 export class ChatService {
   constructor({
     repository,
@@ -21,6 +27,7 @@ export class ChatService {
     getSystemPrompt = async () => '',
     getUserName = async () => '用户',
     replyNotificationService = null,
+    diagnosticLogStore = null,
     idFactory = createRuntimeId,
     now = () => new Date().toISOString(),
     setIntervalFn = globalThis.setInterval?.bind(globalThis),
@@ -32,6 +39,7 @@ export class ChatService {
     this.getSystemPrompt = getSystemPrompt
     this.getUserName = getUserName
     this.replyNotificationService = replyNotificationService
+    this.diagnosticLogStore = diagnosticLogStore
     this.idFactory = idFactory
     this.now = now
     this.setIntervalFn = setIntervalFn
@@ -294,10 +302,43 @@ export class ChatService {
           const instructions = await this.getSystemPrompt(conversation, { messages: contextMessages })
           const systemPrompt = typeof instructions === 'string' ? instructions : instructions?.systemPrompt
           const postHistoryPrompt = typeof instructions === 'string' ? '' : instructions?.postHistoryPrompt
+          const userTurnPrompt = typeof instructions === 'string' ? '' : instructions?.userTurnPrompt
           const attachments = this.repository.listConversationAttachments
             ? await this.repository.listConversationAttachments(conversation.id)
             : []
-          const requestMessages = buildChatContext({ messages: contextMessages, attachments, systemPrompt, postHistoryPrompt })
+          const requestMessages = buildChatContext({ messages: contextMessages, attachments, systemPrompt, postHistoryPrompt, userTurnPrompt })
+          if (conversation.characterId) {
+            const systemMessages = requestMessages.filter(message => message.role === 'system')
+            const firstSystem = systemMessages[0]?.content || ''
+            const lastSystem = systemMessages.length ? systemMessages[systemMessages.length - 1].content : ''
+            let latestUser = ''
+            for (let index = requestMessages.length - 1; index >= 0; index -= 1) {
+              if (requestMessages[index].role === 'user') {
+                latestUser = String(requestMessages[index].content ?? '')
+                break
+              }
+            }
+            this.#addDiagnosticLog('chat_status_request', {
+              conversationId: conversation.id,
+              requestId: assistantMessage.requestId,
+              profileId: profile.id || '',
+              protocolType: profile.protocolType || '',
+              model: conversation.modelName || profile.defaultModel || '',
+              messageRoles: requestMessages.map(message => message.role).join(','),
+              messageCount: requestMessages.length,
+              systemMessageCount: systemMessages.length,
+              statusProtocolInFirstSystem: firstSystem.includes('[统一状态栏输出协议：每轮强制]') && firstSystem.includes('<sumo_monitor>'),
+              statusProtocolInAnySystem: systemMessages.some(message => String(message.content).includes('<sumo_monitor>')),
+              finalReminderInLastSystem: String(lastSystem).includes('[状态栏最终提醒]'),
+              statusProtocolInLatestUser: latestUser.includes('[应用内部状态输出要求]') && latestUser.includes('<sumo_monitor>'),
+              systemPromptLength: String(systemPrompt ?? '').length,
+              postHistoryPromptLength: String(postHistoryPrompt ?? '').length,
+              userTurnPromptLength: String(userTurnPrompt ?? '').length,
+              firstSystemTail: textTail(firstSystem, 1000),
+              lastSystemTail: textTail(lastSystem, 500),
+              latestUserTail: textTail(latestUser, 1000)
+            })
+          }
           result = await this.provider.streamChat(profile, {
             model: conversation.modelName || profile.defaultModel,
             messages: requestMessages,
@@ -341,6 +382,26 @@ export class ChatService {
       this.clearIntervalFn(interval)
       assistantMessage.updatedAt = this.now()
       await queuePersistence(true)
+      if (generationMode === 'chat' && conversation.characterId) {
+        const response = String(assistantMessage.content ?? '')
+        const extracted = extractAssistantStatus(response)
+        this.#addDiagnosticLog('chat_status_response', {
+          conversationId: conversation.id,
+          requestId: assistantMessage.requestId,
+          messageId: assistantMessage.id,
+          messageStatus: assistantMessage.status,
+          finishReason: assistantMessage.finishReason || '',
+          errorCode: assistantMessage.errorCode || '',
+          responseLength: response.length,
+          responseTail: textTail(response),
+          canonicalOpenCount: (response.match(/<\s*sumo_monitor\b/gi) || []).length,
+          canonicalCloseCount: (response.match(/<\s*\/\s*sumo_monitor\s*>/gi) || []).length,
+          statusParsed: Boolean(extracted.status),
+          statusPending: Boolean(extracted.pending),
+          parsedRootTag: extracted.status?.rootTag || '',
+          parsedSections: extracted.status?.sections?.map(section => section.tag).join(',') || ''
+        })
+      }
       if (assistantMessage.status === 'completed') {
         try {
           await this.replyNotificationService?.notifyReply({
@@ -384,5 +445,11 @@ export class ChatService {
     markDirty()
     onMessage?.({ ...assistantMessage, attachments: assistantMessage.attachments })
     return generated.length
+  }
+
+  #addDiagnosticLog(type, detail) {
+    try {
+      this.diagnosticLogStore?.add?.(type, detail)
+    } catch (_) {}
   }
 }

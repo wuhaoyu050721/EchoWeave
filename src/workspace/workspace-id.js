@@ -22,6 +22,58 @@ export const ANDROID_DEVICE_DATABASE = Object.freeze({
 
 const ACCOUNT_WORKSPACE_PATTERN = /^account-[a-f0-9]{64}$/
 
+function invalidAccountNamespace() {
+  throw new Error('云账号服务域无效')
+}
+
+function normalizeFallbackAuthority(value, protocol) {
+  if (!value || /[\s\\/?#]/.test(value)) invalidAccountNamespace()
+  if (value.includes('@')) throw new Error('云账号服务域不能包含凭据')
+
+  let hostname = ''
+  let port = ''
+  if (value.startsWith('[')) {
+    const closingBracket = value.indexOf(']')
+    if (closingBracket <= 1) invalidAccountNamespace()
+    const address = value.slice(1, closingBracket)
+    if (!/^[0-9a-z:.%-]+$/i.test(address)) invalidAccountNamespace()
+    hostname = `[${address.toLowerCase()}]`
+    const remainder = value.slice(closingBracket + 1)
+    if (remainder) {
+      if (!remainder.startsWith(':')) invalidAccountNamespace()
+      port = remainder.slice(1)
+    }
+  } else {
+    if (value.includes('[') || value.includes(']')) invalidAccountNamespace()
+    const firstColon = value.indexOf(':')
+    const lastColon = value.lastIndexOf(':')
+    if (firstColon !== lastColon) invalidAccountNamespace()
+    hostname = lastColon >= 0 ? value.slice(0, lastColon) : value
+    port = lastColon >= 0 ? value.slice(lastColon + 1) : ''
+    if (!hostname || !/^[a-z0-9._-]+$/i.test(hostname)) invalidAccountNamespace()
+    hostname = hostname.toLowerCase()
+  }
+
+  if (port) {
+    if (!/^\d+$/.test(port)) invalidAccountNamespace()
+    const number = Number(port)
+    if (!Number.isSafeInteger(number) || number < 0 || number > 65535) invalidAccountNamespace()
+    if ((protocol === 'http:' && number === 80) || (protocol === 'https:' && number === 443)) port = ''
+    else port = String(number)
+  }
+
+  return `${hostname}${port ? `:${port}` : ''}`
+}
+
+function normalizeAccountHttpNamespaceWithoutUrl(value) {
+  const match = /^(https?):\/\/([^/?#]+)([^?#]*)(?:\?[^#]*)?(?:#.*)?$/i.exec(value)
+  if (!match || /[\s\\]/.test(match[3])) invalidAccountNamespace()
+  const protocol = `${match[1].toLowerCase()}:`
+  const host = normalizeFallbackAuthority(match[2], protocol)
+  const pathname = match[3].replace(/\/+$/, '')
+  return `${protocol}//${host}${pathname}`
+}
+
 function normalizedBoundedString(value, label, maximumLength) {
   const normalized = String(value ?? '').trim()
   if (!normalized) throw new Error(`${label}不能为空`)
@@ -33,12 +85,15 @@ export function normalizeAccountNamespace(value = DEFAULT_ACCOUNT_NAMESPACE) {
   const normalized = normalizedBoundedString(value, '云账号服务域', 2048)
   if (!/^https?:\/\//i.test(normalized)) return normalized
   try {
-    const url = new URL(normalized)
-    if (url.username || url.password) throw new Error('云账号服务域不能包含凭据')
-    url.hash = ''
-    url.search = ''
-    const pathname = url.pathname.replace(/\/+$/, '')
-    return `${url.protocol.toLowerCase()}//${url.host.toLowerCase()}${pathname}`
+    if (typeof globalThis.URL === 'function') {
+      const url = new globalThis.URL(normalized)
+      if (url.username || url.password) throw new Error('云账号服务域不能包含凭据')
+      url.hash = ''
+      url.search = ''
+      const pathname = url.pathname.replace(/\/+$/, '')
+      return `${url.protocol.toLowerCase()}//${url.host.toLowerCase()}${pathname}`
+    }
+    return normalizeAccountHttpNamespaceWithoutUrl(normalized)
   } catch (error) {
     if (/凭据/.test(error?.message || '')) throw error
     throw new Error('云账号服务域无效')

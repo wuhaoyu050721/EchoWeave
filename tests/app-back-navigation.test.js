@@ -13,6 +13,7 @@ test('Android hardware back is wired to layered in-app navigation', () => {
 
   for (const transientState of [
     'attachmentPreview',
+		'assistantStatusOpen',
     'profileAvatarMenuOpen',
     'cloudOpen',
     'backupMenuOpen',

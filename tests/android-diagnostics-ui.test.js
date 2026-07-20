@@ -36,6 +36,7 @@ test('diagnostics page includes start stop clear export and lifecycle cleanup', 
   assert.match(source, /onHide\s*\(/)
   assert.match(source, /onUnload\s*\(/)
   assert.match(source, /service\?\.stop\(\)/)
+	assert.match(source, /getRuntimeDiagnosticLogStore\(\)/)
 })
 
 test('diagnostics page exposes OpenAI and Gemini protocol selection', async () => {

@@ -4,6 +4,15 @@ export function createUserNameResolver(repository) {
   return async () => String(await repository.getSetting('profileName', '用户') || '用户').trim() || '用户'
 }
 
+export async function saveLocalProfileName(repository, value) {
+  const username = String(value ?? '').trim()
+  if (!username) throw new Error('本地用户名不能为空')
+  if (username.length > 32) throw new Error('本地用户名不能超过 32 个字符')
+  if (!repository?.setSetting) throw new Error('本地用户名存储服务不可用')
+  await repository.setSetting('profileName', username)
+  return username
+}
+
 export async function syncProfileNameFromCloudSession(repository, session) {
   const username = String(session?.user?.username ?? '').trim()
   if (!username) return ''

@@ -29,6 +29,7 @@ import {
 } from '../workspace/workspace-id.js'
 import { WorkspaceServiceManager } from '../workspace/workspace-service-manager.js'
 import { createChatInstructionResolver, createUserNameResolver } from './create-character-instructions.js'
+import { getRuntimeDiagnosticLogStore } from '../core/runtime-diagnostic-log.js'
 
 function registeredNativeApis() {
   return globalThis.__aiChatNativeApis || null
@@ -216,6 +217,7 @@ export async function createAppServices({
 
   const getUserName = createUserNameResolver(repository)
   const getSystemPrompt = createChatInstructionResolver({ repository, vault, getUserName })
+  const diagnosticLogStore = getRuntimeDiagnosticLogStore()
 
   const chatService = new ChatService({
     repository,
@@ -223,7 +225,8 @@ export async function createAppServices({
     provider: providerRouter,
     getSystemPrompt,
     getUserName,
-    replyNotificationService
+    replyNotificationService,
+    diagnosticLogStore
   })
   const backupService = new BackupService({ repository })
   const dispose = createWorkspaceDisposer({
@@ -255,6 +258,7 @@ export async function createAppServices({
     nativeCharacterCardPicker,
     nativeWorldBookPicker,
     replyNotificationService,
+    diagnosticLogStore,
     dispose,
     close: dispose,
     platform: {
