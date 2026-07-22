@@ -280,6 +280,16 @@ function statusScorePercent(value) {
   return Math.round(Math.max(0, Math.min(100, Number(number[0]))))
 }
 
+export function assistantStatusProgressColor(value) {
+  const percent = statusScorePercent(value)
+  if (percent === null) return '#2fa49f'
+  if (percent <= 20) return '#85929a'
+  if (percent <= 40) return '#3f8fbd'
+  if (percent <= 60) return '#2fa49f'
+  if (percent <= 80) return '#e0a12f'
+  return '#e64e75'
+}
+
 export function createAssistantStatusOverview(status) {
   if (!status) return null
   const sections = Array.isArray(status.sections) ? status.sections : []

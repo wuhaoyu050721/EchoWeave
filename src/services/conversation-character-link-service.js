@@ -1,0 +1,124 @@
+function cloneJson(value) {
+  return JSON.parse(JSON.stringify(value))
+}
+
+function text(value) {
+  return String(value ?? '').trim()
+}
+
+function timestampValue(now) {
+  const value = typeof now === 'function' ? now() : now
+  return value instanceof Date ? value.toISOString() : String(value || new Date().toISOString())
+}
+
+function newestCharacter(characters) {
+  return [...characters].sort((left, right) => {
+    const avatarDifference = Number(Boolean(right.avatarAssetId)) - Number(Boolean(left.avatarAssetId))
+    if (avatarDifference) return avatarDifference
+    const updatedDifference = text(right.updatedAt).localeCompare(text(left.updatedAt))
+    if (updatedDifference) return updatedDifference
+    return text(left.id).localeCompare(text(right.id))
+  })[0] || null
+}
+
+function activeCharacterByName(characters, name) {
+  const normalizedName = text(name)
+  if (!normalizedName) return null
+  const matches = characters.filter(character => text(character.name) === normalizedName)
+  return matches.length === 1 ? matches[0] : null
+}
+
+async function formerCharacterForConversation(repository, conversation, cache) {
+  const formerId = text(conversation.deletedCharacterId || conversation.characterId)
+  if (!formerId || typeof repository.getCharacter !== 'function') return null
+  if (!cache.has(formerId)) cache.set(formerId, await repository.getCharacter(formerId) || null)
+  return cache.get(formerId)
+}
+
+function replacementFromSourceHash(characters, formerCharacter) {
+  const sourceHash = text(formerCharacter?.sourceHash)
+  if (!sourceHash) return null
+  return newestCharacter(characters.filter(character => (
+    character.id !== formerCharacter.id && text(character.sourceHash) === sourceHash
+  )))
+}
+
+function hasCharacterEvidence(conversation) {
+  return Boolean(
+    text(conversation.characterId) ||
+    text(conversation.deletedCharacterId) ||
+    text(conversation.characterNameSnapshot) ||
+    text(conversation.characterAvatarAssetId) ||
+    conversation.characterDeletedAt
+  )
+}
+
+function repairedConversation(conversation, character, updatedAt) {
+  const repaired = {
+    ...cloneJson(conversation),
+    characterId: character.id,
+    characterNameSnapshot: character.name || conversation.characterNameSnapshot || conversation.title,
+    characterAvatarAssetId: character.avatarAssetId || null,
+    updatedAt
+  }
+  delete repaired.deletedCharacterId
+  delete repaired.characterDeletedAt
+  return repaired
+}
+
+function linkedConversationNeedsRefresh(conversation, character) {
+  return text(conversation.characterNameSnapshot) !== text(character.name) ||
+    text(conversation.characterAvatarAssetId) !== text(character.avatarAssetId) ||
+    Boolean(conversation.deletedCharacterId || conversation.characterDeletedAt)
+}
+
+async function persistConversations(repository, conversations) {
+  if (!conversations.length) return
+  if (typeof repository.importRecords === 'function') {
+    await repository.importRecords({ conversations })
+    return
+  }
+  if (typeof repository.saveConversation !== 'function') {
+    throw new Error('Current repository cannot repair character conversation links')
+  }
+  for (const conversation of conversations) await repository.saveConversation(conversation)
+}
+
+export async function repairConversationCharacterLinks(repository, {
+  now = () => new Date().toISOString()
+} = {}) {
+  if (typeof repository?.listConversations !== 'function' || typeof repository?.listCharacters !== 'function') {
+    return { repaired: 0, refreshed: 0, conversations: [] }
+  }
+
+  const [conversations, activeCharacters] = await Promise.all([
+    repository.listConversations(),
+    repository.listCharacters()
+  ])
+  const activeById = new Map(activeCharacters.map(character => [text(character.id), character]))
+  const formerCache = new Map()
+  const updates = []
+  let repaired = 0
+  let refreshed = 0
+
+  for (const conversation of conversations) {
+    if (!hasCharacterEvidence(conversation)) continue
+    const linkedCharacter = activeById.get(text(conversation.characterId))
+    if (linkedCharacter) {
+      if (!linkedConversationNeedsRefresh(conversation, linkedCharacter)) continue
+      updates.push(repairedConversation(conversation, linkedCharacter, timestampValue(now)))
+      refreshed += 1
+      continue
+    }
+
+    const formerCharacter = await formerCharacterForConversation(repository, conversation, formerCache)
+    const replacement = replacementFromSourceHash(activeCharacters, formerCharacter) ||
+      activeCharacterByName(activeCharacters, conversation.characterNameSnapshot)
+    if (!replacement) continue
+    updates.push(repairedConversation(conversation, replacement, timestampValue(now)))
+    repaired += 1
+  }
+
+  await persistConversations(repository, updates)
+  return { repaired, refreshed, conversations: updates }
+}

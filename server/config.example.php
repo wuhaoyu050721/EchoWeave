@@ -3,7 +3,7 @@ return [
     'dsn' => 'mysql:host=127.0.0.1;port=3306;dbname=ai_chat;charset=utf8mb4',
     'username' => 'ai_chat',
     'password' => 'replace-with-a-database-password',
-    'public_base_url' => 'http://118.145.98.165:8018',
+    'public_base_url' => 'https://www.surtr.cn:8018',
     'max_backup_bytes' => 104857600,
     'max_request_bytes' => 115343360,
     'max_sync_batch_bytes' => 50331648,

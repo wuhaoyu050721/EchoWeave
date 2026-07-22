@@ -21,6 +21,14 @@ export class ProviderService {
     return (await this.repository.listProviders()).map(toPublicProvider)
   }
 
+  async getApiKeyForEditing(id) {
+    const provider = await this.repository.getProvider(id)
+    if (!provider) throw new Error('当前接口不存在')
+    return provider.encryptedApiKey
+      ? await this.vault.decryptString(provider.encryptedApiKey)
+      : ''
+  }
+
   async saveProvider(form) {
     const name = String(form?.name ?? '').trim()
     const defaultModel = String(form?.defaultModel ?? form?.model ?? '').trim()

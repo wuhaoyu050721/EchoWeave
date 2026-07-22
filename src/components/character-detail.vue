@@ -86,6 +86,45 @@
 					<view class="character-detail-item"><text>创作者备注</text><text selectable user-select>{{ detailValue(cardData.creator_notes) }}</text></view>
 				</view>
 
+				<view class="character-detail-section character-world-book-section" data-testid="character-world-books">
+					<view class="character-world-book-heading">
+						<text class="character-section-title">世界书</text>
+						<text>{{ worldBookCount }} 本 · {{ worldBookEntryCount }} 条规则</text>
+					</view>
+					<view v-if="displayWorldBooks.length" class="character-world-book-list">
+						<view v-for="(book, bookIndex) in displayWorldBooks" :key="worldBookKey(book, bookIndex)" class="character-world-book">
+							<button
+								class="character-world-book-toggle"
+								:aria-expanded="isWorldBookExpanded(book, bookIndex)"
+								:aria-label="`${isWorldBookExpanded(book, bookIndex) ? '收起' : '展开'}世界书 ${worldBookName(book)}`"
+								@click="toggleWorldBook(book, bookIndex)"
+							>
+								<view class="character-world-book-icon"><FileText :size="19" /></view>
+								<view class="character-world-book-copy">
+									<text>{{ worldBookName(book) }}</text>
+									<text>{{ worldBookMeta(book) }}</text>
+								</view>
+								<ChevronDown class="character-world-book-chevron" :class="{ expanded: isWorldBookExpanded(book, bookIndex) }" :size="18" />
+							</button>
+							<view v-if="isWorldBookExpanded(book, bookIndex)" class="character-world-book-body">
+								<text v-if="worldBookDescription(book)" class="character-world-book-description" selectable user-select>{{ worldBookDescription(book) }}</text>
+								<view v-if="worldBookEntries(book).length" class="character-world-book-entries">
+									<view v-for="(entry, entryIndex) in worldBookEntries(book)" :key="`${worldBookKey(book, bookIndex)}-entry-${entry.id ?? entry.uid ?? entryIndex}`" class="character-world-book-entry">
+										<view class="character-world-book-entry-heading">
+											<text>{{ worldBookEntryTitle(entry, entryIndex) }}</text>
+											<text :class="{ disabled: entry.enabled === false }">{{ worldBookEntryMode(entry) }}</text>
+										</view>
+										<view v-if="worldBookEntryKeys(entry)" class="character-world-book-triggers"><text>触发词</text><text selectable user-select>{{ worldBookEntryKeys(entry) }}</text></view>
+										<text class="character-world-book-entry-content" selectable user-select>{{ detailValue(entry.content) }}</text>
+									</view>
+								</view>
+								<view v-else class="character-world-book-no-rules"><text>暂无规则</text></view>
+							</view>
+						</view>
+					</view>
+					<view v-else class="character-world-book-empty"><FileText :size="27" /><text>这张角色卡没有关联世界书</text></view>
+				</view>
+
 				<view class="character-detail-section character-source-section">
 					<text class="character-section-title">卡片信息</text>
 					<view class="character-source-row"><text>卡片版本</text><text>{{ character.characterVersion || character.sourceVersion || 'V3' }}</text></view>
@@ -132,15 +171,16 @@
 </template>
 
 <script>
-	import { ArrowLeft, Camera, Check, ChevronRight, Contact, Download, FileText, Image, MessageCircle, Plus, Trash2 } from './app-icons.js'
+	import { ArrowLeft, Camera, Check, ChevronDown, ChevronRight, Contact, Download, FileText, Image, MessageCircle, Plus, Trash2 } from './app-icons.js'
 	import ProviderLogo from './provider-logo.js'
 	import { createCharacterEditForm } from '../features/character-editor.js'
 	import { CHARACTER_MANAGEMENT_EVENTS } from '../features/character-management.js'
 
 	export default {
-		components: { ArrowLeft, Camera, Check, ChevronRight, Contact, Download, FileText, Image, MessageCircle, Plus, ProviderLogo, Trash2 },
+		components: { ArrowLeft, Camera, Check, ChevronDown, ChevronRight, Contact, Download, FileText, Image, MessageCircle, Plus, ProviderLogo, Trash2 },
 		props: {
 			character: { type: Object, default: null },
+			worldBooks: { type: Array, default: () => [] },
 			creating: { type: Boolean, default: false },
 			editing: { type: Boolean, default: false },
 			saving: { type: Boolean, default: false }
@@ -157,7 +197,7 @@
 			'delete-character': payload => Boolean(payload?.characterId)
 		},
 		data() {
-			return { editForm: createCharacterEditForm(this.character || {}), deleteConfirmationOpen: false }
+			return { editForm: createCharacterEditForm(this.character || {}), deleteConfirmationOpen: false, expandedWorldBookIds: [] }
 		},
 		computed: {
 			cardData() { return this.character?.card?.data || {} },
@@ -166,11 +206,41 @@
 			characterTags() { return Array.isArray(this.character?.tags) ? this.character.tags.filter(Boolean) : [] },
 			alternateGreetings() { return Array.isArray(this.cardData.alternate_greetings) ? this.cardData.alternate_greetings.filter(Boolean) : [] },
 			alternateGreetingCount() { return this.alternateGreetings.length },
-			worldBookCount() { return Array.isArray(this.character?.worldBookIds) ? this.character.worldBookIds.length : 0 },
+			embeddedWorldBook() {
+				const data = this.cardData.character_book
+				if (!data || typeof data !== 'object' || Array.isArray(data)) return null
+				return {
+					id: `embedded-${this.character?.id || 'character'}`,
+					characterId: this.character?.id || null,
+					scope: 'character',
+					source: 'character-card',
+					name: data.name || `${this.profileName} 世界书`,
+					data
+				}
+			},
+			displayWorldBooks() {
+				const books = (Array.isArray(this.worldBooks) ? this.worldBooks : []).filter(book => book && !book.deletedAt)
+				if (!this.embeddedWorldBook) return books
+				const characterId = String(this.character?.id || '')
+				const hasStoredEmbeddedBook = books.some(book => book.source === 'character-card' || (
+					book.scope === 'character' && String(book.characterId || '') === characterId
+				))
+				return hasStoredEmbeddedBook ? books : [this.embeddedWorldBook, ...books]
+			},
+			worldBookCount() { return this.displayWorldBooks.length },
+			worldBookEntryCount() { return this.displayWorldBooks.reduce((total, book) => total + this.worldBookEntries(book).length, 0) },
 			assetCount() { return Array.isArray(this.character?.assetIds) ? this.character.assetIds.length : 0 },
 			canSave() { return Boolean(String(this.editForm.name || '').trim()) }
 		},
 		watch: {
+			displayWorldBooks: {
+				immediate: true,
+				handler(books) {
+					const keys = books.map((book, index) => this.worldBookKey(book, index))
+					const retained = this.expandedWorldBookIds.filter(id => keys.includes(id))
+					this.expandedWorldBookIds = retained.length ? retained : keys.slice(0, 1)
+				}
+			},
 			editing(value) {
 				if (value) this.resetEditForm()
 			},
@@ -181,6 +251,41 @@
 		},
 		methods: {
 			resetEditForm() { this.editForm = createCharacterEditForm(this.character || {}) },
+			worldBookKey(book, index) { return String(book?.id || `world-book-${index}`) },
+			worldBookName(book) { return String(book?.name || book?.data?.name || '未命名世界书').trim() || '未命名世界书' },
+			worldBookDescription(book) { return String(book?.data?.description || book?.description || '').trim() },
+			worldBookEntries(book) {
+				const entries = book?.data?.entries
+				if (Array.isArray(entries)) return entries.filter(entry => entry && typeof entry === 'object')
+				if (entries && typeof entries === 'object') return Object.values(entries).filter(entry => entry && typeof entry === 'object')
+				return []
+			},
+			worldBookScopeLabel(book) {
+				if (book?.source === 'character-card' || book?.scope === 'character') return '角色卡内嵌'
+				const characterIds = Array.isArray(book?.characterIds) ? book.characterIds.filter(Boolean) : []
+				return book?.scope === 'global' && !book?.characterId && !characterIds.length ? '全局生效' : '当前角色'
+			},
+			worldBookMeta(book) { return `${this.worldBookEntries(book).length} 条规则 · ${this.worldBookScopeLabel(book)}` },
+			worldBookEntryTitle(entry, index) { return String(entry?.name || entry?.comment || '').trim() || `规则 ${index + 1}` },
+			worldBookEntryKeys(entry) {
+				const values = [entry?.keys ?? entry?.key, entry?.secondary_keys ?? entry?.keysecondary]
+					.flatMap(value => Array.isArray(value) ? value : value === undefined || value === null ? [] : [value])
+					.map(value => String(value).trim())
+					.filter(Boolean)
+				return [...new Set(values)].join('、')
+			},
+			worldBookEntryMode(entry) {
+				if (entry?.enabled === false) return '已停用'
+				if (entry?.constant) return '常驻'
+				return this.worldBookEntryKeys(entry) ? '关键词' : '条件'
+			},
+			isWorldBookExpanded(book, index) { return this.expandedWorldBookIds.includes(this.worldBookKey(book, index)) },
+			toggleWorldBook(book, index) {
+				const id = this.worldBookKey(book, index)
+				this.expandedWorldBookIds = this.expandedWorldBookIds.includes(id)
+					? this.expandedWorldBookIds.filter(value => value !== id)
+					: [...this.expandedWorldBookIds, id]
+			},
 			handleBack() {
 				if (this.deleteConfirmationOpen) {
 					this.deleteConfirmationOpen = false
@@ -463,6 +568,203 @@
 		white-space: pre-wrap;
 		word-break: break-word;
 		flex: 1;
+	}
+
+	.character-world-book-section {
+		padding-bottom: 8px;
+	}
+
+	.character-world-book-heading {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding-bottom: 12px;
+	}
+
+	.character-world-book-heading .character-section-title {
+		padding-bottom: 0;
+	}
+
+	.character-world-book-heading > text:last-child {
+		font-size: 12px;
+		line-height: 18px;
+		color: #888f99;
+		white-space: nowrap;
+	}
+
+	.character-world-book-list,
+	.character-world-book-empty {
+		border-top: 1px solid #efeff1;
+	}
+
+	.character-world-book + .character-world-book {
+		border-top: 1px solid #efeff1;
+	}
+
+	.character-world-book-toggle {
+		display: grid;
+		align-items: center;
+		gap: 11px;
+		width: 100%;
+		min-height: 66px;
+		padding: 10px 0;
+		grid-template-columns: 38px minmax(0, 1fr) 20px;
+		text-align: left;
+	}
+
+	.character-world-book-toggle:active {
+		background: #f8f9fa;
+	}
+
+	.character-world-book-icon {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 38px;
+		height: 38px;
+		border-radius: 8px;
+		background: #eaf5f3;
+		color: #287d76;
+	}
+
+	.character-world-book-copy {
+		display: flex;
+		min-width: 0;
+		flex-direction: column;
+		gap: 3px;
+	}
+
+	.character-world-book-copy > text:first-child {
+		overflow: hidden;
+		font-size: 14px;
+		font-weight: 680;
+		line-height: 20px;
+		color: #292b30;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.character-world-book-copy > text:last-child {
+		overflow: hidden;
+		font-size: 11px;
+		line-height: 17px;
+		color: #858c96;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.character-world-book-chevron {
+		color: #8f969f;
+		transition: transform 180ms ease;
+	}
+
+	.character-world-book-chevron.expanded {
+		transform: rotate(180deg);
+	}
+
+	.character-world-book-body {
+		min-width: 0;
+		margin-left: 49px;
+		padding: 0 0 8px;
+	}
+
+	.character-world-book-description {
+		display: block;
+		padding: 3px 0 13px;
+		font-size: 13px;
+		line-height: 20px;
+		color: #5d626a;
+		white-space: pre-wrap;
+		word-break: break-word;
+	}
+
+	.character-world-book-entry {
+		padding: 12px 0 14px;
+		border-top: 1px solid #eff1f2;
+	}
+
+	.character-world-book-entry-heading {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 10px;
+	}
+
+	.character-world-book-entry-heading > text:first-child {
+		min-width: 0;
+		font-size: 13px;
+		font-weight: 680;
+		line-height: 19px;
+		color: #303238;
+		word-break: break-word;
+		flex: 1;
+	}
+
+	.character-world-book-entry-heading > text:last-child {
+		padding: 2px 6px;
+		border-radius: 4px;
+		background: #edf7f5;
+		font-size: 10px;
+		line-height: 15px;
+		color: #27766f;
+		white-space: nowrap;
+		flex: 0 0 auto;
+	}
+
+	.character-world-book-entry-heading > text:last-child.disabled {
+		background: #f2f2f3;
+		color: #8d8e93;
+	}
+
+	.character-world-book-triggers {
+		display: grid;
+		gap: 8px;
+		margin-top: 8px;
+		grid-template-columns: 42px minmax(0, 1fr);
+	}
+
+	.character-world-book-triggers > text:first-child {
+		font-size: 11px;
+		line-height: 18px;
+		color: #8b9199;
+	}
+
+	.character-world-book-triggers > text:last-child {
+		min-width: 0;
+		font-size: 11px;
+		line-height: 18px;
+		color: #4d6e78;
+		word-break: break-word;
+	}
+
+	.character-world-book-entry-content {
+		display: block;
+		margin-top: 8px;
+		padding-left: 10px;
+		border-left: 2px solid #d5e8e5;
+		font-size: 13px;
+		line-height: 21px;
+		color: #3f4248;
+		white-space: pre-wrap;
+		word-break: break-word;
+	}
+
+	.character-world-book-no-rules,
+	.character-world-book-empty {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 8px;
+		min-height: 72px;
+		font-size: 13px;
+		color: #989da4;
+	}
+
+	.character-world-book-no-rules {
+		justify-content: flex-start;
+		min-height: 48px;
+		border-top: 1px solid #eff1f2;
 	}
 
 	.character-source-section {
@@ -752,5 +1054,6 @@
 
 	@media (prefers-reduced-motion: reduce) {
 		.character-detail-screen { animation: none; }
+		.character-world-book-chevron { transition: none; }
 	}
 </style>

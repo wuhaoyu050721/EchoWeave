@@ -49,3 +49,15 @@ test('diagnostics page exposes OpenAI and Gemini protocol selection', async () =
   assert.match(source, /class="diagnostic-protocol-control"/)
   assert.match(source, /@click="selectProtocol\(protocol\.id\)"/)
 })
+
+test('diagnostics page uses the themed second-level settings layout', async () => {
+  const source = await readFile(new URL('../pages/android-diagnostics/index.vue', import.meta.url), 'utf8')
+
+  assert.match(source, /流式传输诊断/)
+  assert.match(source, /class="runtime-overview"/)
+  assert.match(source, /class="section-band config-section"/)
+  assert.match(source, /class="secondary-actions"/)
+  assert.match(source, /--accent:\s*#d43bc2/)
+  assert.match(source, /background:\s*#f3f3f5/)
+  assert.doesNotMatch(source, /#1f6fcb/)
+})

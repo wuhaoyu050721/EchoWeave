@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { extractTombstoneRefs, syncRecordKey, timestampFromRecord } from '../src/core/cloud-sync-protocol.js'
+import { PlusSqliteRepository } from '../src/platform/app/plus-sqlite-repository.js'
 import { CloudSyncEngine } from '../src/services/cloud-sync-engine.js'
+import { CloudSyncRepositoryAdapter } from '../src/services/cloud-sync-repository-adapter.js'
+import { createNodePlusSqlite } from './helpers/node-plus-sqlite.js'
 
 function clone(value) {
   return value === undefined ? undefined : structuredClone(value)
@@ -280,6 +283,73 @@ test('syncs every entity type across devices with paginated pull and physical-de
   assert.equal(staleRestore.conflicts, 1)
   assert.equal(adapterB.value('providers', 'p1'), undefined)
   assert.equal(api.records.get(syncRecordKey('providers', 'p1')).operation, 'delete')
+})
+
+test('preserves character and avatar relationships across fresh SQLite devices', async () => {
+  const api = new FakeSyncApi()
+  const sourceSqlite = createNodePlusSqlite()
+  const targetSqlite = createNodePlusSqlite()
+  const sourceRepository = new PlusSqliteRepository({
+    sqlite: sourceSqlite,
+    databaseName: `sync-source-${crypto.randomUUID()}`,
+    databasePath: '_doc/sync-source.db'
+  })
+  const targetRepository = new PlusSqliteRepository({
+    sqlite: targetSqlite,
+    databaseName: `sync-target-${crypto.randomUUID()}`,
+    databasePath: '_doc/sync-target.db'
+  })
+  await sourceRepository.init()
+  await targetRepository.init()
+
+  const avatar = {
+    id: 'avatar-1', characterId: 'character-1', type: 'icon', dataUrl: 'data:image/png;base64,AA==',
+    createdAt: '2027-01-15T08:00:00.000Z', updatedAt: '2027-01-15T08:00:00.000Z', deletedAt: null
+  }
+  const character = {
+    id: 'character-1', name: 'Su Mo', sourceHash: 'same-card', avatarAssetId: avatar.id,
+    assetIds: [avatar.id], worldBookIds: [], updatedAt: '2027-01-15T08:00:00.000Z', deletedAt: null
+  }
+  const conversation = {
+    id: 'conversation-1', title: character.name, characterId: character.id,
+    characterNameSnapshot: character.name, characterAvatarAssetId: avatar.id,
+    updatedAt: '2027-01-15T08:00:00.000Z', lastMessageAt: '2027-01-15T08:00:00.000Z', deletedAt: null
+  }
+  await sourceRepository.importRecords({
+    conversations: [conversation],
+    characters: [character],
+    characterAssets: [avatar]
+  })
+
+  const vault = { encryptString: async value => value, decryptString: async value => value }
+  const sourceEngine = createEngine(
+    new CloudSyncRepositoryAdapter({ repository: sourceRepository, vault }),
+    api,
+    new MemoryStateStore(),
+    'sqlite-source'
+  )
+  const targetEngine = createEngine(
+    new CloudSyncRepositoryAdapter({ repository: targetRepository, vault }),
+    api,
+    new MemoryStateStore(),
+    'sqlite-target'
+  )
+
+  await sourceEngine.sync({ accountId: 'sqlite-account', deviceId: 'source-device', syncPassword: 'sync password' })
+  await targetEngine.sync({ accountId: 'sqlite-account', deviceId: 'target-device', syncPassword: 'sync password' })
+
+  const restoredConversation = await targetRepository.getConversation(conversation.id)
+  const restoredCharacter = await targetRepository.getCharacter(restoredConversation.characterId)
+  const restoredAvatar = await targetRepository.getCharacterAsset(restoredConversation.characterAvatarAssetId)
+  assert.equal(restoredCharacter.id, character.id)
+  assert.equal(restoredCharacter.avatarAssetId, restoredAvatar.id)
+  assert.equal(restoredAvatar.characterId, restoredCharacter.id)
+  assert.equal(restoredAvatar.dataUrl, avatar.dataUrl)
+
+  await sourceRepository.close()
+  await targetRepository.close()
+  sourceSqlite.closeAll()
+  targetSqlite.closeAll()
 })
 
 test('retries the identical encrypted mutation after a lost push response', async () => {

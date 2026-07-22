@@ -49,6 +49,23 @@ test('registers, stores the session, and builds versioned API URLs', async () =>
   assert.equal(tokenStore.current(), session)
 })
 
+test('uses canonical HTTPS for a legacy server without changing its stored account scope', async () => {
+  const legacyBaseUrl = 'http://118.145.98.165:8018'
+  const tokenStore = createTokenStore()
+  const transport = createTransport(async () => ({
+    status: 200,
+    headers: {},
+    text: JSON.stringify({ user: { id: 1 }, access_token: 'access', refresh_token: 'refresh' })
+  }))
+  const client = new CloudApiClient({ baseUrl: legacyBaseUrl, transport, tokenStore })
+
+  const session = await client.login({ email: 'user@example.com', password: 'long password' })
+
+  assert.equal(client.baseUrl, legacyBaseUrl)
+  assert.equal(transport.calls[0].url, 'https://www.surtr.cn:8018/api/v1/auth/login')
+  assert.equal(session.cloud_base_url, legacyBaseUrl)
+})
+
 test('uploads and downloads backups with bearer authorization', async () => {
   const tokenStore = createTokenStore(createSession({ access_token: 'access', refresh_token: 'refresh' }))
   const transport = createTransport(async options => ({
@@ -160,6 +177,23 @@ test('rejects malformed or foreign JSON export links before requesting them', as
   await assert.rejects(client.downloadJsonExport('https://other.example.com/api/v1/json-exports/' + 'a'.repeat(43)), /当前云端服务器/)
   await assert.rejects(client.downloadJsonExport('https://cloud.example.com/api/v1/json-exports/short'), /链接无效/)
   assert.equal(transport.calls.length, 0)
+})
+
+test('accepts legacy EchoWeave JSON links and downloads them over canonical HTTPS', async () => {
+  const token = 'c'.repeat(43)
+  const backup = { formatVersion: 3, providers: [], conversations: [], messages: [], attachments: [], settings: {} }
+  const tokenStore = createTokenStore()
+  const transport = createTransport(async () => ({
+    status: 200,
+    headers: {},
+    text: JSON.stringify(backup)
+  }))
+  const client = new CloudApiClient({ baseUrl: 'https://www.surtr.cn:8018', transport, tokenStore })
+
+  const downloaded = await client.downloadJsonExport(`http://118.145.98.165:8018/api/v1/json-exports/${token}`)
+
+  assert.deepEqual(downloaded, backup)
+  assert.equal(transport.calls[0].url, `https://www.surtr.cn:8018/api/v1/json-exports/${token}`)
 })
 
 test('maps oversized JSON exports separately from encrypted account backups', async () => {

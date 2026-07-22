@@ -19,7 +19,7 @@ test('backup dialog exposes local and cloud save plus file and link import', asy
 test('cloud JSON transfer uses the configured login server and shared validated import path', async () => {
   const source = await readFile(pageUrl, 'utf8')
 
-  assert.match(source, /const DEFAULT_CLOUD_BASE_URL = 'http:\/\/118\.145\.98\.165:8018'/)
+  assert.match(source, /import \{ DEFAULT_CLOUD_BASE_URL, normalizeCloudBaseUrl, resolveCloudRequestBaseUrl \}/)
   assert.match(source, /cloud\.apiClient\.uploadJsonExport\(data\)/)
   assert.match(source, /cloud\.apiClient\.downloadJsonExport\(downloadUrl\)/)
   assert.match(source, /applyImportedBackup\(payload\)/)

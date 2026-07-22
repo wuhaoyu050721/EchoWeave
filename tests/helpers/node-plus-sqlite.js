@@ -1,6 +1,9 @@
 import { DatabaseSync } from 'node:sqlite'
 
-export function createNodePlusSqlite({ persistOnClose = false } = {}) {
+export function createNodePlusSqlite({
+  persistOnClose = false,
+  maxCursorCellCharacters = Number.POSITIVE_INFINITY
+} = {}) {
   const databases = new Map()
   const openDatabases = new Set()
   const getDatabase = (name) => {
@@ -42,7 +45,17 @@ export function createNodePlusSqlite({ persistOnClose = false } = {}) {
       }, success, fail)
     },
     selectSql({ name, sql, success, fail }) {
-      run(() => getDatabase(name).prepare(sql).all(), success, fail)
+      run(() => {
+        const rows = getDatabase(name).prepare(sql).all()
+        for (const row of rows) {
+          for (const value of Object.values(row)) {
+            if (typeof value === 'string' && value.length > maxCursorCellCharacters) {
+              throw new Error('android.database.sqlite.SQLiteBlobTooBigException: Row too big to fit into CursorWindow')
+            }
+          }
+        }
+        return rows
+      }, success, fail)
     },
     closeAll() {
       for (const database of databases.values()) database.close()

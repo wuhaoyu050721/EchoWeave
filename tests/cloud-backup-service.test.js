@@ -1,7 +1,20 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { PlusSqliteRepository } from '../src/platform/app/plus-sqlite-repository.js'
 import { CloudBackupService } from '../src/services/cloud-backup-service.js'
 import { CloudTokenStore } from '../src/services/cloud-token-store.js'
+import { createNodePlusSqlite } from './helpers/node-plus-sqlite.js'
+
+async function createSqliteRepository(prefix) {
+  const sqlite = createNodePlusSqlite()
+  const repository = new PlusSqliteRepository({
+    sqlite,
+    databaseName: `${prefix}-${crypto.randomUUID()}`,
+    databasePath: `_doc/${prefix}.db`
+  })
+  await repository.init()
+  return { repository, sqlite }
+}
 
 test('stores cloud sessions only as device-vault ciphertext', async () => {
   let stored = null
@@ -85,6 +98,72 @@ test('production backup path includes secrets only inside the outer envelope and
   assert.equal(uploadedEnvelope.wrapped.providers[0].apiKey, 'sk-secret')
   assert.deepEqual(imported.providers[0].encryptedApiKey, { encrypted: 'new:sk-secret' })
   assert.equal(imported.attachments.length, 1)
+})
+
+test('restores character conversation and avatar links into a fresh SQLite device repository', async () => {
+  const source = await createSqliteRepository('cloud-backup-source')
+  const target = await createSqliteRepository('cloud-backup-target')
+  const avatar = {
+    id: 'avatar-source', characterId: 'character-source', type: 'icon',
+    dataUrl: 'data:image/png;base64,AA==', createdAt: '2026-07-22T01:00:00.000Z', deletedAt: null
+  }
+  const character = {
+    id: 'character-source', name: 'Su Mo', sourceHash: 'same-card', avatarAssetId: avatar.id,
+    assetIds: [avatar.id], worldBookIds: [], updatedAt: '2026-07-22T01:00:00.000Z', deletedAt: null
+  }
+  const conversation = {
+    id: 'conversation-source', title: character.name, characterId: character.id,
+    characterNameSnapshot: character.name, characterAvatarAssetId: avatar.id,
+    providerProfileId: 'provider-source', providerNameSnapshot: 'DeepSeek', modelName: 'deepseek-v4-pro',
+    lastMessageAt: '2026-07-22T01:00:00.000Z', updatedAt: '2026-07-22T01:00:00.000Z', deletedAt: null
+  }
+  await source.repository.importRecords({
+    providers: [{ id: 'provider-source', name: 'DeepSeek', updatedAt: '2026-07-22T01:00:00.000Z', deletedAt: null }],
+    conversations: [conversation],
+    messages: [{
+      id: 'message-source', conversationId: conversation.id, sequence: 1, role: 'assistant', content: 'Hello',
+      attachmentIds: [], createdAt: '2026-07-22T01:00:00.000Z', updatedAt: '2026-07-22T01:00:00.000Z', deletedAt: null
+    }],
+    characters: [character],
+    characterAssets: [avatar]
+  })
+
+  let envelope = null
+  const apiClient = {
+    uploadBackup: async input => { envelope = structuredClone(input.envelope); return { version: 1 } },
+    downloadBackup: async () => structuredClone(envelope)
+  }
+  const vault = { encryptString: async value => value, decryptString: async value => value }
+  const sourceService = new CloudBackupService({
+    repository: source.repository, vault, apiClient,
+    encrypt: async payload => structuredClone(payload),
+    decrypt: async payload => structuredClone(payload)
+  })
+  const targetService = new CloudBackupService({
+    repository: target.repository, vault, apiClient,
+    encrypt: async payload => structuredClone(payload),
+    decrypt: async payload => structuredClone(payload)
+  })
+
+  await sourceService.upload({ deviceId: 'source-device', syncPassword: 'sync password' })
+  const result = await targetService.restore({ syncPassword: 'sync password' })
+  const restoredConversation = (await target.repository.listConversations())[0]
+  const restoredCharacter = await target.repository.getCharacter(restoredConversation.characterId)
+  const restoredAvatar = await target.repository.getCharacterAsset(restoredConversation.characterAvatarAssetId)
+
+  assert.deepEqual(result, {
+    providers: 1, conversations: 1, messages: 1, attachments: 0,
+    characters: 1, worldBooks: 0, characterAssets: 1
+  })
+  assert.equal(restoredCharacter.name, 'Su Mo')
+  assert.equal(restoredCharacter.avatarAssetId, restoredAvatar.id)
+  assert.equal(restoredAvatar.characterId, restoredCharacter.id)
+  assert.equal(restoredAvatar.dataUrl, avatar.dataUrl)
+
+  await source.repository.close()
+  await target.repository.close()
+  source.sqlite.closeAll()
+  target.sqlite.closeAll()
 })
 
 test('rejects an encrypted envelope above the server limit before uploading', async () => {

@@ -164,6 +164,12 @@ export function openSettingsDetails(state) {
   state.settingsView = 'details'
 }
 
+export function openConversationSettings(state) {
+  state.activeTab = 'settings'
+  state.screen = 'settings'
+  state.settingsView = 'conversation'
+}
+
 export function openNsfwSettings(state) {
   state.activeTab = 'settings'
   state.screen = 'settings'

@@ -1,3 +1,5 @@
+import { normalizeCloudBaseUrl, resolveCloudRequestBaseUrl } from '../core/cloud-base-url.js'
+
 function parseResponse(response) {
   if (!response?.text) return null
   try {
@@ -19,13 +21,6 @@ function normalizeJsonExportBackup(backup) {
   }
   if (Array.isArray(backup.attachments)) return { formatVersion: 2, ...backup }
   return { formatVersion: 1, ...backup }
-}
-
-function normalizeCloudBaseUrl(value) {
-  const normalized = String(value ?? '').trim().replace(/\/+$/, '')
-  const match = normalized.match(/^(https?):\/\/([^/]+)(.*)$/i)
-  if (!match) return normalized
-  return `${match[1].toLowerCase()}://${match[2].toLowerCase()}${match[3]}`
 }
 
 const tokenStoreMutationQueues = new WeakMap()
@@ -84,8 +79,9 @@ export class CloudApiClient {
     if (!tokenStore?.load || !tokenStore?.save || !tokenStore?.clear) {
       throw new Error('CloudApiClient 需要 tokenStore')
     }
-    this.baseUrl = String(baseUrl ?? '').trim().replace(/\/+$/, '')
+    this.baseUrl = normalizeCloudBaseUrl(baseUrl)
     if (!/^https?:\/\//i.test(this.baseUrl)) throw new Error('云端服务地址无效')
+    this.requestBaseUrl = resolveCloudRequestBaseUrl(this.baseUrl)
     this.transport = transport
     this.tokenStore = tokenStore
     this.boundAccountScope = ''
@@ -248,7 +244,7 @@ export class CloudApiClient {
 
     try {
       const response = await this.transport.request({
-        url: `${this.baseUrl}${path}`,
+        url: `${this.requestBaseUrl}${path}`,
         method,
         headers,
         body: body === undefined ? undefined : JSON.stringify(body)
@@ -301,9 +297,13 @@ export class CloudApiClient {
 
   #jsonExportPath(downloadUrl) {
     const value = String(downloadUrl ?? '').trim()
-    const prefix = `${this.baseUrl}/api/v1/json-exports/`
-    if (!value.startsWith(prefix)) throw new Error('请输入当前云端服务器生成的 JSON 链接')
-    const token = value.slice(prefix.length)
+    const marker = '/api/v1/json-exports/'
+    const markerIndex = value.indexOf(marker)
+    const linkBaseUrl = markerIndex > 0 ? value.slice(0, markerIndex) : ''
+    if (resolveCloudRequestBaseUrl(linkBaseUrl) !== this.requestBaseUrl) {
+      throw new Error('请输入当前云端服务器生成的 JSON 链接')
+    }
+    const token = value.slice(markerIndex + marker.length)
     if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new Error('云端 JSON 链接无效')
     return `/api/v1/json-exports/${token}`
   }

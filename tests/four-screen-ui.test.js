@@ -33,3 +33,14 @@ test('provider editor exposes automatic presets and App-compatible custom avatar
   assert.match(source, /ref="providerAvatarInput"[^>]*accept="image\/\*"/)
   assert.match(source, /handleProviderAvatarSelection/)
 })
+
+test('saved provider API keys stay masked until the user explicitly reveals them', async () => {
+  const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+
+  assert.match(source, /SAVED_API_KEY_MASK = '••••••••••••'/)
+  assert.match(source, /:type="showApiKey \? 'text' : 'password'"/)
+  assert.match(source, /:placeholder="providerApiKeyPlaceholder"/)
+  assert.match(source, /@click\.stop="toggleProviderApiKeyVisibility"/)
+  assert.match(source, /getApiKeyForEditing\(providerId\)/)
+  assert.match(source, /apiKey: this\.providerApiKeyDirty \|\| !this\.providerForm\.hasApiKey/)
+})

@@ -51,7 +51,7 @@ test('织语 logo and every Android density icon have the declared PNG dimension
   }
 })
 
-test('织语 Android splash images are wired with the HBuilderX density dimensions', async () => {
+test('织语 Android splash images use nine-patch assets at the HBuilderX density dimensions', async () => {
   const manifest = await readFile(new URL('../manifest.json', import.meta.url), 'utf8')
   assert.match(manifest, /"waiting"\s*:\s*false/)
   assert.match(manifest, /"androidStyle"\s*:\s*"default"/)
@@ -62,7 +62,7 @@ test('织语 Android splash images are wired with the HBuilderX density dimensio
     xxhdpi: [1080, 1882]
   }
   for (const [density, [width, height]] of Object.entries(splashImages)) {
-    const relativePath = `unpackage/res/splash/android/echo-weave-${density}-${width}x${height}.png`
+    const relativePath = `unpackage/res/splash/android/echo-weave-${density}-${width}x${height}.9.png`
     assert.match(manifest, new RegExp(`"${density}"\\s*:\\s*"${relativePath.replaceAll('/', '\\/')}"`))
     const splash = await readFile(new URL(`../${relativePath}`, import.meta.url))
     assert.deepEqual(pngDimensions(splash), { width, height })

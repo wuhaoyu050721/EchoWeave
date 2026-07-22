@@ -28,13 +28,14 @@ test('chat content scrolls behind the floating toolbar and fades out at the top 
   assert.match(source, /mask-image:\s*linear-gradient\(to bottom,\s*transparent 0,[^;]+#000 70px,\s*#000 100%\)/s)
 })
 
-test('Android diagnostics follows the blue two-column reference and preserves every action', async () => {
+test('Android diagnostics follows the themed two-column layout and preserves every action', async () => {
   const [source, previewSource] = await Promise.all([
     readFile(new URL('../pages/android-diagnostics/index.vue', import.meta.url), 'utf8'),
     readFile(new URL('../preview/main.js', import.meta.url), 'utf8')
   ])
 
-  assert.match(source, /\.diagnostic-header\s*\{[^}]*background:\s*#1f6fcb[^}]*color:\s*#fff/s)
+	assert.match(source, /--accent:\s*#d43bc2/)
+	assert.match(source, /\.diagnostic-header\s*\{[^}]*background:\s*#fff[^}]*color:\s*var\(--text\)/s)
   assert.match(source, /\.summary-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s)
   for (const contract of ['header-menu', 'resetDiagnostic', 'showApiKey', '开始诊断', '停止诊断', '清空日志', '导出日志']) {
     assert.match(source, new RegExp(contract))
@@ -58,7 +59,7 @@ test('scroll padding is rendered as scrollable tail content instead of a fixed A
     assert.match(mainSource, new RegExp(`class="${tail}"`))
   }
 
-  assert.match(diagnosticsSource, /\.diagnostic-scroll\s*\{[^}]*padding:\s*18px 10px 0/s)
+	assert.match(diagnosticsSource, /\.diagnostic-scroll\s*\{[^}]*padding:\s*14px 0 0/s)
 	assert.match(diagnosticsSource, /class="diagnostic-scroll-tail"/)
 })
 

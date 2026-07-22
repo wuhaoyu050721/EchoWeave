@@ -25,7 +25,6 @@ test('Android hardware back is wired to layered in-app navigation', () => {
     'emojiMenuOpen',
     'homeMenuOpen',
     'searchOpen',
-    'systemPromptOpen',
     'settingsSearchOpen'
   ]) {
     assert.match(handler, new RegExp(`this\\.${transientState}`))

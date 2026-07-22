@@ -4,6 +4,14 @@ import {
   assertWorkspaceId
 } from '../../workspace/workspace-id.js'
 
+const PAYLOAD_CHUNK_CHARACTERS = 256 * 1024
+const PAYLOAD_CHUNK_MARKER = '__echo_weave_chunked_payload_v1__'
+const LARGE_PAYLOAD_TABLES = Object.freeze([
+  { table: 'characters', keyColumn: 'id' },
+  { table: 'world_books', keyColumn: 'id' },
+  { table: 'character_assets', keyColumn: 'id' }
+])
+
 const MIGRATIONS = [
   {
     version: 1,
@@ -86,6 +94,19 @@ const MIGRATIONS = [
       )`,
       'CREATE INDEX IF NOT EXISTS idx_character_assets_character ON character_assets (character_id)'
     ]
+  },
+  {
+    version: 4,
+    statements: [
+      `CREATE TABLE IF NOT EXISTS payload_chunks (
+        entity_table TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        chunk_index INTEGER NOT NULL,
+        payload_chunk TEXT NOT NULL,
+        PRIMARY KEY (entity_table, entity_id, chunk_index)
+      )`,
+      'CREATE INDEX IF NOT EXISTS idx_payload_chunks_entity ON payload_chunks (entity_table, entity_id, chunk_index)'
+    ]
   }
 ]
 
@@ -123,16 +144,55 @@ function attachmentSql(attachment) {
   return `INSERT OR REPLACE INTO attachments (id, conversation_id, message_id, created_at, payload) VALUES (${sqlText(attachment.id)}, ${sqlText(attachment.conversationId)}, ${sqlText(attachment.messageId)}, ${sqlText(attachment.createdAt)}, ${sqlText(encodePayload(attachment))})`
 }
 
-function characterSql(character) {
-  return `INSERT OR REPLACE INTO characters (id, source_hash, updated_at, deleted_at, payload) VALUES (${sqlText(character.id)}, ${sqlText(character.sourceHash)}, ${sqlText(character.updatedAt)}, ${sqlText(character.deletedAt)}, ${sqlText(encodePayload(character))})`
+function characterSql(character, payload = encodePayload(character)) {
+  return `INSERT OR REPLACE INTO characters (id, source_hash, updated_at, deleted_at, payload) VALUES (${sqlText(character.id)}, ${sqlText(character.sourceHash)}, ${sqlText(character.updatedAt)}, ${sqlText(character.deletedAt)}, ${sqlText(payload)})`
 }
 
-function worldBookSql(worldBook) {
-  return `INSERT OR REPLACE INTO world_books (id, character_id, scope, updated_at, deleted_at, payload) VALUES (${sqlText(worldBook.id)}, ${sqlText(worldBook.characterId)}, ${sqlText(worldBook.scope)}, ${sqlText(worldBook.updatedAt)}, ${sqlText(worldBook.deletedAt)}, ${sqlText(encodePayload(worldBook))})`
+function worldBookSql(worldBook, payload = encodePayload(worldBook)) {
+  return `INSERT OR REPLACE INTO world_books (id, character_id, scope, updated_at, deleted_at, payload) VALUES (${sqlText(worldBook.id)}, ${sqlText(worldBook.characterId)}, ${sqlText(worldBook.scope)}, ${sqlText(worldBook.updatedAt)}, ${sqlText(worldBook.deletedAt)}, ${sqlText(payload)})`
 }
 
-function characterAssetSql(asset) {
-  return `INSERT OR REPLACE INTO character_assets (id, character_id, created_at, payload) VALUES (${sqlText(asset.id)}, ${sqlText(asset.characterId)}, ${sqlText(asset.createdAt)}, ${sqlText(encodePayload(asset))})`
+function characterAssetSql(asset, payload = encodePayload(asset)) {
+  return `INSERT OR REPLACE INTO character_assets (id, character_id, created_at, payload) VALUES (${sqlText(asset.id)}, ${sqlText(asset.characterId)}, ${sqlText(asset.createdAt)}, ${sqlText(payload)})`
+}
+
+function deletePayloadChunksSql(entityTable, entityId) {
+  return `DELETE FROM payload_chunks WHERE entity_table = ${sqlText(entityTable)} AND entity_id = ${sqlText(entityId)}`
+}
+
+function insertPayloadChunkSql(entityTable, entityId, chunkIndex, payloadChunk) {
+  return `INSERT INTO payload_chunks (entity_table, entity_id, chunk_index, payload_chunk) VALUES (${sqlText(entityTable)}, ${sqlText(entityId)}, ${chunkIndex}, ${sqlText(payloadChunk)})`
+}
+
+function chunkedPayloadStatements(entityTable, entityId, value, recordSql) {
+  const payload = encodePayload(value)
+  const statements = [deletePayloadChunksSql(entityTable, entityId)]
+  if (payload.length <= PAYLOAD_CHUNK_CHARACTERS) {
+    statements.push(recordSql(payload))
+    return statements
+  }
+  statements.push(recordSql(PAYLOAD_CHUNK_MARKER))
+  for (let offset = 0, chunkIndex = 0; offset < payload.length; offset += PAYLOAD_CHUNK_CHARACTERS, chunkIndex += 1) {
+    statements.push(insertPayloadChunkSql(
+      entityTable,
+      entityId,
+      chunkIndex,
+      payload.slice(offset, offset + PAYLOAD_CHUNK_CHARACTERS)
+    ))
+  }
+  return statements
+}
+
+function characterStatements(character) {
+  return chunkedPayloadStatements('characters', character.id, character, payload => characterSql(character, payload))
+}
+
+function worldBookStatements(worldBook) {
+  return chunkedPayloadStatements('world_books', worldBook.id, worldBook, payload => worldBookSql(worldBook, payload))
+}
+
+function characterAssetStatements(asset) {
+  return chunkedPayloadStatements('character_assets', asset.id, asset, payload => characterAssetSql(asset, payload))
 }
 
 function keyValueSql(table, key, value) {
@@ -159,16 +219,14 @@ function importStatements({
     ...conversations.map(conversationSql),
     ...messages.map(messageSql),
     ...attachments.map(attachmentSql),
-    ...characters.map(characterSql),
-    ...worldBooks.map(worldBookSql),
-    ...characterAssets.map(characterAssetSql),
+    ...characters.flatMap(characterStatements),
+    ...worldBooks.flatMap(worldBookStatements),
+    ...characterAssets.flatMap(characterAssetStatements),
     ...Object.entries(settings).map(([key, value]) => keyValueSql('settings', key, value))
   ]
 }
 
-function matchesSyncSnapshot(row, expectedSnapshot) {
-  const exists = Boolean(row)
-  const value = exists ? decodePayload(row.payload) : null
+function matchesSyncSnapshot(exists, value, expectedSnapshot) {
   return exists === Boolean(expectedSnapshot?.exists) &&
     JSON.stringify(value) === JSON.stringify(expectedSnapshot?.value ?? null)
 }
@@ -225,6 +283,7 @@ export class PlusSqliteRepository {
           `INSERT INTO schema_migrations (version, applied_at) VALUES (${migration.version}, ${sqlText(this.now())})`
         ])
       }
+      await this.#migrateLegacyLargePayloads()
       this.initialized = true
       return this
     })()
@@ -324,9 +383,77 @@ export class PlusSqliteRepository {
     return result
   }
 
+  async #migrateLegacyLargePayloads() {
+    for (const { table, keyColumn } of LARGE_PAYLOAD_TABLES) {
+      const rows = await this.#select(
+        `SELECT ${keyColumn} AS entity_id, length(payload) AS payload_length FROM ${table} ` +
+        `WHERE payload <> ${sqlText(PAYLOAD_CHUNK_MARKER)} AND length(payload) > ${PAYLOAD_CHUNK_CHARACTERS}`
+      )
+      for (const row of rows) {
+        await this.#migrateLegacyLargePayload({
+          table,
+          keyColumn,
+          entityId: String(row.entity_id),
+          payloadLength: Number(row.payload_length)
+        })
+      }
+    }
+  }
+
+  async #migrateLegacyLargePayload({ table, keyColumn, entityId, payloadLength }) {
+    if (!Number.isSafeInteger(payloadLength) || payloadLength <= PAYLOAD_CHUNK_CHARACTERS) return
+    await this.#transaction('begin')
+    try {
+      await this.#execute(deletePayloadChunksSql(table, entityId))
+      for (let offset = 0, chunkIndex = 0; offset < payloadLength; offset += PAYLOAD_CHUNK_CHARACTERS, chunkIndex += 1) {
+        const rows = await this.#select(
+          `SELECT substr(payload, ${offset + 1}, ${PAYLOAD_CHUNK_CHARACTERS}) AS payload_chunk ` +
+          `FROM ${table} WHERE ${keyColumn} = ${sqlText(entityId)} LIMIT 1`
+        )
+        const payloadChunk = rows[0]?.payload_chunk
+        if (typeof payloadChunk !== 'string' || !payloadChunk.length) {
+          throw new Error(`SQLite 大字段迁移失败: ${table}/${entityId} 分块缺失`)
+        }
+        await this.#execute(insertPayloadChunkSql(table, entityId, chunkIndex, payloadChunk))
+      }
+      await this.#execute(
+        `UPDATE ${table} SET payload = ${sqlText(PAYLOAD_CHUNK_MARKER)} WHERE ${keyColumn} = ${sqlText(entityId)}`
+      )
+      await this.#transaction('commit')
+    } catch (error) {
+      try { await this.#transaction('rollback') } catch {}
+      throw error
+    }
+  }
+
+  async #decodeStoredPayload(table, entityId, payload) {
+    if (payload !== PAYLOAD_CHUNK_MARKER) return decodePayload(payload)
+    const rows = await this.#select(
+      `SELECT chunk_index, payload_chunk FROM payload_chunks WHERE entity_table = ${sqlText(table)} ` +
+      `AND entity_id = ${sqlText(entityId)} ORDER BY chunk_index ASC`
+    )
+    if (!rows.length) throw new Error(`SQLite 大字段分块缺失: ${table}/${entityId}`)
+    const chunks = []
+    for (let index = 0; index < rows.length; index += 1) {
+      if (Number(rows[index].chunk_index) !== index || typeof rows[index].payload_chunk !== 'string') {
+        throw new Error(`SQLite 大字段分块损坏: ${table}/${entityId}`)
+      }
+      chunks.push(rows[index].payload_chunk)
+    }
+    return decodePayload(chunks.join(''))
+  }
+
+  async #decodePayloadRows(table, rows, keyColumn = 'id') {
+    const values = []
+    for (const row of rows) {
+      values.push(await this.#decodeStoredPayload(table, row[keyColumn], row.payload))
+    }
+    return values
+  }
+
   async #get(table, keyColumn, key) {
     const rows = await this.#select(`SELECT payload FROM ${table} WHERE ${keyColumn} = ${sqlText(key)} LIMIT 1`)
-    return rows[0] ? decodePayload(rows[0].payload) : undefined
+    return rows[0] ? this.#decodeStoredPayload(table, key, rows[0].payload) : undefined
   }
 
   async getAppliedMigrations() {
@@ -428,23 +555,23 @@ export class PlusSqliteRepository {
   async getSecret(key) { return (await this.#get('secrets', 'key', key)) ?? null }
 
   async listCharacters() {
-    const rows = await this.#select("SELECT payload FROM characters WHERE deleted_at IS NULL ORDER BY payload ASC")
-    return rows.map(row => decodePayload(row.payload)).sort((left, right) => String(left.name ?? '').localeCompare(String(right.name ?? '')))
+    const rows = await this.#select("SELECT id, payload FROM characters WHERE deleted_at IS NULL ORDER BY id ASC")
+    return (await this.#decodePayloadRows('characters', rows))
+      .sort((left, right) => String(left.name ?? '').localeCompare(String(right.name ?? '')))
   }
 
   getCharacter(id) { return this.#get('characters', 'id', id) }
-  async saveCharacter(character) { await this.#enqueueWrite(() => this.#execute(characterSql(character))); return character }
+  async saveCharacter(character) { await this.#enqueueWrite(() => this.#transactional(characterStatements(character))); return character }
 
   async findCharactersBySourceHash(sourceHash) {
-    const rows = await this.#select(`SELECT payload FROM characters WHERE source_hash = ${sqlText(sourceHash)} AND deleted_at IS NULL`)
-    return rows.map(row => decodePayload(row.payload))
+    const rows = await this.#select(`SELECT id, payload FROM characters WHERE source_hash = ${sqlText(sourceHash)} AND deleted_at IS NULL`)
+    return this.#decodePayloadRows('characters', rows)
   }
 
   async listWorldBooks({ characterId = null, includeGlobal = false } = {}) {
     if (!characterId && !includeGlobal) return []
-    const rows = await this.#select('SELECT payload FROM world_books WHERE deleted_at IS NULL ORDER BY payload ASC')
-    return rows
-      .map(row => decodePayload(row.payload))
+    const rows = await this.#select('SELECT id, payload FROM world_books WHERE deleted_at IS NULL ORDER BY id ASC')
+    return (await this.#decodePayloadRows('world_books', rows))
       .filter(book => {
         const characterIds = Array.isArray(book.characterIds) ? book.characterIds.map(String) : []
         const explicitlyBound = Boolean(characterId) && (book.characterId === characterId || characterIds.includes(String(characterId)))
@@ -455,30 +582,30 @@ export class PlusSqliteRepository {
   }
 
   getWorldBook(id) { return this.#get('world_books', 'id', id) }
-  async saveWorldBook(worldBook) { await this.#enqueueWrite(() => this.#execute(worldBookSql(worldBook))); return worldBook }
+  async saveWorldBook(worldBook) { await this.#enqueueWrite(() => this.#transactional(worldBookStatements(worldBook))); return worldBook }
 
   async listAllWorldBooks() {
-    const rows = await this.#select("SELECT payload FROM world_books WHERE deleted_at IS NULL ORDER BY payload ASC")
-    return rows.map(row => decodePayload(row.payload))
+    const rows = await this.#select("SELECT id, payload FROM world_books WHERE deleted_at IS NULL ORDER BY id ASC")
+    return this.#decodePayloadRows('world_books', rows)
   }
 
   getCharacterAsset(id) { return this.#get('character_assets', 'id', id) }
 
   async listCharacterAssets(characterId) {
-    const rows = await this.#select(`SELECT payload FROM character_assets WHERE character_id = ${sqlText(characterId)} ORDER BY COALESCE(created_at, '') ASC`)
-    return rows.map(row => decodePayload(row.payload)).filter(asset => !asset.deletedAt)
+    const rows = await this.#select(`SELECT id, payload FROM character_assets WHERE character_id = ${sqlText(characterId)} ORDER BY COALESCE(created_at, '') ASC`)
+    return (await this.#decodePayloadRows('character_assets', rows)).filter(asset => !asset.deletedAt)
   }
 
   async listAllCharacterAssets() {
-    const rows = await this.#select("SELECT payload FROM character_assets ORDER BY COALESCE(created_at, '') ASC")
-    return rows.map(row => decodePayload(row.payload)).filter(asset => !asset.deletedAt)
+    const rows = await this.#select("SELECT id, payload FROM character_assets ORDER BY COALESCE(created_at, '') ASC")
+    return (await this.#decodePayloadRows('character_assets', rows)).filter(asset => !asset.deletedAt)
   }
 
   async importCharacterBundle({ character, worldBooks = [], characterAssets = [], conversations = [] }) {
     await this.#enqueueWrite(() => this.#transactional([
-      characterSql(character),
-      ...worldBooks.map(worldBookSql),
-      ...characterAssets.map(characterAssetSql),
+      ...characterStatements(character),
+      ...worldBooks.flatMap(worldBookStatements),
+      ...characterAssets.flatMap(characterAssetStatements),
       ...conversations.map(conversationSql)
     ]))
     return character
@@ -486,8 +613,8 @@ export class PlusSqliteRepository {
 
   async saveWorldBookBundle({ worldBook, characters = [] }) {
     await this.#enqueueWrite(() => this.#transactional([
-      worldBookSql(worldBook),
-      ...characters.map(characterSql)
+      ...worldBookStatements(worldBook),
+      ...characters.flatMap(characterStatements)
     ]))
     return worldBook
   }
@@ -525,7 +652,11 @@ export class PlusSqliteRepository {
         const rows = await this.#select(
           `SELECT payload FROM ${table} WHERE ${keyColumn} = ${sqlText(entityId)} LIMIT 1`
         )
-        if (!matchesSyncSnapshot(rows[0], expectedSnapshot)) {
+        const exists = Boolean(rows[0])
+        const value = exists
+          ? await this.#decodeStoredPayload(table, entityId, rows[0].payload)
+          : null
+        if (!matchesSyncSnapshot(exists, value, expectedSnapshot)) {
           await this.#transaction('commit')
           return false
         }

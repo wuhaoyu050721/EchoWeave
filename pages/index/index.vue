@@ -49,6 +49,7 @@
 		<template v-else-if="ui.screen === 'character-detail'">
 			<CharacterDetail
 				:character="selectedCharacter"
+				:world-books="selectedCharacterWorldBooks"
 				:creating="Boolean(customCharacterDraft)"
 				:editing="characterDetailEditing"
 				:saving="characterSaveBusy"
@@ -195,7 +196,7 @@
 							<label class="form-row"><text>名称</text><input v-model="providerForm.name" placeholder="接口名称" /></label>
 							<view class="form-row"><text>接口格式</text><view class="provider-protocol-control" role="group" aria-label="接口格式"><button v-for="protocol in providerProtocols" :key="protocol.id" class="provider-protocol-option" :class="{ active: providerForm.protocolType === protocol.id }" :disabled="providerBusy" :aria-pressed="providerForm.protocolType === protocol.id" @click="selectProviderProtocol(protocol.id)">{{ protocol.label }}</button></view></view>
 							<label class="form-row"><text>基础地址</text><input v-model="providerForm.baseUrl" :placeholder="activeProviderProtocol.defaultBaseUrl" /></label>
-							<label class="form-row"><text>API 密钥</text><view class="password-field"><input v-model="providerForm.apiKey" :type="showApiKey ? 'text' : 'password'" :placeholder="providerForm.hasApiKey ? '已安全保存，留空不修改' : '接口要求时填写并保存'" /><button aria-label="显示或隐藏密钥" @click="showApiKey = !showApiKey"><EyeOff :size="17" /></button></view></label>
+							<view class="form-row"><text>API 密钥</text><view class="password-field" :class="{ 'is-saved': providerForm.hasApiKey && !providerApiKeyDirty }"><input v-model="providerForm.apiKey" :disabled="providerBusy" :type="showApiKey ? 'text' : 'password'" :placeholder="providerApiKeyPlaceholder" autocomplete="off" @input="handleProviderApiKeyInput" /><button :disabled="providerBusy" :aria-label="providerApiKeyToggleLabel" :title="providerApiKeyToggleLabel" @click.stop="toggleProviderApiKeyVisibility"><RefreshCw v-if="providerApiKeyBusy" class="spinning" :size="16" /><EyeOff v-else :size="17" /></button></view></view>
 							<label class="form-row"><text>默认模型</text><view class="select-field-wrap"><picker class="select-field-picker" mode="selector" :range="providerModelOptions" :value="providerModelIndex" :disabled="providerBusy || !providerModelOptions.length" @change="selectProviderModel"><view class="select-field"><text>{{ providerForm.defaultModel || '获取模型后选择' }}</text></view></picker><ChevronDown class="select-chevron" :size="17" /></view></label>
 							<label class="form-row"><text>手动模型</text><input v-model="providerForm.defaultModel" :placeholder="activeProviderProtocol.modelPlaceholder" /></label>
 							<view class="provider-form-actions"><button class="provider-action-button" :disabled="providerBusy" @click="fetchProviderModels"><RefreshCw :class="{ spinning: providerLoadingModels }" :size="17" /><text>{{ providerLoadingModels ? '获取中...' : '获取模型列表' }}</text></button><button class="provider-action-button" :disabled="providerBusy" @click="testConnection"><Activity :size="17" /><text>{{ providerTesting ? '测试中...' : '测试连接' }}</text></button></view>
@@ -221,31 +222,57 @@
 					</view>
 
 					<view v-if="settingsSearchHasResults" class="settings-card settings-primary-card settings-menu-card">
-						<button v-if="matchesSettingsSearch('对话设置 系统提示词 模型行为 动画效果')" class="settings-row" @click="toggleSystemPromptPanel"><view class="settings-icon settings-icon-orange"><FileCog :size="22" /></view><view class="settings-copy"><text>对话设置</text><text>系统提示词、模型行为与动画效果</text></view></button>
+						<button v-if="matchesSettingsSearch('对话设置 系统提示词 全局提示词')" class="settings-row" data-testid="conversation-settings-entry" @click="openConversationSettings(ui)"><view class="settings-icon settings-icon-orange"><FileCog :size="22" /></view><view class="settings-copy"><text>对话设置</text><text>{{ systemPromptSettingLabel }}</text></view><ChevronRight :size="18" /></button>
 						<button v-if="matchesSettingsSearch('账号与云端 登录 自动备份 同步')" class="settings-row" @click="openCloudModal"><view class="settings-icon settings-icon-blue"><Cloud :size="22" /></view><view class="settings-copy"><text>账号与云端</text><text>{{ cloudConnected ? settingsProfileName : '本地模式，不会自动上传' }}</text></view></button>
 						<button v-if="matchesSettingsSearch('隐私与安全 API 密钥 应用锁 加密 通知 回复提醒')" class="settings-row" @click="openSettingsDetails(ui)"><view class="settings-icon settings-icon-green"><KeyRound :size="22" /></view><view class="settings-copy"><text>隐私与安全</text><text>API 密钥、应用锁与回复通知</text></view></button>
 						<button v-if="matchesSettingsSearch('NSFW 设置 成人 私密状态 状态栏')" class="settings-row" data-testid="nsfw-settings-entry" @click="openNsfwSettings(ui)"><view class="settings-icon settings-icon-red"><EyeOff :size="22" /></view><view class="settings-copy"><text>NSFW 设置</text><text>{{ nsfwSettingLabel }}</text></view><ChevronRight :size="18" /></button>
 						<button v-if="matchesSettingsSearch('数据与存储 本地数据库 SQLite IndexedDB')" class="settings-row" @click="showLocalDataInfo"><view class="settings-icon settings-icon-indigo"><Database :size="22" /></view><view class="settings-copy"><text>数据与存储</text><text>{{ storageLabel }} 本地优先存储</text></view></button>
 						<button v-if="matchesSettingsSearch('导入与导出 JSON 备份 恢复')" class="settings-row" @click="openBackupMenu"><view class="settings-icon settings-icon-cyan"><Import :size="22" /></view><view class="settings-copy"><text>导入与导出</text><text>本地文件与云端链接</text></view></button>
-						<button v-if="matchesSettingsSearch('设备与诊断 Android 流式 日志')" class="settings-row" @click="openAndroidDiagnostics"><view class="settings-icon settings-icon-teal"><Activity :size="22" /></view><view class="settings-copy"><text>设备与诊断</text><text>Android 流式连接与运行日志</text></view></button>
+						<button v-if="matchesSettingsSearch('设备与诊断 Android 流式 日志')" class="settings-row" @click="openAndroidDiagnostics"><view class="settings-icon settings-icon-teal"><Activity :size="22" /></view><view class="settings-copy"><text>设备与诊断</text><text>流式传输与运行日志</text></view><ChevronRight :size="18" /></button>
 						<button v-if="matchesSettingsSearch('关于应用 版本 信息')" class="settings-row" @click="showAboutApp"><view class="settings-icon settings-icon-red"><Info :size="22" /></view><view class="settings-copy"><text>关于应用</text><text>版本 1.0.1 · {{ aboutLabel }}</text></view></button>
 						<button v-if="matchesSettingsSearch('检查更新 最新版本')" class="settings-row" @click="showToast('当前已是最新开发版本')"><view class="settings-icon settings-icon-amber"><RefreshCw :size="22" /></view><view class="settings-copy"><text>检查更新</text><text>获取最新功能与修复</text></view></button>
 						<button v-if="matchesSettingsSearch('帮助与反馈 使用问题 问题反馈')" class="settings-row" @click="showToast('反馈功能将在服务端版本接入')"><view class="settings-icon settings-icon-purple"><CircleHelp :size="22" /></view><view class="settings-copy"><text>帮助与反馈</text><text>使用问题与问题反馈</text></view></button>
 					</view>
 					<view v-else class="settings-search-empty"><Search :size="24" /><text>未找到相关设置</text></view>
 
-					<view v-if="systemPromptOpen" class="settings-card settings-expanded-panel prompt-editor"><view class="settings-expanded-heading"><text>对话设置</text><button aria-label="关闭对话设置" @click="systemPromptOpen = false"><X :size="18" /></button></view><view class="prompt-controls"><text>启用系统提示词</text><button class="toggle" :class="{ enabled: systemPromptEnabled }" @click="systemPromptEnabled = !systemPromptEnabled"><view class="toggle-thumb" /></button></view><textarea v-model="systemPrompt" placeholder="输入系统提示词" /><button class="primary-button prompt-save" @click="saveSystemPrompt">保存</button></view>
-
 					<view class="navigation-scroll-tail" />
 				</scroll-view>
 			</view>
 
-			<view v-else-if="ui.settingsView === 'nsfw'" class="screen-view settings-details nsfw-settings-details">
-				<view class="screen-header reference-header settings-detail-header"><button class="icon-button header-back" aria-label="返回设置概览" @click="closeSettingsDetails(ui)"><ArrowLeft :size="21" /></button><text class="screen-title">NSFW 设置</text></view>
-				<scroll-view class="settings-screen reference-scroll" scroll-y>
+			<view v-else-if="ui.settingsView === 'conversation'" class="screen-view settings-details themed-settings-details conversation-settings-details" data-testid="conversation-settings-page">
+				<view class="screen-header settings-detail-header themed-settings-header"><button class="icon-button header-back" aria-label="返回设置概览" @click="closeSettingsDetails(ui)"><ArrowLeft :size="22" /></button><text class="screen-title">对话设置</text><view class="settings-detail-header-space" /></view>
+				<scroll-view class="settings-screen reference-scroll themed-settings-scroll" scroll-y>
+					<view class="settings-detail-summary conversation-settings-summary">
+						<view class="settings-detail-summary-icon"><FileCog :size="23" /></view>
+						<view class="settings-detail-summary-copy"><text>全局系统提示词</text><text>{{ systemPromptSettingLabel }}</text></view>
+						<view class="settings-detail-state" :class="{ enabled: systemPromptEnabled }"><view /><text>{{ systemPromptEnabled ? '启用' : '关闭' }}</text></view>
+					</view>
+					<text class="settings-section-label">状态</text>
+					<view class="settings-card themed-settings-card">
+						<button class="settings-row themed-settings-row" data-testid="system-prompt-toggle" role="switch" :aria-checked="systemPromptEnabled" :disabled="systemPromptSaving" @click="systemPromptEnabled = !systemPromptEnabled"><view class="settings-detail-row-icon conversation-row-icon"><FileCog :size="19" /></view><view class="settings-copy"><text>启用系统提示词</text><text>{{ systemPromptEnabled ? '新对话默认使用当前内容' : '当前内容不会注入对话' }}</text></view><view class="toggle conversation-toggle" :class="{ enabled: systemPromptEnabled }"><view class="toggle-thumb" /></view></button>
+					</view>
+					<text class="settings-section-label">内容</text>
+					<view class="system-prompt-editor" :class="{ disabled: !systemPromptEnabled }">
+						<view class="system-prompt-editor-heading"><text>系统提示词</text><text>{{ systemPrompt.length }} 字</text></view>
+						<textarea v-model="systemPrompt" :disabled="systemPromptSaving" maxlength="-1" placeholder="输入发送给模型的全局系统提示词" data-testid="system-prompt-input" />
+						<view class="system-prompt-editor-footer"><view><LockKeyhole :size="14" /><text>本地加密</text></view><button v-if="systemPrompt" :disabled="systemPromptSaving" aria-label="清空系统提示词" title="清空" @click="systemPrompt = ''"><X :size="15" /><text>清空</text></button></view>
+					</view>
+					<button class="system-prompt-save-button" :disabled="systemPromptSaving" data-testid="system-prompt-save" @click="saveSystemPrompt"><Check :size="18" /><text>{{ systemPromptSaving ? '保存中...' : '保存设置' }}</text></button>
+					<view class="navigation-scroll-tail" />
+				</scroll-view>
+			</view>
+
+			<view v-else-if="ui.settingsView === 'nsfw'" class="screen-view settings-details themed-settings-details nsfw-settings-details">
+				<view class="screen-header settings-detail-header themed-settings-header"><button class="icon-button header-back" aria-label="返回设置概览" @click="closeSettingsDetails(ui)"><ArrowLeft :size="22" /></button><text class="screen-title">NSFW 设置</text><view class="settings-detail-header-space" /></view>
+				<scroll-view class="settings-screen reference-scroll themed-settings-scroll" scroll-y>
+					<view class="settings-detail-summary nsfw-settings-summary">
+						<view class="settings-detail-summary-icon"><EyeOff :size="23" /></view>
+						<view class="settings-detail-summary-copy"><text>私密状态</text><text>{{ nsfwSettingLabel }}</text></view>
+						<view class="settings-detail-state nsfw-state" :class="{ enabled: nsfwEnabled }"><view /><text>{{ nsfwEnabled ? '显示' : '隐藏' }}</text></view>
+					</view>
 					<text class="settings-section-label">状态栏</text>
-					<view class="settings-card">
-						<button class="settings-row" data-testid="nsfw-status-toggle" role="switch" :aria-checked="nsfwEnabled" :disabled="nsfwSaving" @click="toggleNsfw"><view class="settings-icon"><EyeOff :size="19" /></view><view class="settings-copy"><text>显示私密状态</text><text>{{ nsfwSettingLabel }}</text></view><view class="toggle" :class="{ enabled: nsfwEnabled }"><view class="toggle-thumb" /></view></button>
+					<view class="settings-card themed-settings-card">
+						<button class="settings-row themed-settings-row" data-testid="nsfw-status-toggle" role="switch" :aria-checked="nsfwEnabled" :disabled="nsfwSaving" @click="toggleNsfw"><view class="settings-detail-row-icon nsfw-row-icon"><EyeOff :size="19" /></view><view class="settings-copy"><text>显示私密状态</text><text>{{ nsfwEnabled ? '状态栏同时显示私密字段' : '状态栏仅显示常规字段' }}</text></view><view class="toggle nsfw-toggle" :class="{ enabled: nsfwEnabled }"><view class="toggle-thumb" /></view></button>
 					</view>
 					<view class="navigation-scroll-tail" />
 				</scroll-view>
@@ -437,7 +464,7 @@
 					<view v-if="assistantStatusOverview.location" class="assistant-status-hero-item"><text>当前位置</text><text>{{ assistantStatusOverview.location }}</text></view>
 				</view>
 				<view v-if="assistantStatusOverview.scorePercent !== null" class="assistant-status-progress-row">
-					<progress class="assistant-status-progress" :value="assistantStatusOverview.scorePercent" :percent="assistantStatusOverview.scorePercent" max="100" :show-info="false" />
+					<progress class="assistant-status-progress" :value="assistantStatusOverview.scorePercent" :percent="assistantStatusOverview.scorePercent" max="100" :show-info="false" :active-color="assistantStatusProgressColor" :style="{ '--assistant-status-progress-color': assistantStatusProgressColor }" />
 				</view>
 				<scroll-view class="assistant-status-content" scroll-y>
 					<view v-for="section in assistantStatusSections" :key="section.id" class="assistant-status-section" :class="{ 'is-private': section.label === '私密状态' }">
@@ -450,6 +477,16 @@
 				</scroll-view>
 			</view>
 		</view>
+		<AppDialogLayer
+			:action-sheet="conversationActionSheet"
+			:dialog="appDialog"
+			:input-value="appDialogValue"
+			@cancel-action="resolveConversationAction(null)"
+			@select-action="resolveConversationAction"
+			@cancel-dialog="cancelAppDialog"
+			@confirm-dialog="confirmAppDialog"
+			@update:input-value="appDialogValue = $event"
+		/>
 		<view v-if="toastMessage" class="toast-message">{{ toastMessage }}</view>
 		<view v-if="errorMessage" class="error-banner"><AlertCircle :size="16" /><text>{{ errorMessage }}</text><button v-if="initializationError" class="error-retry-button" @click="retryInitialization"><RefreshCw :size="14" /><text>重试</text></button><button v-else aria-label="关闭错误" @click="errorMessage = ''"><X :size="15" /></button></view>
 	</view>
@@ -463,6 +500,7 @@
 		MoreVertical, Paperclip, Plus, RefreshCw, RotateCcw, Search, Send, Server, Settings,
 		Square, ThumbsDown, ThumbsUp, Trash2, Upload, X
 	} from '../../src/components/app-icons.js'
+	import AppDialogLayer from '../../src/components/app-dialog-layer.vue'
 	import AppImage from '../../src/components/app-image.js'
 	import CharacterContacts from '../../src/components/character-contacts.vue'
 	import CharacterDetail from '../../src/components/character-detail.vue'
@@ -471,7 +509,8 @@
 	import { createCloudServices } from '../../src/app/create-cloud-services.js'
 	import { saveLocalProfileName, syncProfileNameFromCloudSession } from '../../src/app/create-character-instructions.js'
 	import { createPlatformServices, createPlatformWorkspaceManager } from '../../src/app/create-platform-services.js'
-	import { assistantStatusSectionsForDisplay, createAssistantStatusOverview, extractAssistantStatus } from '../../src/core/assistant-status.js'
+	import { assistantStatusProgressColor, assistantStatusSectionsForDisplay, createAssistantStatusOverview, extractAssistantStatus } from '../../src/core/assistant-status.js'
+	import { DEFAULT_CLOUD_BASE_URL, normalizeCloudBaseUrl, resolveCloudRequestBaseUrl } from '../../src/core/cloud-base-url.js'
 	import { imageAttachmentSource } from '../../src/core/image-output.js'
 	import { PROFILE_AVATAR_SETTING_KEY, createProfileAvatar, normalizeProfileAvatar } from '../../src/core/profile-avatar.js'
 	import {
@@ -479,6 +518,7 @@
 		describeProviderAvatar, detectProviderAvatarPreset, resolveProviderAvatarSource
 	} from '../../src/core/provider-avatar.js'
 	import { PROVIDER_PROTOCOLS, getProviderProtocol } from '../../src/core/provider-protocol.js'
+	import { repairConversationCharacterLinks } from '../../src/services/conversation-character-link-service.js'
 	import { REPLY_NOTIFICATION_SETTING_KEY } from '../../src/services/reply-notification-service.js'
 	import { createImageExportFileName, createJsonExportFileName, downloadImageInBrowser, exportBytesToDownloads, exportTextToDownloads, saveImageToPhotoAlbum } from '../../src/platform/app/app-file-exporter.js'
 	import { preserveServiceIdentity } from '../../src/app/vue-service-container.js'
@@ -490,7 +530,7 @@
 	import {
 		applyFetchedModels, applyProviderModelSelection, applyProviderProtocolSelection, attachmentActions, canSendMessage, closeCharacterDetails as closeCharacterDetailsState,
 		closeSettingsDetails, createInitialUiState, createProviderForm, isUserMessageRead, navigationItems,
-		openCharacterDetails as openCharacterDetailsState, openConversation, openNsfwSettings, openSettingsDetails, selectTab, setGenerating,
+		openCharacterDetails as openCharacterDetailsState, openConversation, openConversationSettings, openNsfwSettings, openSettingsDetails, selectTab, setGenerating,
 		resolveAppBackAction, setGenerationMode, summarizeConversation, toggleAppLock
 	} from '../../src/ui-state.js'
 
@@ -498,10 +538,10 @@
 	const COMPOSER_MIN_HEIGHT = 44
 	const COMPOSER_MAX_HEIGHT = 132
 	const COMPOSER_LINE_HEIGHT = 22
-	const DEFAULT_CLOUD_BASE_URL = 'http://118.145.98.165:8018'
+	const SAVED_API_KEY_MASK = '••••••••••••'
 	const NSFW_SETTING_KEY = 'nsfwEnabled'
 	const SETTINGS_SEARCH_ITEMS = [
-		'对话设置 系统提示词 模型行为 动画效果', '账号与云端 登录 自动备份 同步', '隐私与安全 API 密钥 应用锁 加密 通知 回复提醒',
+		'对话设置 系统提示词 全局提示词', '账号与云端 登录 自动备份 同步', '隐私与安全 API 密钥 应用锁 加密 通知 回复提醒',
 		'NSFW 设置 成人 私密状态 状态栏',
 		'数据与存储 本地数据库 SQLite IndexedDB', '导入与导出 JSON 备份 恢复', '设备与诊断 Android 流式 日志',
 		'关于应用 版本 信息', '检查更新 最新版本', '帮助与反馈 使用问题 问题反馈'
@@ -513,13 +553,14 @@
 		components: {
 			Activity, AlertCircle, ArrowLeft, Camera, Check, CheckCheck, ChevronDown, ChevronRight, CircleHelp, Cloud, Copy, Database,
 			Download, EyeOff, FileCog, FileText, Image, Import, Info, KeyRound, LockKeyhole, MessageCircle, Mic,
-			MoreVertical, Paperclip, Plus, AppImage, CharacterContacts, CharacterDetail, ProviderLogo, WorldBookManager, RefreshCw, RotateCcw, Search, Send, Square,
+			MoreVertical, Paperclip, Plus, AppDialogLayer, AppImage, CharacterContacts, CharacterDetail, ProviderLogo, WorldBookManager, RefreshCw, RotateCcw, Search, Send, Square,
 			ThumbsDown, ThumbsUp, Trash2, Upload, X
 		},
 		data() {
 			return {
 				ui: createInitialUiState(), iconMap, navigationItems, attachmentActions, services: null, workspaceManager: null, ready: false, initializing: false, initializationError: '',
 				conversationItems: [], characterItems: [], worldBookItems: [], providerItems: [], messageItems: [], animatedMessageIds: [], assistantStatusOpen: false, chatScrollIntoView: '', chatScrollRevision: 0, chatScrollTimer: null, searchQuery: '', searchOpen: false, homeMenuOpen: false, draftMessage: '', composerInputHeight: COMPOSER_MIN_HEIGHT,
+				conversationActionSheet: null, conversationActionResolver: null, appDialog: null, appDialogValue: '', appDialogResolver: null,
 				contactSearchQuery: '', contactSortMode: 'name', customCharacterDraft: null, customCharacterAvatar: null, characterDetailEditing: false, characterSaveBusy: false, pendingCharacterAvatarId: '',
 				characterImportBusy: false, characterImportPreview: null, characterImportConfirmed: false,
 				worldBookManagerOpen: false, worldBookImportBusy: false, worldBookImportPreview: null, worldBookImportConfirmed: false,
@@ -530,8 +571,9 @@
 				emojiOptions: ['😀', '😂', '😊', '😍', '👍', '🙏', '🎉', '❤️'],
 				providerForm: createProviderForm(), providerSaving: false,
 				providerTesting: false, providerLoadingModels: false, connectionStatus: 'untested', showApiKey: false,
+				providerApiKeyBusy: false, providerApiKeyDirty: false, providerApiKeyLoadedValue: '', providerApiKeyRequestId: 0,
 				providerAvatarPresets: PROVIDER_AVATAR_PRESETS, providerProtocols: PROVIDER_PROTOCOLS, providerAvatarMenuOpen: false, providerAvatarBusy: false,
-				systemPromptOpen: false, systemPromptEnabled: false, systemPrompt: '', nsfwEnabled: false, nsfwSaving: false, backupMenuOpen: false, backupBusy: false,
+				systemPromptEnabled: false, systemPrompt: '', systemPromptSaving: false, nsfwEnabled: false, nsfwSaving: false, backupMenuOpen: false, backupBusy: false,
 				cloudExportUrl: '', cloudImportUrl: '',
 				settingsSearchOpen: false, settingsSearchQuery: '', profileName: '', profileAvatar: null, profileAvatarMenuOpen: false, profileAvatarBusy: false,
 				cloudOpen: false, cloudBusy: false, cloudServices: null, cloudSession: null, networkSyncHandler: null,
@@ -586,7 +628,13 @@
 				return /<\s*sumo_monitor\b/i.test(String(latestMessage.content ?? '')) ? '状态格式未识别' : '本轮未返回状态'
 			},
 			assistantStatusOverview() { return createAssistantStatusOverview(this.latestAssistantStatus) },
+			assistantStatusProgressColor() { return assistantStatusProgressColor(this.assistantStatusOverview?.scorePercent) },
 			assistantStatusSections() { return assistantStatusSectionsForDisplay(this.latestAssistantStatus, { showPrivate: this.nsfwEnabled }) },
+			systemPromptSettingLabel() {
+				if (!this.systemPromptEnabled) return '已关闭'
+				const length = String(this.systemPrompt || '').trim().length
+				return length ? `已启用 · ${length} 字` : '已启用 · 内容为空'
+			},
 			nsfwSettingLabel() { return this.nsfwEnabled ? '已开启，显示私密状态' : '已关闭，隐藏私密状态' },
 			assistantStatusUpdateLabel() {
 				if (this.assistantStatusIssue) return this.assistantStatusIssue
@@ -623,11 +671,30 @@
 				if (this.customCharacterDraft?.id === this.ui.activeCharacterId) return this.customCharacterDraft
 				return this.characterItems.find(item => item.id === this.ui.activeCharacterId) || null
 			},
+			selectedCharacterWorldBooks() {
+				const character = this.selectedCharacter
+				if (!character?.id) return []
+				const characterId = String(character.id)
+				const linkedIds = new Set((Array.isArray(character.worldBookIds) ? character.worldBookIds : []).map(String))
+				const books = this.worldBookItems.filter(book => {
+					if (!book || book.deletedAt) return false
+					const boundCharacterIds = Array.isArray(book.characterIds) ? book.characterIds.map(String) : []
+					const explicitlyBound = String(book.characterId || '') === characterId || boundCharacterIds.includes(characterId)
+					const appliesGlobally = book.scope === 'global' && !book.characterId && !boundCharacterIds.length
+					return linkedIds.has(String(book.id || '')) || explicitlyBound || appliesGlobally
+				})
+				return books.sort((left, right) => {
+					const leftIsDirect = linkedIds.has(String(left.id || '')) || String(left.characterId || '') === characterId
+					const rightIsDirect = linkedIds.has(String(right.id || '')) || String(right.characterId || '') === characterId
+					if (leftIsDirect !== rightIsDirect) return leftIsDirect ? -1 : 1
+					return String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')) || String(left.name || '').localeCompare(String(right.name || ''), 'zh-CN')
+				})
+			},
 			activeCharacter() { return this.characterItems.find(item => item.id === this.activeConversation?.characterId) || null },
 			activeProvider() { return this.providerItems.find((item) => item.id === this.activeConversation?.providerProfileId) || this.providerItems.find((item) => item.id === this.ui.activeProviderId) || null },
 			activeProviderLogo() { return this.activeProvider?.logo || '/static/providers/openai.png' },
-			activeAssistantAvatar() { return this.activeCharacter?.avatarDataUrl || this.activeProviderLogo },
-			chatProviderName() { return this.activeCharacter?.name || this.activeProvider?.name || this.activeConversation?.providerNameSnapshot || 'AI 助手' },
+			activeAssistantAvatar() { return this.activeCharacter?.avatarDataUrl || this.activeConversation?.characterAvatarDataUrl || this.activeProviderLogo },
+			chatProviderName() { return this.activeCharacter?.name || this.activeConversation?.characterNameSnapshot || this.activeProvider?.name || this.activeConversation?.providerNameSnapshot || 'AI 助手' },
 			chatModelName() { return this.activeConversation?.modelName || this.activeProvider?.defaultModel || '选择模型' },
 			chatHeader() { return this.activeConversation ? `${this.activeProvider?.name || this.activeConversation.providerNameSnapshot || '接口'} · ${this.activeConversation.modelName || '模型'}` : '选择接口' },
 			providerModelOptions() {
@@ -642,12 +709,21 @@
 			activeProviderProtocol() { return getProviderProtocol(this.providerForm.protocolType) },
 			providerFormAvatarSource() { return resolveProviderAvatarSource(this.providerForm) },
 			providerFormAvatarDescription() { return describeProviderAvatar(this.providerForm) },
+			providerApiKeyPlaceholder() {
+				return this.providerForm.hasApiKey && !this.providerForm.apiKey
+					? SAVED_API_KEY_MASK
+					: '接口要求时填写并保存'
+			},
+			providerApiKeyToggleLabel() {
+				if (this.providerApiKeyBusy) return '正在读取 API 密钥'
+				return this.showApiKey ? '隐藏 API 密钥' : '查看 API 密钥'
+			},
 			automaticProviderAvatar() { return detectProviderAvatarPreset(this.providerForm) },
 			automaticProviderAvatarSource() { return this.automaticProviderAvatar.source },
 			automaticProviderAvatarLabel() { return `当前识别为 ${this.automaticProviderAvatar.label}` },
 			canSend() { return canSendMessage(this.ui, this.draftMessage, Boolean(this.activeProvider), this.pendingAttachments.length, this.attachmentProcessing) },
 			composerMultiline() { return this.composerInputHeight > COMPOSER_MIN_HEIGHT },
-			providerBusy() { return !this.ready || this.providerSaving || this.providerTesting || this.providerLoadingModels }
+			providerBusy() { return !this.ready || this.providerSaving || this.providerTesting || this.providerLoadingModels || this.providerApiKeyBusy }
 		},
 		watch: {
 			draftMessage(value) {
@@ -690,10 +766,19 @@
 			closeSettingsDetails,
 			formatAttachmentSize,
 			isUserMessageRead,
+			openConversationSettings,
 			openNsfwSettings,
 			openSettingsDetails,
 			setGenerationMode,
 			handleAppBack() {
+				if (this.appDialog) {
+					this.cancelAppDialog()
+					return true
+				}
+				if (this.conversationActionSheet) {
+					this.resolveConversationAction(null)
+					return true
+				}
 				if (this.ui.screen === 'character-detail' && this.characterSaveBusy) return true
 				if (this.ui.screen === 'character-detail' && this.characterDetailEditing) {
 					if (this.customCharacterDraft) this.closeCharacterDetailsView()
@@ -752,10 +837,6 @@
 					this.toggleConversationSearch()
 					return true
 				}
-				if (this.systemPromptOpen) {
-					this.systemPromptOpen = false
-					return true
-				}
 				if (this.settingsSearchOpen) {
 					this.toggleSettingsSearch()
 					return true
@@ -803,6 +884,7 @@
 			conversationProviderLogo(conversation) {
 				const character = this.characterItems.find(item => item.id === conversation?.characterId)
 				if (character?.avatarDataUrl) return character.avatarDataUrl
+				if (conversation?.characterAvatarDataUrl) return conversation.characterAvatarDataUrl
 				const provider = this.providerItems.find(item => item.id === conversation?.providerProfileId)
 				return provider?.logo || this.providerLogoSource({ name: conversation?.providerNameSnapshot })
 			},
@@ -990,6 +1072,7 @@
 				this.characterSaveBusy = true
 				try {
 					await this.characterManager().deleteCharacter(characterId)
+					await this.repairCharacterConversationLinks()
 					this.customCharacterDraft = null
 					this.characterDetailEditing = false
 					closeCharacterDetailsState(this.ui)
@@ -1015,7 +1098,7 @@
 			async loadWorldBooks() {
 				if (!this.services?.repository?.listAllWorldBooks) return
 				this.worldBookItems = (await this.services.repository.listAllWorldBooks())
-					.filter(book => book.scope === 'global' && !book.deletedAt)
+					.filter(book => book && !book.deletedAt)
 					.sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')))
 			},
 			openWorldBookManager() {
@@ -1407,11 +1490,19 @@
 				this.systemPrompt = prompt.encryptedValue ? await this.services.vault.decryptString(prompt.encryptedValue) : ''
 				const sessionBaseUrl = this.cloudSession?.cloud_base_url || DEFAULT_CLOUD_BASE_URL
 				const cloudConfig = await this.services.repository.getSetting('cloudConfig', { baseUrl: sessionBaseUrl, email: '' })
-				this.cloudForm.baseUrl = cloudConfig.baseUrl || sessionBaseUrl
+				const configuredBaseUrl = normalizeCloudBaseUrl(cloudConfig.baseUrl || sessionBaseUrl)
+				this.cloudForm.baseUrl = resolveCloudRequestBaseUrl(configuredBaseUrl)
 				this.cloudForm.email = cloudConfig.email || this.cloudSession?.user?.email || ''
+				if (this.cloudForm.baseUrl !== configuredBaseUrl) {
+					await this.services.repository.setSetting('cloudConfig', {
+						baseUrl: this.cloudForm.baseUrl,
+						email: this.cloudForm.email
+					})
+				}
 				this.autoBackupEnabled = Boolean(await this.services.repository.getSetting('cloudAutoBackup', false))
 				await this.stopCloudActivityAndWait()
-				this.cloudServices = this.cloudForm.baseUrl ? this.buildCloudServices(this.cloudForm.baseUrl) : null
+				const serviceBaseUrl = normalizeCloudBaseUrl(this.cloudSession?.cloud_base_url) || this.cloudForm.baseUrl
+				this.cloudServices = serviceBaseUrl ? this.buildCloudServices(serviceBaseUrl) : null
 				this.cloudSession = await this.services.tokenStore?.load?.() || this.cloudSession
 				await this.syncCloudUsernameFromSession()
 			},
@@ -1424,6 +1515,8 @@
 				}
 				this.ui.activeProviderId = this.providerItems[0]?.id || null
 				this.providerForm = createProviderForm(this.providerItems[0])
+				this.resetProviderApiKeyState()
+				await this.repairCharacterConversationLinks()
 				await Promise.all([this.loadCharacters(), this.loadWorldBooks(), this.loadConversations()])
 				if (!this.conversationItems.length && this.providerItems[0]) await this.addConversation(false)
 			},
@@ -1440,6 +1533,7 @@
 				this.assistantStatusOpen = false
 				this.customCharacterDraft = null
 				this.characterDetailEditing = false
+				this.resetProviderApiKeyState()
 			},
 			async activateWorkspaceForSession(session) {
 				if (!this.workspaceManager) return
@@ -1483,9 +1577,20 @@
 				if (!this.services) return
 				const conversations = await this.services.repository.listConversations()
 				this.conversationItems = await Promise.all(conversations.map(async (conversation) => {
-					const messages = await this.services.repository.listMessages(conversation.id)
-					return summarizeConversation(conversation, messages[messages.length - 1])
+					const [messages, avatar] = await Promise.all([
+						this.services.repository.listMessages(conversation.id),
+						conversation.characterAvatarAssetId
+							? this.services.repository.getCharacterAsset?.(conversation.characterAvatarAssetId)
+							: null
+					])
+					return {
+						...summarizeConversation(conversation, messages[messages.length - 1]),
+						characterAvatarDataUrl: avatar?.dataUrl || avatar?.sourceUrl || ''
+					}
 				}))
+			},
+			async repairCharacterConversationLinks() {
+				return repairConversationCharacterLinks(this.services?.repository)
 			},
 			decorateChatMessage(message) {
 				const rawContent = String(message?.content ?? '')
@@ -1514,6 +1619,7 @@
 			},
 			backToConversations() { this.closeComposerMenus(); this.assistantStatusOpen = false; this.services?.replyNotificationService?.setActiveConversationId(null); selectTab(this.ui, 'conversations'); this.loadConversations() },
 			goToTab(tab) {
+				if (tab !== 'providers') this.hideProviderApiKey()
 				this.closeComposerMenus(); this.homeMenuOpen = false; this.characterDetailEditing = false; this.services?.replyNotificationService?.setActiveConversationId(null); selectTab(this.ui, tab); this.modelMenuOpen = false
 				if (tab === 'contacts') Promise.all([this.loadCharacters(), this.loadWorldBooks()]).catch(error => this.handleError(error, '联系人加载失败'))
 			},
@@ -1597,12 +1703,7 @@
 				const keyword = this.settingsSearchQuery.trim().toLowerCase()
 				return !keyword || searchText.toLowerCase().includes(keyword)
 			},
-			toggleSystemPromptPanel() {
-				this.systemPromptOpen = !this.systemPromptOpen
-				if (this.systemPromptOpen) this.cloudOpen = false
-			},
 			async openCloudModal() {
-				this.systemPromptOpen = false
 				await this.syncCloudUsernameFromSession()
 				this.cloudOpen = true
 			},
@@ -1631,57 +1732,64 @@
 					if (open) await this.openChat(conversation.id)
 				} catch (error) { this.handleError(error) }
 			},
-			chooseConversationAction() {
-				const uniApi = getUniApi()
-				if (typeof uniApi?.showActionSheet !== 'function') return Promise.resolve(null)
-				return new Promise(resolve => uniApi.showActionSheet({
-					itemList: ['重命名会话', '删除会话'],
-					success: result => resolve(result.tapIndex === 0 ? 'rename' : result.tapIndex === 1 ? 'delete' : null),
-					fail: () => resolve(null)
-				}))
+			chooseConversationAction(conversation) {
+				if (this.conversationActionResolver) this.resolveConversationAction(null)
+				this.conversationActionSheet = { title: String(conversation?.title || '未命名会话') }
+				return new Promise(resolve => { this.conversationActionResolver = resolve })
+			},
+			resolveConversationAction(action) {
+				const resolve = this.conversationActionResolver
+				this.conversationActionResolver = null
+				this.conversationActionSheet = null
+				resolve?.(action || null)
 			},
 			requestConversationTitle(currentTitle) {
-				const uniApi = getUniApi()
-				if (typeof uniApi?.showModal === 'function') {
-					return new Promise(resolve => uniApi.showModal({
-						title: '重命名会话',
-						content: '请输入新的会话名称',
-						editable: true,
-						placeholderText: currentTitle,
-						confirmText: '保存',
-						success: result => resolve(result.confirm ? String(result.content ?? '').trim() || currentTitle : null),
-						fail: () => resolve(null)
-					}))
-				}
-				const browserWindow = getBrowserWindow()
-				if (typeof browserWindow?.prompt !== 'function') { this.showToast('当前环境不支持重命名弹窗'); return Promise.resolve(null) }
-				try { return Promise.resolve(browserWindow.prompt('重命名会话；留空将删除会话', currentTitle)) }
-				catch (_) { this.showToast('当前环境不支持重命名弹窗'); return Promise.resolve(null) }
+				return this.openAppDialog({
+					kind: 'prompt',
+					title: '重命名会话',
+					content: '输入一个便于识别的新名称。',
+					confirmText: '保存',
+					tone: 'primary'
+				}, currentTitle)
 			},
 			confirmAction(title, content, confirmText = '确定') {
-				const uniApi = getUniApi()
-				if (typeof uniApi?.showModal === 'function') {
-					return new Promise(resolve => uniApi.showModal({
-						title, content, confirmText, confirmColor: '#d9363e',
-						success: result => resolve(Boolean(result.confirm)),
-						fail: () => resolve(false)
-					}))
+				const danger = confirmText === '删除' || title.includes('删除') || content.includes('删除')
+				return this.openAppDialog({ kind: 'confirm', title, content, confirmText, tone: danger ? 'danger' : 'primary' })
+			},
+			openAppDialog(dialog, inputValue = '') {
+				if (this.appDialogResolver) this.cancelAppDialog()
+				this.appDialog = dialog
+				this.appDialogValue = String(inputValue || '')
+				return new Promise(resolve => { this.appDialogResolver = resolve })
+			},
+			settleAppDialog(value) {
+				const resolve = this.appDialogResolver
+				this.appDialogResolver = null
+				this.appDialog = null
+				this.appDialogValue = ''
+				resolve?.(value)
+			},
+			cancelAppDialog() {
+				this.settleAppDialog(this.appDialog?.kind === 'prompt' ? null : false)
+			},
+			confirmAppDialog() {
+				if (!this.appDialog) return
+				if (this.appDialog.kind === 'prompt') {
+					const title = String(this.appDialogValue || '').trim()
+					if (!title) { this.showToast('会话名称不能为空'); return }
+					this.settleAppDialog(title)
+					return
 				}
-				const browserWindow = getBrowserWindow()
-				if (typeof browserWindow?.confirm !== 'function') return Promise.resolve(false)
-				try { return Promise.resolve(Boolean(browserWindow.confirm(content))) }
-				catch (_) { return Promise.resolve(false) }
+				this.settleAppDialog(true)
 			},
 			async manageConversation(conversation) {
 				if (!conversation) return
 				try {
-					const usesActionSheet = typeof getUniApi()?.showActionSheet === 'function'
-					let action = usesActionSheet ? await this.chooseConversationAction() : null
+					const action = await this.chooseConversationAction(conversation)
 					let title = null
-					if (action === 'rename' || !usesActionSheet) {
+					if (action === 'rename') {
 						title = await this.requestConversationTitle(conversation.title)
 						if (title === null) return
-						if (!usesActionSheet) action = String(title).trim() ? 'rename' : 'delete'
 					}
 					if (!action) return
 					if (action === 'delete') {
@@ -1827,12 +1935,70 @@
 				this.providerForm.avatar = createProviderCustomAvatar(attachment)
 				this.showToast('已选择自定义头像，保存接口后生效')
 			},
+			resetProviderApiKeyState() {
+				this.providerApiKeyRequestId += 1
+				this.showApiKey = false
+				this.providerApiKeyBusy = false
+				this.providerApiKeyDirty = false
+				this.providerApiKeyLoadedValue = ''
+			},
+			hideProviderApiKey() {
+				this.showApiKey = false
+				if (!this.providerApiKeyDirty && this.providerApiKeyLoadedValue && this.providerForm.apiKey === this.providerApiKeyLoadedValue) {
+					this.providerForm.apiKey = ''
+					this.providerApiKeyLoadedValue = ''
+				}
+			},
+			handleProviderApiKeyInput(event) {
+				const value = event?.detail?.value ?? event?.target?.value
+				if (value !== undefined) this.providerForm.apiKey = String(value)
+				this.providerApiKeyDirty = true
+			},
+			providerFormForSave() {
+				return {
+					...this.providerForm,
+					apiKey: this.providerApiKeyDirty || !this.providerForm.hasApiKey
+						? this.providerForm.apiKey
+						: ''
+				}
+			},
+			async toggleProviderApiKeyVisibility() {
+				if (this.providerApiKeyBusy) return
+				if (this.showApiKey) {
+					this.hideProviderApiKey()
+					return
+				}
+				if (this.providerForm.apiKey || !this.providerForm.hasApiKey || !this.providerForm.id) {
+					this.showApiKey = true
+					return
+				}
+
+				const providerId = this.providerForm.id
+				const requestId = ++this.providerApiKeyRequestId
+				this.providerApiKeyBusy = true
+				try {
+					const apiKey = await this.providerServiceOrThrow().getApiKeyForEditing(providerId)
+					if (requestId !== this.providerApiKeyRequestId || this.providerForm.id !== providerId) return
+					this.providerForm.apiKey = apiKey
+					this.providerApiKeyLoadedValue = apiKey
+					this.providerApiKeyDirty = false
+					this.showApiKey = true
+				} catch (error) {
+					if (requestId === this.providerApiKeyRequestId) this.handleError(error, '读取已保存密钥失败')
+				} finally {
+					if (requestId === this.providerApiKeyRequestId) this.providerApiKeyBusy = false
+				}
+			},
 			selectProvider(providerId) {
 				const provider = this.providerItems.find((item) => item.id === providerId)
 				if (!provider) return
-				this.providerAvatarMenuOpen = false; this.ui.activeProviderId = providerId; this.providerForm = createProviderForm(provider); this.connectionStatus = provider.lastTestStatus || 'untested'; this.showApiKey = false
+				this.providerAvatarMenuOpen = false
+				this.ui.activeProviderId = providerId
+				this.providerForm = createProviderForm(provider)
+				this.connectionStatus = provider.lastTestStatus || 'untested'
+				this.resetProviderApiKeyState()
 			},
-			addProvider() { this.providerAvatarMenuOpen = false; this.ui.activeProviderId = null; this.providerForm = createProviderForm({ name: '新接口', baseUrl: 'https://example.com/v1', defaultModel: '' }); this.connectionStatus = 'untested' },
+			addProvider() { this.providerAvatarMenuOpen = false; this.ui.activeProviderId = null; this.providerForm = createProviderForm({ name: '新接口', baseUrl: 'https://example.com/v1', defaultModel: '' }); this.connectionStatus = 'untested'; this.resetProviderApiKeyState() },
 			selectProviderModel(event) {
 				applyProviderModelSelection(this.providerForm, this.providerModelOptions, event?.detail?.value)
 			},
@@ -1843,14 +2009,23 @@
 			},
 			async saveProvider() {
 				this.providerSaving = true; this.errorMessage = ''
-				try { const saved = await this.providerServiceOrThrow().saveProvider(this.providerForm); await this.loadProviders(); this.ui.activeProviderId = saved.id; this.providerForm = createProviderForm(saved); this.connectionStatus = saved.lastTestStatus; this.showToast('接口已保存'); return saved }
+				try {
+					const saved = await this.providerServiceOrThrow().saveProvider(this.providerFormForSave())
+					await this.loadProviders()
+					this.ui.activeProviderId = saved.id
+					this.providerForm = createProviderForm(saved)
+					this.connectionStatus = saved.lastTestStatus
+					this.resetProviderApiKeyState()
+					this.showToast('接口已保存')
+					return saved
+				}
 				catch (error) { this.handleError(error); return null }
 				finally { this.providerSaving = false }
 			},
 			async testConnection() {
 				const saved = await this.saveProvider(); if (!saved) return
 				this.providerTesting = true; this.connectionStatus = 'testing'
-				try { const tested = await this.providerServiceOrThrow().testConnection(saved.id); await this.loadProviders(); this.providerForm = createProviderForm(tested); this.connectionStatus = 'success' }
+				try { const tested = await this.providerServiceOrThrow().testConnection(saved.id); await this.loadProviders(); this.providerForm = createProviderForm(tested); this.resetProviderApiKeyState(); this.connectionStatus = 'success' }
 				catch (error) { this.connectionStatus = 'failed'; this.handleError(error, '连接测试失败') }
 				finally { this.providerTesting = false }
 			},
@@ -1872,8 +2047,16 @@
 				await this.services.repository.saveConversation(updated); this.ui.activeProviderId = provider.id; this.modelMenuOpen = false; this.attachmentMenuOpen = false; await this.loadConversations()
 			},
 			async saveSystemPrompt() {
-				try { const encryptedValue = this.systemPrompt.trim() ? await this.services.vault.encryptString(this.systemPrompt.trim()) : null; await this.services.repository.setSetting('systemPrompt', { enabled: this.systemPromptEnabled, encryptedValue }); this.showToast('系统提示词已保存') }
-				catch (error) { this.handleError(error) }
+				if (this.systemPromptSaving || !this.services?.repository || !this.services?.vault) return
+				this.systemPromptSaving = true
+				try {
+					const normalizedPrompt = this.systemPrompt.trim()
+					const encryptedValue = normalizedPrompt ? await this.services.vault.encryptString(normalizedPrompt) : null
+					await this.services.repository.setSetting('systemPrompt', { enabled: this.systemPromptEnabled, encryptedValue })
+					this.systemPrompt = normalizedPrompt
+					this.showToast('系统提示词已保存')
+				} catch (error) { this.handleError(error, '系统提示词保存失败') }
+				finally { this.systemPromptSaving = false }
 			},
 			async toggleLock() { toggleAppLock(this.ui); await this.services.repository.setSetting('app', { appLockEnabled: this.ui.appLockEnabled }) },
 			async toggleNsfw() {
@@ -1978,6 +2161,7 @@
 				this.networkSyncHandler = null
 			},
 			async refreshAfterCloudSync() {
+				await this.repairCharacterConversationLinks()
 				await Promise.all([this.loadProviders(), this.loadCharacters(), this.loadWorldBooks(), this.loadConversations()])
 				if (this.ui.screen === 'chat' && this.ui.activeConversationId) {
 					await this.openChat(this.ui.activeConversationId)
@@ -2007,15 +2191,18 @@
 				}))
 			},
 			async prepareCloudServices() {
-				const baseUrl = this.cloudForm.baseUrl.trim().replace(/\/+$/, '')
+				const configuredBaseUrl = normalizeCloudBaseUrl(this.cloudForm.baseUrl)
+				const baseUrl = resolveCloudRequestBaseUrl(configuredBaseUrl)
 				if (!baseUrl) throw new Error('请填写云端服务器地址')
-				const sessionBaseUrl = String(this.cloudSession?.cloud_base_url || '').trim().replace(/\/+$/, '')
-				if (sessionBaseUrl && sessionBaseUrl !== baseUrl) {
+				this.cloudForm.baseUrl = baseUrl
+				const sessionBaseUrl = normalizeCloudBaseUrl(this.cloudSession?.cloud_base_url)
+				if (sessionBaseUrl && resolveCloudRequestBaseUrl(sessionBaseUrl) !== baseUrl) {
 					throw new Error('当前账号属于其他云端服务器，请先退出登录')
 				}
-				if (!this.cloudServices || this.cloudServices.apiClient.baseUrl !== baseUrl) {
+				const serviceBaseUrl = sessionBaseUrl || baseUrl
+				if (!this.cloudServices || this.cloudServices.apiClient.baseUrl !== serviceBaseUrl) {
 					await this.stopCloudActivityAndWait()
-					this.cloudServices = this.buildCloudServices(baseUrl)
+					this.cloudServices = this.buildCloudServices(serviceBaseUrl)
 					this.cloudSession = await this.cloudServices.tokenStore.load()
 					await this.syncCloudUsernameFromSession()
 				}
@@ -2025,10 +2212,10 @@
 			async cloudAuthenticate(action) {
 				this.cloudBusy = true; this.errorMessage = ''
 				try {
-					const baseUrl = this.cloudForm.baseUrl.trim().replace(/\/+$/, '')
 					const email = this.cloudForm.email.trim()
 					const username = this.cloudForm.username.trim()
 					const cloud = await this.prepareCloudServices()
+					const baseUrl = cloud.apiClient.baseUrl
 					const credentials = { email, password: this.cloudForm.password }
 					if (action === 'register') credentials.username = username
 					const session = await cloud.apiClient[action](credentials)
@@ -2167,6 +2354,7 @@
 					const syncPassword = this.cloudForm.syncPassword || await cloud.credentialStore.load()
 					if (!syncPassword) throw new Error('请先输入同步密码')
 					const result = await cloud.cloudBackupService.restore({ syncPassword })
+					await this.repairCharacterConversationLinks()
 					await this.loadProfileAvatar()
 					await this.loadProviders()
 					await this.loadCharacters()
@@ -2290,6 +2478,7 @@
 			},
 			async applyImportedBackup(payload) {
 				const result = await this.services.backupService.importData(payload)
+				await this.repairCharacterConversationLinks()
 				await this.loadProfileAvatar()
 				await this.loadProviders()
 				await this.loadCharacters()
@@ -4674,35 +4863,6 @@
 		color: #8a8b90;
 	}
 
-	.settings-expanded-panel {
-		margin-top: 10px;
-		padding: 12px;
-		background: #fff;
-	}
-
-	.settings-expanded-heading {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		margin-bottom: 12px;
-		font-size: 15px;
-		font-weight: 700;
-	}
-
-	.settings-expanded-heading button {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 30px;
-		height: 30px;
-		border-radius: 50%;
-	}
-
-	.settings-overview .prompt-editor {
-		padding: 12px;
-		border-bottom: 0;
-	}
-
 	.settings-overview .navigation-scroll-tail {
 		height: 100px;
 	}
@@ -4727,33 +4887,288 @@
 		margin-left: -8px;
 	}
 
-	.prompt-editor {
-		padding: 0 12px 12px;
-		border-bottom: 1px solid var(--border);
+	.themed-settings-details {
+		--settings-detail-accent: #d43bc2;
+		--settings-detail-accent-soft: #fff0fb;
+		background: #f3f3f5;
 	}
 
-	.prompt-editor textarea {
-		width: 100%;
-		min-height: 72px;
-		padding: 9px;
-		border: 1px solid var(--border);
-		border-radius: 7px;
+	.themed-settings-header {
+		display: grid;
+		align-items: center;
+		gap: 0;
+		height: 62px;
+		padding: 0 8px;
+		border-bottom: 1px solid #e8e8eb;
+		background: #fff;
+		grid-template-columns: 48px minmax(0, 1fr) 48px;
+		color: #222329;
+	}
+
+	.themed-settings-header .header-back {
+		width: 42px;
+		height: 42px;
+		margin-left: 0;
+		color: #2c2d32;
+	}
+
+	.themed-settings-header .header-back:active {
+		background: #f2f2f4;
+	}
+
+	.themed-settings-header .screen-title {
+		overflow: hidden;
+		font-size: 18px;
+		font-weight: 720;
+		text-align: center;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.settings-detail-header-space {
+		width: 48px;
+	}
+
+	.themed-settings-scroll {
+		padding: 0 12px;
+		background: #f3f3f5;
+	}
+
+	.settings-detail-summary {
+		display: grid;
+		align-items: center;
+		gap: 12px;
+		min-height: 88px;
+		margin-top: 12px;
+		padding: 15px;
+		border: 1px solid #e7e7ea;
+		border-radius: 8px;
+		background: #fff;
+		grid-template-columns: 46px minmax(0, 1fr) auto;
+	}
+
+	.settings-detail-summary-icon,
+	.settings-detail-row-icon {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 42px;
+		height: 42px;
+		border-radius: 8px;
+		background: var(--settings-detail-accent-soft);
+		color: var(--settings-detail-accent);
+	}
+
+	.settings-detail-summary-copy {
+		display: flex;
+		min-width: 0;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.settings-detail-summary-copy > text:first-child {
+		overflow: hidden;
+		font-size: 16px;
+		font-weight: 700;
+		line-height: 22px;
+		color: #25262b;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.settings-detail-summary-copy > text:last-child {
+		overflow: hidden;
 		font-size: 12px;
-		resize: none;
+		line-height: 18px;
+		color: #898a90;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
-	.prompt-controls {
+	.settings-detail-state {
+		display: flex;
+		align-items: center;
+		gap: 5px;
+		font-size: 11px;
+		font-weight: 650;
+		color: #8a8b90;
+		white-space: nowrap;
+	}
+
+	.settings-detail-state > view {
+		width: 7px;
+		height: 7px;
+		border-radius: 50%;
+		background: #b7b8bc;
+	}
+
+	.settings-detail-state.enabled {
+		color: var(--settings-detail-accent);
+	}
+
+	.settings-detail-state.enabled > view {
+		background: var(--settings-detail-accent);
+	}
+
+	.themed-settings-details .settings-section-label {
+		margin: 17px 2px 8px;
+		color: #6f7076;
+	}
+
+	.themed-settings-card {
+		border-color: #e7e7ea;
+		box-shadow: none;
+	}
+
+	.themed-settings-row {
+		min-height: 68px;
+		gap: 12px;
+		padding: 10px 12px;
+	}
+
+	.themed-settings-row:active {
+		background: #f8f8f9;
+	}
+
+	.settings-detail-row-icon {
+		width: 38px;
+		height: 38px;
+		flex: 0 0 auto;
+	}
+
+	.themed-settings-row .settings-copy text:first-child {
+		font-size: 14px;
+		font-weight: 680;
+		line-height: 20px;
+		color: #2c2d32;
+	}
+
+	.themed-settings-row .settings-copy text:last-child {
+		font-size: 11px;
+		line-height: 17px;
+		color: #898a90;
+	}
+
+	.conversation-toggle.enabled {
+		background: #d43bc2;
+	}
+
+	.system-prompt-editor {
+		overflow: hidden;
+		border: 1px solid #dedee2;
+		border-radius: 8px;
+		background: #fff;
+	}
+
+	.system-prompt-editor.disabled {
+		border-color: #e5e5e8;
+	}
+
+	.system-prompt-editor-heading,
+	.system-prompt-editor-footer {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		margin-bottom: 8px;
-		font-size: 12px;
-		font-weight: 600;
+		gap: 10px;
+		padding: 0 13px;
 	}
 
-	.prompt-save {
+	.system-prompt-editor-heading {
+		height: 45px;
+		border-bottom: 1px solid #ececef;
+	}
+
+	.system-prompt-editor-heading > text:first-child {
+		font-size: 13px;
+		font-weight: 680;
+		color: #37383d;
+	}
+
+	.system-prompt-editor-heading > text:last-child {
+		font-size: 11px;
+		color: #96979c;
+	}
+
+	.system-prompt-editor textarea {
 		display: block;
-		margin: 8px 0 0 auto;
+		box-sizing: border-box;
+		width: 100%;
+		height: 230px;
+		min-height: 230px;
+		padding: 14px;
+		border: 0;
+		background: #fafafb;
+		font-size: 14px;
+		line-height: 22px;
+		color: #28292e;
+		outline: none;
+		resize: none;
+	}
+
+	.system-prompt-editor textarea:focus {
+		background: #fff;
+	}
+
+	.system-prompt-editor-footer {
+		height: 43px;
+		border-top: 1px solid #ececef;
+		font-size: 11px;
+		color: #88898f;
+	}
+
+	.system-prompt-editor-footer > view,
+	.system-prompt-editor-footer > button {
+		display: flex;
+		align-items: center;
+		gap: 5px;
+	}
+
+	.system-prompt-editor-footer > view {
+		color: #6d797e;
+	}
+
+	.system-prompt-editor-footer > button {
+		height: 30px;
+		padding: 0 7px;
+		border-radius: 6px;
+		color: #a33a58;
+	}
+
+	.system-prompt-editor-footer > button:active {
+		background: #fff0f4;
+	}
+
+	.system-prompt-save-button {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 8px;
+		width: 100%;
+		height: 50px;
+		margin-top: 14px;
+		border-radius: 8px;
+		background: #d43bc2;
+		font-size: 15px;
+		font-weight: 700;
+		color: #fff;
+		box-shadow: 0 6px 16px rgba(212, 59, 194, 0.18);
+	}
+
+	.system-prompt-save-button:active {
+		transform: scale(0.99);
+	}
+
+	.system-prompt-save-button:disabled {
+		opacity: 0.55;
+	}
+
+	.nsfw-settings-details {
+		--settings-detail-accent: #df4657;
+		--settings-detail-accent-soft: #fff0f2;
+	}
+
+	.nsfw-toggle.enabled {
+		background: #df4657;
 	}
 
 	.cloud-modal-backdrop {
@@ -5515,6 +5930,7 @@
 		min-width: 0;
 		min-height: 34px;
 		padding: 0 8px;
+		overflow: hidden;
 		border-left: 1px solid #e8ecee;
 		text-align: center;
 	}
@@ -5526,7 +5942,9 @@
 
 	.assistant-status-hero-item text {
 		display: block;
+		width: 100%;
 		min-width: 0;
+		max-width: 100%;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
@@ -5563,7 +5981,7 @@
 		border: 0;
 		border-radius: 2px;
 		background: #e3e9eb;
-		accent-color: #2fa49f;
+		accent-color: var(--assistant-status-progress-color, #2fa49f);
 		appearance: none;
 		-webkit-appearance: none;
 	}
@@ -5575,12 +5993,12 @@
 
 	.assistant-status-progress::-webkit-progress-value {
 		border-radius: 2px;
-		background: #2fa49f;
+		background: var(--assistant-status-progress-color, #2fa49f);
 	}
 
 	.assistant-status-progress::-moz-progress-bar {
 		border-radius: 2px;
-		background: #2fa49f;
+		background: var(--assistant-status-progress-color, #2fa49f);
 	}
 
 	.assistant-status-content {

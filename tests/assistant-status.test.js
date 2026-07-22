@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { assistantStatusSectionsForDisplay, createAssistantStatusOverview, extractAssistantStatus } from '../src/core/assistant-status.js'
+import { assistantStatusProgressColor, assistantStatusSectionsForDisplay, createAssistantStatusOverview, extractAssistantStatus } from '../src/core/assistant-status.js'
 
 const sample = `“哥哥，我好想你。”她张开双臂，向你走来。
 
@@ -70,6 +70,21 @@ test('normalizes ratio scores into a progress percentage', () => {
 
   assert.equal(overview.scoreValue, '8/10')
   assert.equal(overview.scorePercent, 80)
+})
+
+test('changes the progress color as the status score grows', () => {
+  assert.equal(assistantStatusProgressColor(0), '#85929a')
+  assert.equal(assistantStatusProgressColor(20), '#85929a')
+  assert.equal(assistantStatusProgressColor(21), '#3f8fbd')
+  assert.equal(assistantStatusProgressColor(40), '#3f8fbd')
+  assert.equal(assistantStatusProgressColor(41), '#2fa49f')
+  assert.equal(assistantStatusProgressColor(60), '#2fa49f')
+  assert.equal(assistantStatusProgressColor(61), '#e0a12f')
+  assert.equal(assistantStatusProgressColor(80), '#e0a12f')
+  assert.equal(assistantStatusProgressColor(81), '#e64e75')
+  assert.equal(assistantStatusProgressColor(100), '#e64e75')
+  assert.equal(assistantStatusProgressColor('8/10'), '#e0a12f')
+  assert.equal(assistantStatusProgressColor('unknown'), '#2fa49f')
 })
 
 test('supports sibling state sections and case-insensitive status tags', () => {

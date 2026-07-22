@@ -2,8 +2,7 @@
 	<view class="diagnostic-shell">
 		<view class="diagnostic-header">
 			<button class="icon-button" aria-label="返回" @click="goBack"><ArrowLeft :size="22" /></button>
-			<text class="header-title">Android 流式诊断</text>
-			<view class="header-spacer" />
+			<text class="header-title">流式传输诊断</text>
 			<button class="icon-button" aria-label="诊断页菜单" @click="headerMenuOpen = !headerMenuOpen"><MoreVertical :size="20" /></button>
 		</view>
 		<view v-if="headerMenuOpen" class="header-menu">
@@ -12,34 +11,34 @@
 		</view>
 
 		<scroll-view class="diagnostic-scroll" scroll-y>
-			<view class="config-pane">
-				<button class="runtime-banner" :class="{ supported: isAndroidApp }" @click="showToast(isAndroidApp ? '密钥仅保留在当前页面内存中' : '请使用 Android App 运行诊断')">
-					<LockKeyhole :size="20" />
-					<view class="runtime-copy">
-						<text>{{ runtimeLabel }}</text>
-						<text>{{ isAndroidApp ? 'API 密钥仅保存在当前页面内存中' : '请在 HBuilderX Android App 中打开此页面' }}</text>
-					</view>
-					<ChevronRight :size="18" />
-				</button>
-
-				<view class="section-block config-section">
-					<text class="section-title">请求配置</text>
-					<view class="field-row"><text>接口格式</text><view class="diagnostic-protocol-control" role="group" aria-label="接口格式"><button v-for="protocol in protocols" :key="protocol.id" class="diagnostic-protocol-option" :class="{ active: form.protocolType === protocol.id }" :disabled="isRunning" :aria-pressed="form.protocolType === protocol.id" @click="selectProtocol(protocol.id)">{{ protocol.label }}</button></view></view>
-					<label class="field-row"><text>基础地址</text><view class="field-control"><input v-model="form.baseUrl" placeholder="https://api.openai.com/v1" /><Server :size="17" /></view></label>
-					<label class="field-row"><text>API 密钥</text><view class="field-control"><input v-model="form.apiKey" :type="showApiKey ? 'text' : 'password'" placeholder="仅本次诊断使用" /><button aria-label="显示或隐藏密钥" @click="showApiKey = !showApiKey"><EyeOff :size="17" /></button></view></label>
-					<label class="field-row"><text>模型</text><view class="field-control"><input v-model="form.model" :placeholder="activeProtocol.modelPlaceholder.replace('例如 ', '')" /><ChevronDown :size="17" /></view></label>
-					<label class="field-row field-textarea"><text>测试提示词</text><view class="textarea-field"><textarea v-model="form.prompt" maxlength="500" placeholder="请回复一段包含中文的简短文本" /><text>{{ form.prompt.length }}/500</text></view></label>
-					<label class="field-row"><text>超时</text><view class="number-field"><input v-model.number="form.timeout" type="number" /><text>ms</text></view></label>
+			<button class="runtime-overview" :class="{ supported: isAndroidApp }" @click="showToast(isAndroidApp ? '密钥仅保留在当前页面内存中' : '请使用 Android App 运行诊断')">
+				<view class="runtime-icon"><LockKeyhole :size="21" /></view>
+				<view class="runtime-copy">
+					<text>{{ runtimeLabel }}</text>
+					<text>{{ isAndroidApp ? '密钥只在本次诊断期间保留' : '请在 Android App 中打开此页面' }}</text>
 				</view>
+				<view class="runtime-state" :class="summary.status"><view /><text>{{ statusLabel }}</text></view>
+			</button>
 
+			<text class="section-label">请求配置</text>
+			<view class="section-band config-section">
+				<view class="field-row"><text class="field-label">接口格式</text><view class="diagnostic-protocol-control" role="group" aria-label="接口格式"><button v-for="protocol in protocols" :key="protocol.id" class="diagnostic-protocol-option" :class="{ active: form.protocolType === protocol.id }" :disabled="isRunning" :aria-pressed="form.protocolType === protocol.id" @click="selectProtocol(protocol.id)">{{ protocol.label }}</button></view></view>
+				<label class="field-row"><text class="field-label">基础地址</text><view class="field-control"><Server :size="17" /><input v-model="form.baseUrl" placeholder="https://api.openai.com/v1" /></view></label>
+				<label class="field-row"><text class="field-label">API 密钥</text><view class="field-control"><LockKeyhole :size="17" /><input v-model="form.apiKey" :type="showApiKey ? 'text' : 'password'" placeholder="仅本次诊断使用" /><button aria-label="显示或隐藏密钥" @click="showApiKey = !showApiKey"><EyeOff :size="17" /></button></view><text class="field-note">离开页面后自动清除，不会写入本地存储</text></label>
+				<label class="field-row"><text class="field-label">模型</text><view class="field-control"><Database :size="17" /><input v-model="form.model" :placeholder="activeProtocol.modelPlaceholder.replace('例如 ', '')" /><ChevronDown :size="17" /></view></label>
+				<label class="field-row field-textarea"><view class="field-heading"><text class="field-label">测试提示词</text><text>{{ form.prompt.length }}/500</text></view><view class="textarea-field"><textarea v-model="form.prompt" maxlength="500" placeholder="请回复一段包含中文的简短文本" /></view></label>
+				<label class="field-row"><text class="field-label">请求超时</text><view class="number-field"><input v-model.number="form.timeout" type="number" /><text>ms</text></view></label>
 				<view class="action-bar">
 					<button class="primary-action" :disabled="!isRunning && !canStart" @click="isRunning ? stopDiagnostic() : startDiagnostic()"><Square v-if="isRunning" :size="15" fill="currentColor" /><Play v-else :size="17" fill="currentColor" /><text>{{ isRunning ? '停止诊断' : '开始诊断' }}</text></button>
-					<button class="secondary-action" @click="resetDiagnostic"><RotateCcw :size="17" /><text>重置</text></button>
-					<button class="secondary-action" aria-label="清空日志" @click="clearLogs"><Trash2 :size="17" /><text>清空</text></button>
+					<view class="secondary-actions">
+						<button class="secondary-action" @click="resetDiagnostic"><RotateCcw :size="17" /><text>重置状态</text></button>
+						<button class="secondary-action" aria-label="清空日志" @click="clearLogs"><Trash2 :size="17" /><text>清空日志</text></button>
+					</view>
 				</view>
 			</view>
 
-			<view class="section-block summary-section">
+			<text class="section-label">运行状态</text>
+			<view class="section-band summary-section">
 				<view class="section-heading"><text class="section-title">状态摘要</text><text class="status-badge" :class="summary.status">{{ statusLabel }}</text></view>
 				<view class="summary-grid">
 					<view class="metric-card"><view class="metric-label"><Activity :size="18" /><text>首块耗时</text></view><view class="metric-reading"><strong>{{ metricValue(summary.firstChunkMs) }}</strong><text>ms</text></view></view>
@@ -52,12 +51,14 @@
 				<view v-if="summary.errorMessage" class="diagnostic-error"><AlertCircle :size="16" /><text>{{ summary.errorMessage }}</text></view>
 			</view>
 
-			<view class="section-block">
+			<text class="section-label">模型响应</text>
+			<view class="section-band output-section">
 				<text class="section-title">流式输出</text>
 				<view class="output-preview"><text>{{ output || '等待诊断输出...' }}</text></view>
 			</view>
 
-			<view class="section-block log-section">
+			<text class="section-label">运行记录</text>
+			<view class="section-band log-section">
 				<view class="section-heading"><text class="section-title">诊断日志</text><text class="log-count">{{ logs.length }}</text></view>
 				<view v-if="!logs.length" class="empty-log">暂无日志</view>
 				<view v-for="(entry, index) in logs" :key="`${entry.timestamp}-${index}`" class="log-row">
@@ -75,7 +76,7 @@
 
 <script>
 	import {
-		Activity, AlertCircle, ArrowLeft, Check, ChevronDown, ChevronRight, ClipboardCopy, Database, EyeOff,
+		Activity, AlertCircle, ArrowLeft, Check, ChevronDown, ClipboardCopy, Database, EyeOff,
 		FileText, History, LockKeyhole, MoreVertical, Play, RotateCcw, Server, Square, Trash2
 	} from '../../src/components/app-icons.js'
 	import { preserveServiceIdentity } from '../../src/app/vue-service-container.js'
@@ -112,7 +113,7 @@
 
 	export default {
 		components: {
-			Activity, AlertCircle, ArrowLeft, Check, ChevronDown, ChevronRight, ClipboardCopy, Database, EyeOff,
+			Activity, AlertCircle, ArrowLeft, Check, ChevronDown, ClipboardCopy, Database, EyeOff,
 			FileText, History, LockKeyhole, MoreVertical, Play, RotateCcw, Server, Square, Trash2
 		},
 		data() {
@@ -303,30 +304,34 @@
 	}
 
 	.diagnostic-shell {
-		--text: #171b22;
-		--muted: #647086;
-		--border: #d7dee8;
-		--soft: #f3f6fa;
-		--accent: #1f6fcb;
-		--danger: #b84038;
+		--text: #211b22;
+		--muted: #777079;
+		--border: #ebe6ec;
+		--soft: #f5f2f6;
+		--accent: #d43bc2;
+		--accent-soft: #fbeefa;
+		--danger: #c44352;
+		--success: #278664;
 		position: relative;
 		display: flex;
 		flex-direction: column;
 		height: 100vh;
 		padding-top: var(--status-bar-height, 0px);
 		overflow: hidden;
-		background: #f5f7fa;
+		background: #f3f3f5;
 		color: var(--text);
 		font-family: system-ui, sans-serif;
 	}
 
 	.diagnostic-header {
-		display: flex;
+		display: grid;
+		grid-template-columns: 40px minmax(0, 1fr) 40px;
 		align-items: center;
 		height: 56px;
 		padding: 0 10px;
-		background: #1f6fcb;
-		color: #fff;
+		border-bottom: 1px solid #eee9ef;
+		background: #fff;
+		color: var(--text);
 		flex: 0 0 auto;
 	}
 
@@ -337,22 +342,19 @@
 		width: 40px;
 		height: 40px;
 		border-radius: 6px;
+		color: #403940;
 	}
 
 	.header-title {
-		margin-left: 18px;
-		font-size: 18px;
-		font-weight: 700;
-	}
-
-	.header-spacer {
 		min-width: 0;
-		flex: 1;
+		text-align: center;
+		font-size: 17px;
+		font-weight: 700;
 	}
 
 	.header-menu {
 		position: absolute;
-		top: calc(var(--status-bar-height, 0px) + 48px);
+		top: calc(var(--status-bar-height, 0px) + 50px);
 		right: 10px;
 		z-index: 15;
 		display: flex;
@@ -362,7 +364,7 @@
 		border: 1px solid var(--border);
 		border-radius: 8px;
 		background: #fff;
-		box-shadow: 0 8px 22px rgba(28, 49, 76, 0.16);
+		box-shadow: 0 10px 28px rgba(45, 29, 44, 0.14);
 	}
 
 	.header-menu button {
@@ -383,7 +385,7 @@
 	.diagnostic-scroll {
 		display: block;
 		min-height: 0;
-		padding: 18px 10px 0;
+		padding: 14px 0 0;
 		overflow-y: auto;
 		flex: 1;
 	}
@@ -392,28 +394,34 @@
 		height: 64px;
 	}
 
-	.config-pane {
-		min-height: calc(100vh - 86px);
-	}
-
-	.runtime-banner {
+	.runtime-overview {
 		display: flex;
 		align-items: center;
-		gap: 11px;
+		gap: 12px;
 		width: 100%;
-		min-height: 78px;
-		padding: 12px 14px;
+		min-height: 86px;
+		padding: 16px;
 		text-align: left;
-		border: 1px solid #e0c99e;
-		border-radius: 8px;
-		background: #fff9ed;
-		color: #6d4b1e;
+		border-top: 1px solid var(--border);
+		border-bottom: 1px solid var(--border);
+		background: #fff;
 	}
 
-	.runtime-banner.supported {
-		border-color: #b8d8cf;
-		background: #eff8f5;
-		color: #185c4b;
+	.runtime-icon {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 42px;
+		height: 42px;
+		border-radius: 8px;
+		background: #fff5e8;
+		color: #b66c12;
+		flex: 0 0 auto;
+	}
+
+	.runtime-overview.supported .runtime-icon {
+		background: var(--accent-soft);
+		color: var(--accent);
 	}
 
 	.runtime-copy {
@@ -425,27 +433,84 @@
 	}
 
 	.runtime-copy text:first-child {
-		font-size: 14px;
+		font-size: 15px;
 		font-weight: 700;
 	}
 
 	.runtime-copy text:last-child {
-		font-size: 11px;
+		font-size: 12px;
 		line-height: 1.4;
-		opacity: 0.82;
+		color: var(--muted);
 	}
 
-	.section-block {
-		margin-top: 15px;
-		padding: 13px;
-		border: 1px solid var(--border);
-		border-radius: 8px;
+	.runtime-state {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 6px 8px;
+		border-radius: 7px;
+		background: #f6f3f6;
+		font-size: 11px;
+		font-weight: 700;
+		color: var(--muted);
+		white-space: nowrap;
+		flex: 0 0 auto;
+	}
+
+	.runtime-state > view {
+		width: 6px;
+		height: 6px;
+		border-radius: 50%;
+		background: #aaa3ab;
+	}
+
+	.runtime-state.connecting,
+	.runtime-state.streaming {
+		background: var(--accent-soft);
+		color: #a72b98;
+	}
+
+	.runtime-state.connecting > view,
+	.runtime-state.streaming > view {
+		background: var(--accent);
+	}
+
+	.runtime-state.completed {
+		background: #ecf7f2;
+		color: var(--success);
+	}
+
+	.runtime-state.completed > view {
+		background: var(--success);
+	}
+
+	.runtime-state.failed {
+		background: #fff0f1;
+		color: var(--danger);
+	}
+
+	.runtime-state.failed > view {
+		background: var(--danger);
+	}
+
+	.section-label {
+		display: block;
+		padding: 20px 16px 8px;
+		font-size: 12px;
+		font-weight: 650;
+		color: #837b84;
+	}
+
+	.section-band {
+		padding: 16px;
+		border-top: 1px solid var(--border);
+		border-bottom: 1px solid var(--border);
 		background: #fff;
-		box-shadow: 0 2px 7px rgba(31, 55, 86, 0.035);
 	}
 
 	.config-section {
-		padding: 16px 13px;
+		padding-top: 4px;
+		padding-bottom: 14px;
 	}
 
 	.section-heading {
@@ -457,8 +522,8 @@
 
 	.section-title {
 		display: block;
-		margin-bottom: 12px;
-		font-size: 16px;
+		margin-bottom: 13px;
+		font-size: 15px;
 		font-weight: 700;
 	}
 
@@ -467,13 +532,36 @@
 	}
 
 	.field-row {
-		display: grid;
-		grid-template-columns: 88px minmax(0, 1fr);
-		align-items: center;
-		gap: 10px;
-		margin-top: 12px;
+		display: flex;
+		flex-direction: column;
+		align-items: stretch;
+		gap: 8px;
+		margin-top: 14px;
 		font-size: 13px;
+	}
+
+	.field-label {
 		font-weight: 650;
+		color: #403840;
+	}
+
+	.field-heading {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+	}
+
+	.field-heading > text:last-child,
+	.field-note {
+		font-size: 11px;
+		font-weight: 400;
+		color: var(--muted);
+	}
+
+	.field-note {
+		margin-top: -2px;
+		line-height: 1.4;
 	}
 
 	.field-control,
@@ -489,16 +577,16 @@
 	.number-field {
 		display: flex;
 		align-items: center;
-		height: 50px;
-		padding-right: 11px;
+		height: 48px;
+		padding: 0 12px;
 		color: var(--muted);
 	}
 
 	.field-control input,
 	.number-field input {
 		min-width: 0;
-		height: 48px;
-		padding: 0 12px;
+		height: 46px;
+		padding: 0 10px;
 		border: 0;
 		outline: 0;
 		background: transparent;
@@ -513,11 +601,11 @@
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 3px;
 		width: 100%;
-		height: 50px;
+		height: 48px;
 		padding: 3px;
 		border: 1px solid var(--border);
 		border-radius: 8px;
-		background: #edf1f6;
+		background: #f3eff4;
 	}
 
 	.diagnostic-protocol-option {
@@ -525,7 +613,7 @@
 		align-items: center;
 		justify-content: center;
 		min-width: 0;
-		height: 42px;
+		height: 40px;
 		padding: 0 6px;
 		border-radius: 6px;
 		font-size: 12px;
@@ -535,7 +623,7 @@
 
 	.diagnostic-protocol-option.active {
 		background: #fff;
-		box-shadow: 0 1px 4px rgba(31, 55, 86, 0.12);
+		box-shadow: 0 1px 5px rgba(56, 31, 53, 0.12);
 		color: var(--accent);
 	}
 
@@ -543,29 +631,22 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 30px;
+		width: 32px;
 		height: 38px;
+		margin-right: -7px;
 		flex: 0 0 auto;
-	}
-
-	.field-textarea {
-		align-items: start;
-	}
-
-	.field-textarea > text {
-		padding-top: 12px;
 	}
 
 	.textarea-field {
 		position: relative;
-		min-height: 190px;
+		min-height: 136px;
 	}
 
 	.textarea-field textarea {
 		display: block;
 		width: 100%;
-		min-height: 166px;
-		padding: 12px 12px 28px;
+		min-height: 134px;
+		padding: 12px;
 		border: 0;
 		outline: 0;
 		background: transparent;
@@ -575,26 +656,25 @@
 		resize: none;
 	}
 
-	.textarea-field > text {
-		position: absolute;
-		right: 10px;
-		bottom: 8px;
-		font-size: 11px;
-		font-weight: 400;
-		color: var(--muted);
-	}
-
 	.number-field {
-		padding-right: 12px;
+		padding-right: 14px;
 		font-size: 12px;
 		font-weight: 400;
 	}
 
 	.action-bar {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+		margin-top: 18px;
+		padding-top: 16px;
+		border-top: 1px solid var(--border);
+	}
+
+	.secondary-actions {
 		display: grid;
-		grid-template-columns: minmax(0, 1.35fr) minmax(0, 0.9fr) minmax(0, 0.9fr);
-		gap: 9px;
-		margin-top: 12px;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 10px;
 	}
 
 	.primary-action,
@@ -603,7 +683,7 @@
 		align-items: center;
 		justify-content: center;
 		gap: 7px;
-		height: 48px;
+		height: 46px;
 		border-radius: 8px;
 		font-size: 13px;
 		font-weight: 700;
@@ -616,7 +696,8 @@
 
 	.secondary-action {
 		border: 1px solid var(--border);
-		background: #fff;
+		background: #faf8fa;
+		color: #554c55;
 	}
 
 	.primary-action:disabled {
@@ -632,9 +713,14 @@
 	}
 
 	.status-badge.streaming,
+	.status-badge.connecting {
+		background: var(--accent-soft);
+		color: #a72b98;
+	}
+
 	.status-badge.completed {
-		background: #e7f5f0;
-		color: #17634f;
+		background: #ecf7f2;
+		color: var(--success);
 	}
 
 	.status-badge.failed {
@@ -646,7 +732,7 @@
 		display: grid;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 10px;
-		margin-top: 13px;
+		margin-top: 14px;
 	}
 
 	.metric-card {
@@ -658,7 +744,7 @@
 		padding: 12px;
 		border: 1px solid var(--border);
 		border-radius: 8px;
-		background: #f8fafc;
+		background: #faf8fa;
 	}
 
 	.metric-label,
@@ -679,7 +765,7 @@
 	}
 
 	.finish-label {
-		color: #4f9f46;
+		color: var(--success);
 	}
 
 	.metric-reading {
@@ -718,7 +804,7 @@
 		padding: 12px;
 		border: 1px solid var(--border);
 		border-radius: 8px;
-		background: #f8fafc;
+		background: #faf8fa;
 		font-size: 12px;
 		line-height: 1.55;
 		white-space: pre-wrap;
@@ -727,7 +813,7 @@
 	}
 
 	.log-section {
-		margin-bottom: 28px;
+		margin-bottom: 0;
 	}
 
 	.log-count {
@@ -768,7 +854,7 @@
 
 	.log-detail {
 		min-width: 0;
-		color: #536075;
+		color: #5f5760;
 		word-break: break-word;
 	}
 
@@ -788,12 +874,19 @@
 	}
 
 	@media (max-width: 370px) {
-		.field-row {
-			grid-template-columns: 80px minmax(0, 1fr);
+		.runtime-overview {
+			gap: 9px;
+			padding-right: 12px;
+			padding-left: 12px;
+		}
+
+		.runtime-state {
+			padding-right: 6px;
+			padding-left: 6px;
 		}
 
 		.log-row {
-			grid-template-columns: 56px 78px minmax(0, 1fr);
+			grid-template-columns: 54px 76px minmax(0, 1fr);
 		}
 	}
 </style>

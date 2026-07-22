@@ -89,20 +89,25 @@ test('provider logos use raster image assets in App views', async () => {
   assert.doesNotMatch(stateSource, /static\/providers\/[^'"\s]+\.svg/)
 })
 
-test('conversation and provider management use App-safe dialog APIs', async () => {
-  const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
-  const manageBlock = source.slice(source.indexOf('chooseConversationAction()'), source.indexOf('upsertMessage(message)'))
-  const providerDeleteBlock = source.slice(source.indexOf('async deleteProvider(provider)'), source.indexOf('async selectConversationProvider(provider)'))
+test('conversation and provider management use the shared App-rendered dialog layer', async () => {
+	const [source, dialogSource] = await Promise.all([
+		readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8'),
+		readFile(new URL('../src/components/app-dialog-layer.vue', import.meta.url), 'utf8')
+	])
+	const manageBlock = source.slice(source.indexOf('chooseConversationAction(conversation)'), source.indexOf('upsertMessage(message)'))
+	const providerDeleteBlock = source.slice(source.indexOf('async deleteProvider(provider)'), source.indexOf('async selectConversationProvider(provider)'))
 
-  assert.match(source, /function getUniApi\(\)/)
-  assert.match(manageBlock, /uniApi\.showActionSheet/)
-  assert.match(manageBlock, /uniApi\.showModal/)
-  assert.match(manageBlock, /editable:\s*true/)
-  assert.match(manageBlock, /confirmAction\('删除会话'/)
-  assert.doesNotMatch(manageBlock, /\bwindow\.(?:prompt|confirm)\b/)
-  assert.match(providerDeleteBlock, /await this\.confirmAction\('删除接口'/)
-  assert.doesNotMatch(providerDeleteBlock, /\bwindow\.confirm\b/)
-  assert.match(source, /confirmCloudAction\(content\)\s*\{\s*return this\.confirmAction\('云端备份', content\)/s)
+	assert.match(source, /function getUniApi\(\)/)
+	assert.match(source, /<AppDialogLayer/)
+	assert.match(manageBlock, /this\.conversationActionSheet/)
+	assert.match(manageBlock, /this\.openAppDialog\(/)
+	assert.match(manageBlock, /confirmAction\('删除会话'/)
+	assert.doesNotMatch(manageBlock, /showActionSheet|showModal|\bwindow\.(?:prompt|confirm)\b/)
+	assert.match(dialogSource, /data-testid="conversation-action-sheet"/)
+	assert.match(dialogSource, /data-testid="app-dialog-input"/)
+	assert.match(providerDeleteBlock, /await this\.confirmAction\('删除接口'/)
+	assert.doesNotMatch(providerDeleteBlock, /\bwindow\.confirm\b/)
+	assert.match(source, /confirmCloudAction\(content\)\s*\{\s*return this\.confirmAction\('云端备份', content\)/s)
 })
 
 test('both settings views wire the about application action', async () => {

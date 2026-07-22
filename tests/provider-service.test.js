@@ -46,6 +46,20 @@ test('encrypts API keys and exposes only hasApiKey to UI', async () => {
   assert.equal(stored.baseUrl, 'https://api.openai.com/v1')
 })
 
+test('reveals a saved API key only through an explicit editing request', async () => {
+  const { service } = await setup()
+  await service.saveProvider({
+    name: 'OpenAI', baseUrl: 'https://api.openai.com', apiKey: 'sk-secret', defaultModel: 'gpt-test'
+  })
+
+  const listed = await service.listProviders()
+  assert.equal(listed[0].hasApiKey, true)
+  assert.equal(listed[0].apiKey, undefined)
+  assert.equal(listed[0].encryptedApiKey, undefined)
+  assert.equal(await service.getApiKeyForEditing('provider-1'), 'sk-secret')
+  await assert.rejects(() => service.getApiKeyForEditing('missing-provider'), /当前接口不存在/)
+})
+
 test('persists Gemini protocol profiles and normalizes their native base URL', async () => {
   const { repository, service } = await setup()
   const saved = await service.saveProvider({

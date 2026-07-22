@@ -58,9 +58,9 @@
             "splashscreen" : {
                 "androidStyle" : "default",
                 "android" : {
-                    "hdpi" : "unpackage/res/splash/android/echo-weave-hdpi-480x762.png",
-                    "xhdpi" : "unpackage/res/splash/android/echo-weave-xhdpi-720x1242.png",
-                    "xxhdpi" : "unpackage/res/splash/android/echo-weave-xxhdpi-1080x1882.png"
+                    "hdpi" : "unpackage/res/splash/android/echo-weave-hdpi-480x762.9.png",
+                    "xhdpi" : "unpackage/res/splash/android/echo-weave-xhdpi-720x1242.9.png",
+                    "xxhdpi" : "unpackage/res/splash/android/echo-weave-xxhdpi-1080x1882.9.png"
                 }
             }
         }

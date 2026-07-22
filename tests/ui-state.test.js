@@ -13,6 +13,7 @@ import {
   closeSettingsDetails,
   closeCharacterDetails,
   openCharacterDetails,
+  openConversationSettings,
   openNsfwSettings,
   openSettingsDetails,
   openConversation,
@@ -92,6 +93,20 @@ test('settings opens details and returns to overview', () => {
   assert.equal(state.screen, 'settings')
   assert.equal(state.activeTab, 'settings')
   assert.equal(state.settingsView, 'details')
+
+  closeSettingsDetails(state)
+  assert.equal(state.settingsView, 'overview')
+})
+
+test('conversation settings opens as a second-level settings view', () => {
+  const state = createInitialUiState()
+
+  openConversationSettings(state)
+
+  assert.equal(state.screen, 'settings')
+  assert.equal(state.activeTab, 'settings')
+  assert.equal(state.settingsView, 'conversation')
+  assert.equal(resolveAppBackAction(state), 'settings-overview')
 
   closeSettingsDetails(state)
   assert.equal(state.settingsView, 'overview')

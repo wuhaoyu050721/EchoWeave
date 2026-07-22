@@ -57,3 +57,20 @@ test('character editor exposes the main V3 character fields', () => {
 test('character detail hides the bottom navigation while open', () => {
   assert.match(page, /ui\.screen !== 'chat' && ui\.screen !== 'character-detail'/)
 })
+
+test('character detail renders linked and embedded world-book rules', () => {
+	assert.match(page, /:world-books="selectedCharacterWorldBooks"/)
+	assert.match(page, /selectedCharacterWorldBooks\(\)/)
+	assert.match(page, /linkedIds\.has\(String\(book\.id \|\| ''\)\) \|\| explicitlyBound \|\| appliesGlobally/)
+	assert.match(page, /\.filter\(book => book && !book\.deletedAt\)/)
+	assert.doesNotMatch(page, /\.filter\(book => book\.scope === 'global' && !book\.deletedAt\)/)
+
+	assert.match(detail, /worldBooks: \{ type: Array, default: \(\) => \[\] \}/)
+	assert.match(detail, /data-testid="character-world-books"/)
+	assert.match(detail, /embeddedWorldBook\(\)/)
+	assert.match(detail, /displayWorldBooks\(\)/)
+	assert.match(detail, /worldBookEntries\(book\)/)
+	assert.match(detail, /worldBookEntryKeys\(entry\)/)
+	assert.match(detail, /这张角色卡没有关联世界书/)
+	assert.match(detail, /:aria-expanded="isWorldBookExpanded\(book, bookIndex\)"/)
+})

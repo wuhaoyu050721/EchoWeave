@@ -3,14 +3,22 @@ import test from 'node:test'
 import { PlusSqliteRepository } from '../src/platform/app/plus-sqlite-repository.js'
 import { createNodePlusSqlite } from './helpers/node-plus-sqlite.js'
 
-async function setup() {
+async function setup({ sqlite = createNodePlusSqlite(), databaseName = `test-${crypto.randomUUID()}` } = {}) {
   const repository = new PlusSqliteRepository({
-    sqlite: createNodePlusSqlite(),
-    databaseName: `test-${crypto.randomUUID()}`,
+    sqlite,
+    databaseName,
     databasePath: '_doc/test.db'
   })
   await repository.init()
   return repository
+}
+
+function executeSql(sqlite, name, sql) {
+  return new Promise((resolve, reject) => sqlite.executeSql({ name, sql, success: resolve, fail: reject }))
+}
+
+function encodedSqlText(value) {
+  return `'${encodeURIComponent(JSON.stringify(value)).replace(/'/g, "''")}'`
 }
 
 test('applies schema migrations once and persists Unicode with quotes', async () => {
@@ -21,8 +29,95 @@ test('applies schema migrations once and persists Unicode with quotes', async ()
   })
 
   assert.equal((await repository.getProvider('p1')).name, "测试 '接口'")
-  assert.deepEqual(await repository.getAppliedMigrations(), [1, 2, 3])
+  assert.deepEqual(await repository.getAppliedMigrations(), [1, 2, 3, 4])
   await repository.close()
+})
+
+test('chunks large character records below the Android CursorWindow cell limit', async () => {
+  const sqlite = createNodePlusSqlite({
+    persistOnClose: true,
+    maxCursorCellCharacters: 300 * 1024
+  })
+  const databaseName = `test-${crypto.randomUUID()}`
+  let repository = await setup({ sqlite, databaseName })
+  const largeText = 'A'.repeat(700 * 1024)
+  const character = {
+    id: 'char-large', name: 'Large', description: largeText, sourceHash: 'large-hash',
+    avatarAssetId: 'asset-large', worldBookIds: ['book-large'], assetIds: ['asset-large'],
+    updatedAt: '2026-07-22T00:00:00.000Z', deletedAt: null
+  }
+  const worldBook = {
+    id: 'book-large', characterId: 'char-large', scope: 'character', name: 'Large book',
+    data: { entries: [{ keys: ['large'], content: largeText }] },
+    updatedAt: '2026-07-22T00:00:00.000Z', deletedAt: null
+  }
+  const asset = {
+    id: 'asset-large', characterId: 'char-large', type: 'icon',
+    dataUrl: `data:image/png;base64,${largeText}`,
+    createdAt: '2026-07-22T00:00:00.000Z', deletedAt: null
+  }
+
+  await repository.importCharacterBundle({ character, worldBooks: [worldBook], characterAssets: [asset] })
+  assert.equal((await repository.listCharacters())[0].description.length, largeText.length)
+  assert.equal((await repository.listWorldBooks({ characterId: character.id }))[0].data.entries[0].content.length, largeText.length)
+  assert.equal((await repository.getCharacterAsset(asset.id)).dataUrl.length, asset.dataUrl.length)
+
+  await repository.close()
+  repository = await setup({ sqlite, databaseName })
+  const backup = await repository.readBackupData()
+  assert.equal(backup.characters[0].description, largeText)
+  assert.equal(backup.worldBooks[0].data.entries[0].content, largeText)
+  assert.equal(backup.characterAssets[0].dataUrl, asset.dataUrl)
+
+  const updatedCharacter = { ...character, nickname: 'Synced large record' }
+  const applied = await repository.importRecordsIfUnchanged({
+    entityType: 'characters',
+    entityId: character.id,
+    expectedSnapshot: { exists: true, value: character },
+    records: { characters: [updatedCharacter] }
+  })
+  assert.equal(applied, true)
+  assert.equal((await repository.getCharacter(character.id)).nickname, 'Synced large record')
+  await repository.close()
+  sqlite.closeAll()
+})
+
+test('repairs legacy oversized character rows during startup before they reach CursorWindow', async () => {
+  const sqlite = createNodePlusSqlite({
+    persistOnClose: true,
+    maxCursorCellCharacters: 300 * 1024
+  })
+  const databaseName = `test-${crypto.randomUUID()}`
+  let repository = await setup({ sqlite, databaseName })
+  const legacy = {
+    id: 'legacy-large', name: 'Legacy large', description: '旧'.repeat(100 * 1024),
+    sourceHash: 'legacy-hash', avatarAssetId: 'legacy-asset',
+    worldBookIds: ['legacy-book'], assetIds: ['legacy-asset'],
+    updatedAt: '2026-07-21T00:00:00.000Z', deletedAt: null
+  }
+  const legacyBook = {
+    id: 'legacy-book', characterId: legacy.id, scope: 'character', name: 'Legacy book',
+    data: { entries: [{ keys: ['legacy'], content: '书'.repeat(100 * 1024) }] },
+    updatedAt: '2026-07-21T00:00:00.000Z', deletedAt: null
+  }
+  const legacyAsset = {
+    id: 'legacy-asset', characterId: legacy.id, type: 'icon',
+    dataUrl: `data:image/png;base64,${'A'.repeat(700 * 1024)}`,
+    createdAt: '2026-07-21T00:00:00.000Z', deletedAt: null
+  }
+  await executeSql(sqlite, databaseName, `INSERT OR REPLACE INTO characters (id, source_hash, updated_at, deleted_at, payload) VALUES ('legacy-large', 'legacy-hash', '2026-07-21T00:00:00.000Z', NULL, ${encodedSqlText(legacy)})`)
+  await executeSql(sqlite, databaseName, `INSERT OR REPLACE INTO world_books (id, character_id, scope, updated_at, deleted_at, payload) VALUES ('legacy-book', 'legacy-large', 'character', '2026-07-21T00:00:00.000Z', NULL, ${encodedSqlText(legacyBook)})`)
+  await executeSql(sqlite, databaseName, `INSERT OR REPLACE INTO character_assets (id, character_id, created_at, payload) VALUES ('legacy-asset', 'legacy-large', '2026-07-21T00:00:00.000Z', ${encodedSqlText(legacyAsset)})`)
+  await repository.close()
+
+  repository = await setup({ sqlite, databaseName })
+  const restored = await repository.getCharacter(legacy.id)
+  assert.deepEqual(restored, legacy)
+  assert.deepEqual((await repository.listCharacters()).map(value => value.id), [legacy.id])
+  assert.deepEqual((await repository.listWorldBooks({ characterId: legacy.id })).map(value => value.id), [legacyBook.id])
+  assert.equal((await repository.getCharacterAsset(legacyAsset.id)).dataUrl, legacyAsset.dataUrl)
+  await repository.close()
+  sqlite.closeAll()
 })
 
 test('stores providers and sorts conversations by recent activity', async () => {
