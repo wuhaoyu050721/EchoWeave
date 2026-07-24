@@ -107,7 +107,7 @@ test('streams Gemini SSE text and inline images across split byte chunks', async
   })
 
   assert.equal(request.url, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse')
-  assert.equal(request.timeout, 45000)
+  assert.equal(request.timeout, 300000)
   assert.deepEqual(JSON.parse(request.body), {
     contents: [{ role: 'user', parts: [{ text: '测试' }] }]
   })
@@ -116,6 +116,64 @@ test('streams Gemini SSE text and inline images across split byte chunks', async
   assert.equal(result.images.length, 1)
   assert.equal(callbackImages.length, 1)
   assert.equal(result.images[0].dataUrl, 'data:image/png;base64,AA==')
+})
+
+test('uses Gemini generateContent when streaming is disabled', async () => {
+  let request
+  const deltas = []
+  const images = []
+  const finishReasons = []
+  let doneCount = 0
+  const provider = new GeminiProvider({
+    transport: {
+      async request(options) {
+        request = options
+        return {
+          text: JSON.stringify({
+            candidates: [{
+              content: {
+                parts: [
+                  { text: '完整' },
+                  { text: '回答' },
+                  { inlineData: { mimeType: 'image/png', data: 'AA==' } }
+                ]
+              },
+              finishReason: 'STOP'
+            }]
+          })
+        }
+      }
+    }
+  })
+
+  const result = await provider.streamChat({
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+    apiKey: 'key',
+    requestTimeout: 45000
+  }, {
+    model: 'gemini-2.5-flash',
+    messages: [{ role: 'user', content: '测试' }],
+    stream: false
+  }, {
+    onDelta: value => deltas.push(value),
+    onImage: image => images.push(image),
+    onFinishReason: value => finishReasons.push(value),
+    onDone: () => { doneCount += 1 }
+  })
+
+  assert.equal(request.url, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent')
+  assert.equal(request.onChunk, undefined)
+  assert.equal(request.headers.Accept, 'application/json')
+  assert.equal(request.timeout, 300000)
+  assert.deepEqual(JSON.parse(request.body), {
+    contents: [{ role: 'user', parts: [{ text: '测试' }] }]
+  })
+  assert.deepEqual(deltas, ['完整回答'])
+  assert.deepEqual(finishReasons, ['STOP'])
+  assert.equal(doneCount, 1)
+  assert.equal(result.finishReason, 'STOP')
+  assert.equal(result.images.length, 1)
+  assert.equal(images[0].dataUrl, 'data:image/png;base64,AA==')
 })
 
 test('uses generateContent image modalities and returns embedded Gemini images', async () => {

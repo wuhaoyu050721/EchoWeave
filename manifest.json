@@ -2,9 +2,12 @@
     "name" : "织语",
     "appid" : "__UNI__019AC26",
     "description" : "本地优先的自定义 AI 角色对话应用",
-    "versionName" : "1.0.1",
-    "versionCode" : "101",
+    "versionName" : "1.1.0",
+    "versionCode" : "110",
     "transformPx" : false,
+    "uniStatistics" : {
+        "enable" : false
+    },
     /* 5+App特有相关 */
     "app-plus" : {
         "usingComponents" : true,
@@ -18,7 +21,12 @@
         },
         /* 模块配置 */
         "modules" : {
+            "Device" : {},
+            "Downloader" : {},
+            "File" : {},
             "Gallery" : {},
+            "Invocation" : {},
+            "NativeObj" : {},
             "SQLite" : {},
             "Speech" : {},
             "Push" : {}
@@ -33,6 +41,7 @@
                 "permissions" : [
                     "<uses-permission android:name=\"android.permission.INTERNET\"/>",
                     "<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>",
+                    "<uses-permission android:name=\"android.permission.POST_NOTIFICATIONS\"/>",
                     "<uses-permission android:name=\"android.permission.CAMERA\"/>",
                     "<uses-permission android:name=\"android.permission.RECORD_AUDIO\"/>",
                     "<uses-feature android:name=\"android.hardware.camera\" android:required=\"false\"/>",

@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { hashSyncValue } from '../src/core/cloud-sync-crypto.js'
+import { syncRecordKey } from '../src/core/cloud-sync-protocol.js'
 import { CloudSyncRepositoryAdapter } from '../src/services/cloud-sync-repository-adapter.js'
 
 function createRepository(data) {
@@ -134,4 +136,72 @@ test('uses a conditional repository write when the local storage snapshot is ava
   assert.deepEqual(result, { applied: false, reason: 'local_changed' })
   assert.equal(repository.imports.length, 0)
   assert.deepEqual(data.settings.appearance, { theme: 'local-new' })
+})
+
+test('reuses synced character asset hashes without loading large payloads', async () => {
+  const asset = {
+    id: 'asset-large',
+    characterId: 'character-large',
+    dataUrl: `data:image/png;base64,${'A'.repeat(1024 * 1024)}`,
+    createdAt: '2027-01-15T08:00:00.000Z',
+    updatedAt: '2027-01-15T08:00:00.000Z',
+    deletedAt: null
+  }
+  const data = {
+    providers: [], conversations: [], messages: [], attachments: [],
+    characters: [{ id: asset.characterId, name: 'Large asset' }],
+    worldBooks: [], characterAssets: [asset], settings: {}
+  }
+  const repository = createRepository(data)
+  let assetReads = 0
+  let cachedHash = null
+  repository.readBackupData = async ({ includeCharacterAssets = true } = {}) => ({
+    ...structuredClone(data),
+    characterAssets: includeCharacterAssets ? structuredClone(data.characterAssets) : []
+  })
+  repository.listCharacterAssetSyncMetadata = async () => [{
+    id: asset.id,
+    characterId: asset.characterId,
+    createdAt: asset.createdAt,
+    sourceUpdatedAt: asset.updatedAt,
+    localRevision: 0,
+    metadataKnown: false,
+    deleted: null,
+    syncHash: cachedHash
+  }]
+  repository.getCharacterAsset = async id => {
+    assetReads += 1
+    return id === asset.id ? structuredClone(asset) : null
+  }
+  repository.cacheCharacterAssetSyncHash = async (_id, { hash }) => {
+    cachedHash = hash
+    return true
+  }
+  const adapter = new CloudSyncRepositoryAdapter({
+    repository,
+    vault: { decryptString: async value => value, encryptString: async value => value }
+  })
+  const expectedHash = hashSyncValue(asset)
+  const manifest = {
+    [syncRecordKey('characterAssets', asset.id)]: {
+      entityType: 'characterAssets',
+      entityId: asset.id,
+      hash: expectedHash,
+      deleted: false,
+      updatedAt: Date.parse(asset.updatedAt),
+      revision: 1
+    }
+  }
+
+  const records = await adapter.readRecords({ manifest })
+  const descriptor = records.find(record => record.entityType === 'characterAssets')
+  assert.equal(assetReads, 0)
+  assert.equal(descriptor.value, undefined)
+  assert.equal(descriptor.hash, expectedHash)
+  assert.equal(cachedHash, expectedHash)
+
+  const materialized = await adapter.materializeRecord(descriptor)
+  assert.equal(assetReads, 1)
+  assert.deepEqual(materialized.value, asset)
+  assert.equal(materialized.hash, expectedHash)
 })

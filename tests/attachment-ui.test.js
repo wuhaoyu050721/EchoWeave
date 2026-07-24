@@ -62,7 +62,7 @@ test('sent attachments render image and text preview entry points', async () => 
   assert.match(source, /attachmentPreviewImageStyle/)
   assert.match(source, /class="attachment-preview-image"[^>]+:style="attachmentPreviewImageStyle/)
   assert.match(source, /attachment-preview-modal/)
-  assert.match(source, /listMessageAttachments/)
+  assert.match(source, /attachmentIds\.map\(id => repository\?\.getAttachment\?\.\(id\)\)/)
   assert.match(source, /attachments:\s*pendingAttachments/)
 })
 
@@ -75,7 +75,7 @@ test('generated assistant images expose image mode and history rendering', async
   assert.match(source, /assistant-image-grid/)
   assert.match(source, /assistant-image-surface/)
   assert.match(source, /media-message-meta/)
-  assert.match(source, /imageAttachments\(message\)\.length === 1 \? 'widthFix' : 'aspectFill'/)
+  assert.match(source, /message\.imageAttachments\.length === 1 \? 'widthFix' : 'aspectFill'/)
   assert.match(source, /\.media-message\s*\{[^}]*position:\s*relative[^}]*width:\s*min\(252px,\s*68vw\)/s)
   assert.match(source, /\.sent-image-button\s*\{[^}]*border:\s*0[^}]*background:\s*transparent/s)
   assert.match(source, /预览生成图片/)

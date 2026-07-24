@@ -1,12 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { IDBFactory } from 'fake-indexeddb'
+import { IDBFactory, IDBKeyRange } from 'fake-indexeddb'
 import { IndexedDbRepository } from '../src/platform/browser/indexeddb-repository.js'
 
 async function createRepository() {
   const repository = new IndexedDbRepository({
     indexedDB: new IDBFactory(),
+    keyRange: IDBKeyRange,
     databaseName: `test-${crypto.randomUUID()}`
   })
   await repository.init()
@@ -37,6 +38,53 @@ test('creates user and assistant messages together and preserves sequence order'
 
   assert.deepEqual((await repository.listMessages('c1')).map((item) => item.id), ['m1', 'm2'])
   assert.deepEqual((await repository.listMessageAttachments('m1')).map((item) => item.id), ['a1'])
+})
+
+test('reads large conversations in bounded newest-first pages', async () => {
+  const repository = await createRepository()
+  await repository.saveMessages(Array.from({ length: 125 }, (_, index) => ({
+    id: `message-${index + 1}`,
+    conversationId: 'large-chat',
+    sequence: index + 1,
+    role: index % 2 ? 'assistant' : 'user',
+    content: `message ${index + 1}`,
+    status: 'completed',
+    deletedAt: null
+  })))
+
+  const latest = await repository.listMessagePage('large-chat', { limit: 20 })
+  const older = await repository.listMessagePage('large-chat', { beforeSequence: 106, limit: 20 })
+  const beginning = await repository.listMessagePage('large-chat', { beforeSequence: 6, limit: 20 })
+
+  assert.deepEqual(latest.messages.map(message => message.sequence), Array.from({ length: 20 }, (_, index) => index + 106))
+  assert.equal(latest.hasMore, true)
+  assert.deepEqual(older.messages.map(message => message.sequence), Array.from({ length: 20 }, (_, index) => index + 86))
+  assert.equal(older.hasMore, true)
+  assert.deepEqual(beginning.messages.map(message => message.sequence), [1, 2, 3, 4, 5])
+  assert.equal(beginning.hasMore, false)
+})
+
+test('reads the latest message for multiple conversation previews', async () => {
+  const repository = await createRepository()
+  await repository.saveMessages(Array.from({ length: 30 }, (_, index) => ({
+    id: `preview-message-${index + 1}`,
+    conversationId: `preview-chat-${Math.floor(index / 3) + 1}`,
+    sequence: (index % 3) + 1,
+    role: index % 3 === 2 ? 'assistant' : 'user',
+    content: `message ${index + 1}`,
+    status: 'completed',
+    deletedAt: null
+  })))
+
+  const latest = await repository.listLatestMessages([
+    'preview-chat-7', 'preview-chat-2', 'preview-chat-7', 'missing-chat', 'preview-chat-10'
+  ])
+
+  assert.deepEqual(latest.map(message => [message.conversationId, message.sequence]), [
+    ['preview-chat-7', 3],
+    ['preview-chat-2', 3],
+    ['preview-chat-10', 3]
+  ])
 })
 
 test('deleting a conversation also deletes its messages', async () => {

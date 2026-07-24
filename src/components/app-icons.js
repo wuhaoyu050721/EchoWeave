@@ -33,6 +33,7 @@ const ICONS = {
   Person: { glyph: '\ue699' },
   PersonAdd: { glyph: '\ue69f' },
   Play: { glyph: '\u25b6', system: true },
+  PlayOutline: { glyph: '\u25b7', system: true },
   Plus: { glyph: '\ue67b' },
   RefreshCw: { glyph: '\ue657' },
   RotateCcw: { glyph: '\ue64f' },
@@ -118,6 +119,7 @@ export const Contact = createIcon('Contact')
 export const Person = createIcon('Person')
 export const PersonAdd = createIcon('PersonAdd')
 export const Play = createIcon('Play')
+export const PlayOutline = createIcon('PlayOutline')
 export const Plus = createIcon('Plus')
 export const RefreshCw = createIcon('RefreshCw')
 export const RotateCcw = createIcon('RotateCcw')

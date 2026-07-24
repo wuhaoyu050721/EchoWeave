@@ -13,6 +13,20 @@ import { migrateLegacyCloudToken } from '../src/workspace/device-token-migration
 import { WorkspaceServiceManager } from '../src/workspace/workspace-service-manager.js'
 import { deriveAccountWorkspaceId } from '../src/workspace/workspace-id.js'
 
+test('browser services resolve the persisted streaming preference with an enabled default', async () => {
+  const services = await createBrowserServices({
+    indexedDB: new IDBFactory(),
+    crypto: globalThis.crypto,
+    databaseName: `streaming-${crypto.randomUUID()}`,
+    deviceDatabaseName: `streaming-device-${crypto.randomUUID()}`
+  })
+
+  assert.equal(await services.chatService.getStreamingEnabled(), true)
+  await services.repository.setSetting('streamingEnabled', false)
+  assert.equal(await services.chatService.getStreamingEnabled(), false)
+  await services.dispose()
+})
+
 test('preserves the legacy browser local database and migrates its token to the device store', async () => {
   const indexedDB = new IDBFactory()
   const legacyRepository = new IndexedDbRepository({ indexedDB })

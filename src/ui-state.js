@@ -115,6 +115,7 @@ export function createInitialUiState() {
     screen: 'conversations',
     settingsView: 'overview',
     activeConversationId: null,
+    groupEditorConversationId: null,
     activeCharacterId: null,
     activeProviderId: 'openai',
     appLockEnabled: false,
@@ -132,7 +133,21 @@ export function openConversation(state, conversationId) {
   state.activeTab = 'conversations'
   state.screen = 'chat'
   state.activeConversationId = conversationId
+  state.groupEditorConversationId = null
   state.activeCharacterId = null
+}
+
+export function openGroupEditor(state, conversationId = null) {
+  state.activeTab = 'conversations'
+  state.screen = 'group-editor'
+  state.groupEditorConversationId = conversationId || null
+  state.activeCharacterId = null
+}
+
+export function closeGroupEditor(state) {
+  state.activeTab = 'conversations'
+  state.screen = 'conversations'
+  state.groupEditorConversationId = null
 }
 
 export function openCharacterDetails(state, characterId) {
@@ -154,6 +169,7 @@ export function selectTab(state, tab) {
 
   state.activeTab = tab
   state.screen = tabScreens[tab]
+  state.groupEditorConversationId = null
   state.activeCharacterId = null
   if (tab === 'settings') state.settingsView = 'overview'
 }
@@ -187,6 +203,10 @@ export function resolveAppBackAction(state) {
 
   if (state?.screen === 'character-detail') {
     return 'contacts'
+  }
+
+  if (state?.screen === 'group-editor') {
+    return 'conversations'
   }
 
   if (state?.screen && state.screen !== 'conversations') {

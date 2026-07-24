@@ -1,8 +1,10 @@
 import {
   CLOUD_SYNC_ENTITY_TYPES,
   extractTombstoneRefs,
+  syncRecordKey,
   timestampFromRecord
 } from '../core/cloud-sync-protocol.js'
+import { hashSyncValue } from '../core/cloud-sync-crypto.js'
 
 export const DEFAULT_LOCAL_ONLY_SYNC_SETTINGS = Object.freeze([
   'cloudDeviceId',
@@ -67,10 +69,14 @@ export class CloudSyncRepositoryAdapter {
     return this.localOnlySettingKeys.has(String(key))
   }
 
-  async readRecords() {
-    const data = await this.repository.readBackupData()
+  async readRecords({ manifest = {} } = {}) {
+    const supportsAssetMetadata = typeof this.repository.listCharacterAssetSyncMetadata === 'function'
+    const data = await this.repository.readBackupData(
+      supportsAssetMetadata ? { includeCharacterAssets: false } : undefined
+    )
     const records = []
     for (const entityType of CLOUD_SYNC_ENTITY_TYPES) {
+      if (entityType === 'characterAssets' && supportsAssetMetadata) continue
       if (entityType === 'settings') {
         for (const [entityId, value] of Object.entries(data.settings ?? {})) {
           if (this.isLocalOnlySetting(entityId)) continue
@@ -83,7 +89,33 @@ export class CloudSyncRepositoryAdapter {
         records.push(await this.#descriptor(entityType, value.id, value))
       }
     }
+    if (supportsAssetMetadata) {
+      records.push(...await this.#characterAssetDescriptors({
+        manifest,
+        characters: data.characters ?? []
+      }))
+    }
     return records
+  }
+
+  async materializeRecord(descriptor) {
+    const entityType = String(descriptor?.entityType ?? '')
+    const entityId = String(descriptor?.entityId ?? '')
+    if (!entityType || !entityId) return null
+    const snapshot = await this.#readStorageRecord(entityType, entityId)
+    if (!snapshot.exists || snapshot.value?.deletedAt) return null
+    const materialized = await this.#descriptor(entityType, entityId, snapshot.value)
+    materialized.hash = hashSyncValue(materialized.value)
+    if (entityType === 'characterAssets') {
+      const metadata = await this.repository.getCharacterAssetSyncMetadata?.(entityId)
+      materialized.localRevision = metadata?.localRevision ?? descriptor?.localRevision ?? 0
+      await this.repository.cacheCharacterAssetSyncHash?.(entityId, {
+        expectedRevision: materialized.localRevision,
+        hash: materialized.hash,
+        sourceUpdatedAt: snapshot.value.updatedAt ?? snapshot.value.createdAt ?? null
+      })
+    }
+    return materialized
   }
 
   async readRecord(entityType, entityId) {
@@ -119,6 +151,7 @@ export class CloudSyncRepositoryAdapter {
       }
       records[entityType].push(record)
     }
+    let result = { applied: true }
     if (expectedSnapshot && typeof this.repository.importRecordsIfUnchanged === 'function') {
       const applied = await this.repository.importRecordsIfUnchanged({
         entityType,
@@ -130,7 +163,18 @@ export class CloudSyncRepositoryAdapter {
     } else {
       await this.repository.importRecords(records)
     }
-    return { applied: true }
+    if (entityType === 'characterAssets' && operation === 'upsert') {
+      const metadata = await this.repository.getCharacterAssetSyncMetadata?.(entityId)
+      const hash = typeof change.hash === 'string' && change.hash
+        ? change.hash
+        : hashSyncValue(value)
+      await this.repository.cacheCharacterAssetSyncHash?.(entityId, {
+        expectedRevision: metadata?.localRevision ?? 0,
+        hash,
+        sourceUpdatedAt: value?.updatedAt ?? value?.createdAt ?? null
+      })
+    }
+    return result
   }
 
   async #readStorageRecord(entityType, entityId) {
@@ -166,6 +210,72 @@ export class CloudSyncRepositoryAdapter {
       sourceUpdatedAt: timestampFromRecord(value),
       refs: extractTombstoneRefs(entityType, value)
     }
+  }
+
+  async #characterAssetDescriptors({ manifest, characters }) {
+    const deletedAssetIds = new Set(
+      characters.flatMap(character => Array.isArray(character?.deletedAssetIds) ? character.deletedAssetIds : [])
+        .map(String)
+    )
+    const records = []
+    for (const metadata of await this.repository.listCharacterAssetSyncMetadata()) {
+      const entityId = String(metadata.id)
+      const key = syncRecordKey('characterAssets', entityId)
+      const baseline = manifest?.[key]
+      const legacyDeleted = metadata.metadataKnown === false && (
+        baseline?.deleted === true || deletedAssetIds.has(entityId)
+      )
+      if (metadata.deleted === true || legacyDeleted) continue
+
+      let hash = metadata.syncHash
+      if (
+        !hash &&
+        metadata.metadataKnown === false &&
+        baseline &&
+        baseline.deleted !== true &&
+        typeof baseline.hash === 'string' &&
+        baseline.hash
+      ) {
+        hash = baseline.hash
+        await this.repository.cacheCharacterAssetSyncHash?.(entityId, {
+          expectedRevision: 0,
+          hash,
+          sourceUpdatedAt: metadata.sourceUpdatedAt ?? metadata.createdAt ?? null
+        })
+      }
+
+      if (hash) {
+        records.push({
+          entityType: 'characterAssets',
+          entityId,
+          value: undefined,
+          hash,
+          localRevision: metadata.localRevision ?? 0,
+          sourceUpdatedAt: timestampFromRecord({
+            updatedAt: metadata.sourceUpdatedAt,
+            createdAt: metadata.createdAt
+          }),
+          refs: {
+            characterId: String(metadata.characterId ?? ''),
+            createdAt: metadata.createdAt ?? null
+          }
+        })
+        continue
+      }
+
+      const value = await this.repository.getCharacterAsset(entityId)
+      if (!value || value.deletedAt) continue
+      const descriptor = await this.#descriptor('characterAssets', entityId, value)
+      descriptor.hash = hashSyncValue(descriptor.value)
+      descriptor.localRevision = metadata.localRevision ?? 0
+      await this.repository.cacheCharacterAssetSyncHash?.(entityId, {
+        expectedRevision: descriptor.localRevision,
+        hash: descriptor.hash,
+        sourceUpdatedAt: value.updatedAt ?? value.createdAt ?? null
+      })
+      records.push(descriptor)
+    }
+    return records
   }
 
   async #toPortable(entityType, localValue, entityId) {

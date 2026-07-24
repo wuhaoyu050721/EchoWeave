@@ -509,7 +509,7 @@ final class CloudBackupApp
     private function validateJsonExport(array $backup): int
     {
         $formatVersion = (int) ($backup['formatVersion'] ?? 0);
-        if (!in_array($formatVersion, [1, 2, 3], true)) {
+        if (!in_array($formatVersion, [1, 2, 3, 4, 5], true)) {
             throw new InvalidArgumentException('backup formatVersion is unsupported');
         }
         foreach (['providers', 'conversations', 'messages', 'settings'] as $field) {
@@ -535,12 +535,37 @@ final class CloudBackupApp
         if (array_key_exists('formatVersion', $backup)) return $backup;
 
         $legacyVersion = (int) ($backup['cloudFormatVersion'] ?? 0);
-        if (in_array($legacyVersion, [1, 2, 3], true)) {
+        if (in_array($legacyVersion, [1, 2, 3, 4, 5], true)) {
             $backup['formatVersion'] = $legacyVersion;
             return $backup;
         }
 
-        if (array_key_exists('characters', $backup) || array_key_exists('worldBooks', $backup) || array_key_exists('characterAssets', $backup)) {
+        $hasProviderMemberData = array_filter(
+            $backup['conversations'] ?? [],
+            fn (mixed $conversation): bool => is_array($conversation) && array_filter(
+                is_array($conversation['participants'] ?? null) ? $conversation['participants'] : [],
+                fn (mixed $participant): bool => is_array($participant) && !empty($participant['providerProfileId'])
+            ) !== []
+        ) !== [] || array_filter(
+            $backup['messages'] ?? [],
+            fn (mixed $message): bool => is_array($message) && !empty($message['speakerProviderProfileId'])
+        ) !== [];
+
+        $hasGroupData = array_filter(
+            $backup['conversations'] ?? [],
+            fn (mixed $conversation): bool => is_array($conversation) && ($conversation['conversationKind'] ?? null) === 'group'
+        ) !== [] || array_filter(
+            $backup['messages'] ?? [],
+            fn (mixed $message): bool => is_array($message) && (
+                !empty($message['speakerCharacterId']) || !empty($message['speakerNameSnapshot'])
+            )
+        ) !== [];
+
+        if ($hasProviderMemberData) {
+            $backup['formatVersion'] = 5;
+        } elseif ($hasGroupData) {
+            $backup['formatVersion'] = 4;
+        } elseif (array_key_exists('characters', $backup) || array_key_exists('worldBooks', $backup) || array_key_exists('characterAssets', $backup)) {
             $backup['formatVersion'] = 3;
         } elseif (array_key_exists('attachments', $backup)) {
             $backup['formatVersion'] = 2;

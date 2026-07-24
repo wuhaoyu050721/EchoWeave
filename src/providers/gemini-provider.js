@@ -1,5 +1,6 @@
 import { GeminiSseParser } from '../core/gemini-sse-parser.js'
 import { extractImageOutputs } from '../core/image-output.js'
+import { resolveChatRequestTimeout } from '../core/model-request-timeout.js'
 import { buildGeminiEndpoint, buildGeminiModelEndpoint } from '../core/provider-url.js'
 
 const IMAGE_GENERATION_TIMEOUT = 5 * 60 * 1000
@@ -89,7 +90,7 @@ function responseTextParts(payload) {
   const parts = []
   for (const candidate of Array.isArray(payload?.candidates) ? payload.candidates : []) {
     for (const part of Array.isArray(candidate?.content?.parts) ? candidate.content.parts : []) {
-      if (!part?.thought && typeof part?.text === 'string' && part.text.trim()) parts.push(part.text.trim())
+      if (!part?.thought && typeof part?.text === 'string' && part.text.trim()) parts.push(part.text)
     }
   }
   return parts
@@ -149,6 +150,34 @@ export class GeminiProvider {
   }
 
   async streamChat(profile, request, handlers = {}) {
+    if (request.stream === false) {
+      const response = await this.transport.request({
+        url: buildGeminiModelEndpoint(profile.baseUrl, request.model, 'generateContent'),
+        method: 'POST',
+        headers: buildHeaders(profile.apiKey),
+        body: JSON.stringify(serializeGeminiMessages(request.messages)),
+        signal: request.signal,
+        timeout: resolveChatRequestTimeout(profile)
+      })
+      let payload
+      try {
+        payload = JSON.parse(response.text)
+      } catch {
+        throw new Error('Gemini 对话响应不是有效 JSON')
+      }
+      if (payload?.error) throw new Error(String(payload.error.message || 'Gemini 请求失败'))
+
+      const content = responseTextParts(payload).join('')
+      if (content) handlers.onDelta?.(content, payload)
+      const finishReason = (Array.isArray(payload?.candidates) ? payload.candidates : [])
+        .find(candidate => candidate?.finishReason)?.finishReason ?? null
+      if (finishReason) handlers.onFinishReason?.(finishReason, payload)
+      const images = extractImageOutputs(payload, { baseUrl: profile.baseUrl })
+      images.forEach(image => handlers.onImage?.(image, payload))
+      handlers.onDone?.()
+      return { finishReason, images }
+    }
+
     let finishReason = null
     let parseError = null
     let eventCount = 0
@@ -186,7 +215,7 @@ export class GeminiProvider {
       headers: buildHeaders(profile.apiKey, 'text/event-stream'),
       body: JSON.stringify(serializeGeminiMessages(request.messages)),
       signal: request.signal,
-      timeout: Number(profile.requestTimeout) || 60000,
+      timeout: resolveChatRequestTimeout(profile),
       onChunk: chunk => parser.feed(chunk)
     })
     parser.finish()

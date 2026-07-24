@@ -15,6 +15,11 @@
 				<button aria-label="关闭会话操作" @click="$emit('cancel-action')"><X :size="20" /></button>
 			</view>
 			<view class="app-action-sheet-list">
+				<button v-if="actionSheet.group" class="app-action-row" data-testid="conversation-group-settings-action" @click="$emit('select-action', 'group-settings')">
+					<view class="app-action-icon app-action-icon-primary"><Contact :size="20" /></view>
+					<view class="app-action-copy"><text>群聊设置</text><text>调整成员与角色回复方式</text></view>
+					<ChevronRight :size="18" />
+				</button>
 				<button class="app-action-row" data-testid="conversation-rename-action" @click="$emit('select-action', 'rename')">
 					<view class="app-action-icon app-action-icon-primary"><MessageCircle :size="20" /></view>
 					<view class="app-action-copy"><text>重命名会话</text><text>修改当前会话名称</text></view>
@@ -80,10 +85,10 @@
 </template>
 
 <script>
-	import { ChevronRight, Info, MessageCircle, Trash2, X } from './app-icons.js'
+	import { ChevronRight, Contact, Info, MessageCircle, Trash2, X } from './app-icons.js'
 
 	export default {
-		components: { ChevronRight, Info, MessageCircle, Trash2, X },
+		components: { ChevronRight, Contact, Info, MessageCircle, Trash2, X },
 		props: {
 			actionSheet: { type: Object, default: null },
 			dialog: { type: Object, default: null },

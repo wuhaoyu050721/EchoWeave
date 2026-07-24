@@ -1,3 +1,4 @@
+import './src/core/legacy-runtime-polyfill.js'
 import './src/core/abort-controller-polyfill.js'
 import './src/core/text-encoding-polyfill.js'
 import './src/components/app-icons.css'

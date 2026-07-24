@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { hashSyncValue } from '../src/core/cloud-sync-crypto.js'
 import { extractTombstoneRefs, syncRecordKey, timestampFromRecord } from '../src/core/cloud-sync-protocol.js'
 import { PlusSqliteRepository } from '../src/platform/app/plus-sqlite-repository.js'
 import { CloudSyncEngine } from '../src/services/cloud-sync-engine.js'
@@ -249,6 +250,111 @@ const allEntityRecords = [
   { entityType: 'characterAssets', entityId: 'ca1', value: { id: 'ca1', characterId: 'ch1', dataUrl: 'data:image/png;base64,AA==' } },
   { entityType: 'settings', entityId: 'appearance', value: { theme: 'light' } }
 ]
+
+test('does not materialize an unchanged record with a trusted local hash', async () => {
+  const entityId = 'asset-lazy'
+  const key = syncRecordKey('characterAssets', entityId)
+  let currentValue = {
+    id: entityId,
+    characterId: 'character-lazy',
+    dataUrl: `data:image/png;base64,${'A'.repeat(1024 * 1024)}`,
+    updatedAt: '2027-01-15T08:00:00.000Z'
+  }
+  let currentHash = hashSyncValue(currentValue)
+  let materialized = 0
+  const adapter = {
+    async readRecords() {
+      return [{
+        entityType: 'characterAssets',
+        entityId,
+        value: undefined,
+        hash: currentHash,
+        localRevision: 1,
+        sourceUpdatedAt: timestampFromRecord(currentValue),
+        refs: { characterId: currentValue.characterId }
+      }]
+    },
+    async materializeRecord() {
+      materialized += 1
+      return {
+        entityType: 'characterAssets',
+        entityId,
+        value: clone(currentValue),
+        hash: currentHash,
+        localRevision: 1,
+        sourceUpdatedAt: timestampFromRecord(currentValue),
+        refs: { characterId: currentValue.characterId }
+      }
+    },
+    async readRecord() {
+      return {
+        entityType: 'characterAssets',
+        entityId,
+        value: clone(currentValue),
+        sourceUpdatedAt: timestampFromRecord(currentValue),
+        refs: { characterId: currentValue.characterId }
+      }
+    },
+    async readRecordState() {
+      return {
+        record: {
+          entityType: 'characterAssets',
+          entityId,
+          value: clone(currentValue),
+          sourceUpdatedAt: timestampFromRecord(currentValue),
+          refs: { characterId: currentValue.characterId }
+        },
+        snapshot: { exists: true, value: clone(currentValue) }
+      }
+    },
+    async applyRecord() { return { applied: true } }
+  }
+  const api = new FakeSyncApi()
+  api.revision = 1
+  const stateStore = new MemoryStateStore()
+  stateStore.states.set('user-lazy', {
+    version: 1,
+    cursor: 1,
+    encryptionSalt: 'fake-encryption-salt',
+    manifest: {
+      [key]: {
+        entityType: 'characterAssets',
+        entityId,
+        hash: currentHash,
+        updatedAt: timestampFromRecord(currentValue),
+        revision: 1,
+        deviceId: 'device-lazy',
+        deleted: false,
+        refs: { characterId: currentValue.characterId },
+        previousHash: null
+      }
+    },
+    pending: []
+  })
+  const engine = createEngine(adapter, api, stateStore, 'lazy-mutation')
+
+  const unchanged = await engine.sync({
+    accountId: 'user-lazy',
+    deviceId: 'device-lazy',
+    syncPassword: 'sync password secret'
+  })
+  assert.equal(unchanged.pushed, 0)
+  assert.equal(materialized, 0)
+
+  currentValue = {
+    ...currentValue,
+    dataUrl: `data:image/png;base64,${'B'.repeat(1024 * 1024)}`,
+    updatedAt: '2027-01-15T09:00:00.000Z'
+  }
+  currentHash = hashSyncValue(currentValue)
+  const changed = await engine.sync({
+    accountId: 'user-lazy',
+    deviceId: 'device-lazy',
+    syncPassword: 'sync password secret'
+  })
+  assert.equal(changed.pushed, 1)
+  assert.equal(materialized, 1)
+})
 
 test('syncs every entity type across devices with paginated pull and physical-delete tombstones', async () => {
   const api = new FakeSyncApi()

@@ -108,7 +108,7 @@ class StreamRequestRunnable extends Runnable {
       }
 
       const timeout = Math.max(1, options.timeout).toInt()
-      connection.setConnectTimeout(timeout)
+      connection.setConnectTimeout(Math.min(timeout, 30000).toInt())
       connection.setReadTimeout(timeout)
       connection.setRequestMethod(options.method.toUpperCase())
       connection.setDoInput(true)

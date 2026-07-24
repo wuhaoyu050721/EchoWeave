@@ -37,7 +37,11 @@ test('streams Chat Completions deltas and sends expected payload', async () => {
     }
   })
 
-  const result = await provider.streamChat({ baseUrl: 'https://example.com/v1', apiKey: '' }, {
+  const result = await provider.streamChat({
+    baseUrl: 'https://example.com/v1',
+    apiKey: '',
+    requestTimeout: 60000
+  }, {
     model: 'test-model',
     messages: [{ role: 'user', content: 'Hi' }]
   }, { onDelta: (value) => deltas.push(value) })
@@ -46,11 +50,64 @@ test('streams Chat Completions deltas and sends expected payload', async () => {
   assert.equal(result.finishReason, 'stop')
   assert.equal(requests[0].url, 'https://example.com/v1/chat/completions')
   assert.equal(requests[0].headers.Authorization, undefined)
+  assert.equal(requests[0].timeout, 300000)
   assert.deepEqual(JSON.parse(requests[0].body), {
     model: 'test-model',
     messages: [{ role: 'user', content: 'Hi' }],
     stream: true
   })
+})
+
+test('uses a non-streaming Chat Completions request and emits the complete response once', async () => {
+  let request
+  const deltas = []
+  const images = []
+  const finishReasons = []
+  let doneCount = 0
+  const provider = new OpenAIProvider({
+    transport: {
+      async request(options) {
+        request = options
+        return {
+          text: JSON.stringify({
+            choices: [{
+              message: {
+                content: [{ type: 'text', text: 'Complete ' }, { type: 'text', text: 'answer' }],
+                images: [{ b64_json: 'AA==' }]
+              },
+              finish_reason: 'stop'
+            }]
+          })
+        }
+      }
+    }
+  })
+
+  const result = await provider.streamChat({ baseUrl: 'https://example.com/v1', apiKey: 'key' }, {
+    model: 'test-model',
+    messages: [{ role: 'user', content: 'Hi' }],
+    stream: false
+  }, {
+    onDelta: value => deltas.push(value),
+    onImage: image => images.push(image),
+    onFinishReason: value => finishReasons.push(value),
+    onDone: () => { doneCount += 1 }
+  })
+
+  assert.equal(request.onChunk, undefined)
+  assert.equal(request.headers.Accept, 'application/json')
+  assert.equal(request.timeout, 300000)
+  assert.deepEqual(JSON.parse(request.body), {
+    model: 'test-model',
+    messages: [{ role: 'user', content: 'Hi' }],
+    stream: false
+  })
+  assert.deepEqual(deltas, ['Complete answer'])
+  assert.deepEqual(finishReasons, ['stop'])
+  assert.equal(doneCount, 1)
+  assert.equal(result.finishReason, 'stop')
+  assert.equal(result.images.length, 1)
+  assert.equal(images[0].dataUrl, 'data:image/png;base64,AA==')
 })
 
 test('rejects malformed model responses', async () => {

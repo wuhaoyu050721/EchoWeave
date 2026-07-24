@@ -1,3 +1,5 @@
+import { runtimeGlobal } from './legacy-runtime-polyfill.js'
+
 function encodeCodePoint(bytes, codePoint) {
   if (codePoint <= 0x7f) {
     bytes.push(codePoint)
@@ -185,7 +187,7 @@ export class Utf8TextDecoder {
   }
 }
 
-export function installTextEncodingPolyfill(target = globalThis) {
+export function installTextEncodingPolyfill(target = runtimeGlobal) {
   if (typeof target.TextEncoder !== 'function') target.TextEncoder = Utf8TextEncoder
   if (typeof target.TextDecoder !== 'function') target.TextDecoder = Utf8TextDecoder
   return target

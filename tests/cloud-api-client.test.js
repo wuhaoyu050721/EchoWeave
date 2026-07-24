@@ -167,6 +167,56 @@ test('normalizes JSON exports that are missing formatVersion before upload', asy
   assert.deepEqual(sent.attachments, [])
 })
 
+test('infers JSON backup format 4 when group conversation fields are present', async () => {
+  const tokenStore = createTokenStore(createSession({ access_token: 'access', refresh_token: 'refresh' }))
+  const transport = createTransport(async () => ({
+    status: 201,
+    headers: {},
+    text: JSON.stringify({ export: { download_url: 'https://cloud.example.com/api/v1/json-exports/' + 'g'.repeat(43), byte_size: 128 } })
+  }))
+  const client = new CloudApiClient({ baseUrl: 'https://cloud.example.com', transport, tokenStore })
+
+  await client.uploadJsonExport({
+    providers: [],
+    conversations: [{ id: 'group-1', conversationKind: 'group', participants: [] }],
+    messages: [],
+    attachments: [],
+    characters: [],
+    worldBooks: [],
+    characterAssets: [],
+    settings: {}
+  })
+
+  assert.equal(JSON.parse(transport.calls[0].body).backup.formatVersion, 4)
+})
+
+test('infers JSON backup format 5 when provider group members are present', async () => {
+  const tokenStore = createTokenStore(createSession({ access_token: 'access', refresh_token: 'refresh' }))
+  const transport = createTransport(async () => ({
+    status: 201,
+    headers: {},
+    text: JSON.stringify({ export: { download_url: 'https://cloud.example.com/api/v1/json-exports/' + 'p'.repeat(43), byte_size: 128 } })
+  }))
+  const client = new CloudApiClient({ baseUrl: 'https://cloud.example.com', transport, tokenStore })
+
+  await client.uploadJsonExport({
+    providers: [{ id: 'provider-1' }],
+    conversations: [{
+      id: 'group-1',
+      conversationKind: 'group',
+      participants: [{ memberKind: 'provider', providerProfileId: 'provider-1' }]
+    }],
+    messages: [],
+    attachments: [],
+    characters: [],
+    worldBooks: [],
+    characterAssets: [],
+    settings: {}
+  })
+
+  assert.equal(JSON.parse(transport.calls[0].body).backup.formatVersion, 5)
+})
+
 test('rejects malformed or foreign JSON export links before requesting them', async () => {
   const tokenStore = createTokenStore()
   const transport = createTransport(async () => {

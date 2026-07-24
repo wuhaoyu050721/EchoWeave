@@ -35,6 +35,11 @@ function putAll(store, records) {
   }
 }
 
+function normalizeMessagePageLimit(value, fallback = 60) {
+  const numeric = Math.floor(Number(value))
+  return Number.isFinite(numeric) ? Math.max(1, Math.min(200, numeric)) : fallback
+}
+
 const IMPORT_STORE_NAMES = [
   'providers', 'conversations', 'messages', 'attachments',
   'characters', 'worldBooks', 'characterAssets', 'settings'
@@ -90,6 +95,7 @@ async function runWriteTransaction(transaction, write) {
 export class IndexedDbRepository {
   constructor({
     indexedDB = globalThis.indexedDB,
+    keyRange = globalThis.IDBKeyRange,
     databaseName,
     workspaceId = LOCAL_WORKSPACE_ID,
     databaseVersion = 3
@@ -98,6 +104,7 @@ export class IndexedDbRepository {
       throw new Error('当前环境不支持 IndexedDB')
     }
     this.indexedDB = indexedDB
+    this.keyRange = keyRange || null
     this.workspaceId = assertWorkspaceId(workspaceId)
     this.databaseName = databaseName ?? browserDatabaseNameForWorkspace(this.workspaceId)
     this.databaseVersion = databaseVersion
@@ -269,6 +276,65 @@ export class IndexedDbRepository {
     return (await this.#getAll('messages'))
       .filter((message) => message.conversationId === conversationId && !message.deletedAt)
       .sort((left, right) => (left.sequence ?? 0) - (right.sequence ?? 0))
+  }
+
+  async listMessagePage(conversationId, { beforeSequence = null, limit = 60 } = {}) {
+    const pageLimit = normalizeMessagePageLimit(limit)
+    const before = Number(beforeSequence)
+    const hasBefore = beforeSequence !== null && beforeSequence !== undefined && Number.isFinite(before)
+    if (!this.keyRange) {
+      const messages = (await this.listMessages(conversationId))
+        .filter(message => !hasBefore || (Number(message.sequence) || 0) < before)
+      return {
+        messages: messages.slice(-pageLimit),
+        hasMore: messages.length > pageLimit
+      }
+    }
+
+    const transaction = this.#transaction('messages')
+    const index = transaction.objectStore('messages').index('conversationSequence')
+    const range = this.keyRange.bound(
+      [conversationId, Number.MIN_SAFE_INTEGER],
+      [conversationId, hasBefore ? before : Number.MAX_SAFE_INTEGER],
+      false,
+      hasBefore
+    )
+    const request = index.openCursor(range, 'prev')
+    const descending = await new Promise((resolve, reject) => {
+      const values = []
+      request.addEventListener('success', () => {
+        const cursor = request.result
+        if (!cursor || values.length > pageLimit) {
+          resolve(values)
+          return
+        }
+        if (!cursor.value.deletedAt) values.push(cursor.value)
+        cursor.continue()
+      })
+      request.addEventListener('error', () => reject(request.error), { once: true })
+    })
+    return {
+      messages: descending.slice(0, pageLimit).reverse(),
+      hasMore: descending.length > pageLimit
+    }
+  }
+
+  async listLatestMessages(conversationIds = []) {
+    const ids = [...new Set(
+      (Array.isArray(conversationIds) ? conversationIds : [])
+        .map(value => String(value || '').trim())
+        .filter(Boolean)
+    )]
+    const messages = []
+    for (let offset = 0; offset < ids.length; offset += 16) {
+      const batch = await Promise.all(
+        ids.slice(offset, offset + 16).map(async conversationId => (
+          (await this.listMessagePage(conversationId, { limit: 1 })).messages[0] || null
+        ))
+      )
+      messages.push(...batch.filter(Boolean))
+    }
+    return messages
   }
 
   async listAllMessages() {

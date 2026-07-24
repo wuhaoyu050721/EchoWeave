@@ -6,7 +6,14 @@ import {
 
 const PAYLOAD_CHUNK_CHARACTERS = 256 * 1024
 const PAYLOAD_CHUNK_MARKER = '__echo_weave_chunked_payload_v1__'
-const LARGE_PAYLOAD_TABLES = Object.freeze([
+const LATEST_MESSAGE_CURSOR_BATCH_SIZE = 4
+const PAYLOAD_TABLES = Object.freeze([
+  { table: 'providers', keyColumn: 'id' },
+  { table: 'conversations', keyColumn: 'id' },
+  { table: 'messages', keyColumn: 'id' },
+  { table: 'settings', keyColumn: 'key' },
+  { table: 'secrets', keyColumn: 'key' },
+  { table: 'attachments', keyColumn: 'id' },
   { table: 'characters', keyColumn: 'id' },
   { table: 'world_books', keyColumn: 'id' },
   { table: 'character_assets', keyColumn: 'id' }
@@ -107,6 +114,21 @@ const MIGRATIONS = [
       )`,
       'CREATE INDEX IF NOT EXISTS idx_payload_chunks_entity ON payload_chunks (entity_table, entity_id, chunk_index)'
     ]
+  },
+  {
+    version: 5,
+    statements: [
+      `CREATE TABLE IF NOT EXISTS sync_local_metadata (
+        entity_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        local_revision INTEGER NOT NULL DEFAULT 0,
+        deleted INTEGER NOT NULL DEFAULT 0,
+        source_updated_at TEXT,
+        sync_hash TEXT,
+        PRIMARY KEY (entity_type, entity_id)
+      )`,
+      'CREATE INDEX IF NOT EXISTS idx_sync_local_metadata_revision ON sync_local_metadata (entity_type, local_revision)'
+    ]
   }
 ]
 
@@ -120,6 +142,11 @@ function sqlText(value) {
   return `'${String(value).replace(/'/g, "''")}'`
 }
 
+function normalizeMessagePageLimit(value, fallback = 60) {
+  const numeric = Math.floor(Number(value))
+  return Number.isFinite(numeric) ? Math.max(1, Math.min(200, numeric)) : fallback
+}
+
 function encodePayload(value) {
   return encodeURIComponent(JSON.stringify(value))
 }
@@ -128,20 +155,20 @@ function decodePayload(value) {
   return JSON.parse(decodeURIComponent(String(value)))
 }
 
-function providerSql(provider) {
-  return `INSERT OR REPLACE INTO providers (id, payload, updated_at, deleted_at) VALUES (${sqlText(provider.id)}, ${sqlText(encodePayload(provider))}, ${sqlText(provider.updatedAt)}, ${sqlText(provider.deletedAt)})`
+function providerSql(provider, payload = encodePayload(provider)) {
+  return `INSERT OR REPLACE INTO providers (id, payload, updated_at, deleted_at) VALUES (${sqlText(provider.id)}, ${sqlText(payload)}, ${sqlText(provider.updatedAt)}, ${sqlText(provider.deletedAt)})`
 }
 
-function conversationSql(conversation) {
-  return `INSERT OR REPLACE INTO conversations (id, payload, last_message_at, updated_at, deleted_at) VALUES (${sqlText(conversation.id)}, ${sqlText(encodePayload(conversation))}, ${sqlText(conversation.lastMessageAt)}, ${sqlText(conversation.updatedAt)}, ${sqlText(conversation.deletedAt)})`
+function conversationSql(conversation, payload = encodePayload(conversation)) {
+  return `INSERT OR REPLACE INTO conversations (id, payload, last_message_at, updated_at, deleted_at) VALUES (${sqlText(conversation.id)}, ${sqlText(payload)}, ${sqlText(conversation.lastMessageAt)}, ${sqlText(conversation.updatedAt)}, ${sqlText(conversation.deletedAt)})`
 }
 
-function messageSql(message) {
-  return `INSERT OR REPLACE INTO messages (id, conversation_id, sequence, status, created_at, updated_at, deleted_at, payload) VALUES (${sqlText(message.id)}, ${sqlText(message.conversationId)}, ${Number(message.sequence) || 0}, ${sqlText(message.status)}, ${sqlText(message.createdAt)}, ${sqlText(message.updatedAt)}, ${sqlText(message.deletedAt)}, ${sqlText(encodePayload(message))})`
+function messageSql(message, payload = encodePayload(message)) {
+  return `INSERT OR REPLACE INTO messages (id, conversation_id, sequence, status, created_at, updated_at, deleted_at, payload) VALUES (${sqlText(message.id)}, ${sqlText(message.conversationId)}, ${Number(message.sequence) || 0}, ${sqlText(message.status)}, ${sqlText(message.createdAt)}, ${sqlText(message.updatedAt)}, ${sqlText(message.deletedAt)}, ${sqlText(payload)})`
 }
 
-function attachmentSql(attachment) {
-  return `INSERT OR REPLACE INTO attachments (id, conversation_id, message_id, created_at, payload) VALUES (${sqlText(attachment.id)}, ${sqlText(attachment.conversationId)}, ${sqlText(attachment.messageId)}, ${sqlText(attachment.createdAt)}, ${sqlText(encodePayload(attachment))})`
+function attachmentSql(attachment, payload = encodePayload(attachment)) {
+  return `INSERT OR REPLACE INTO attachments (id, conversation_id, message_id, created_at, payload) VALUES (${sqlText(attachment.id)}, ${sqlText(attachment.conversationId)}, ${sqlText(attachment.messageId)}, ${sqlText(attachment.createdAt)}, ${sqlText(payload)})`
 }
 
 function characterSql(character, payload = encodePayload(character)) {
@@ -154,6 +181,15 @@ function worldBookSql(worldBook, payload = encodePayload(worldBook)) {
 
 function characterAssetSql(asset, payload = encodePayload(asset)) {
   return `INSERT OR REPLACE INTO character_assets (id, character_id, created_at, payload) VALUES (${sqlText(asset.id)}, ${sqlText(asset.characterId)}, ${sqlText(asset.createdAt)}, ${sqlText(payload)})`
+}
+
+function syncLocalMetadataSql(entityType, entityId, { deleted = false, sourceUpdatedAt = null } = {}) {
+  return `INSERT OR REPLACE INTO sync_local_metadata ` +
+    `(entity_type, entity_id, local_revision, deleted, source_updated_at, sync_hash) VALUES (` +
+    `${sqlText(entityType)}, ${sqlText(entityId)}, ` +
+    `COALESCE((SELECT local_revision + 1 FROM sync_local_metadata ` +
+    `WHERE entity_type = ${sqlText(entityType)} AND entity_id = ${sqlText(entityId)}), 1), ` +
+    `${deleted ? 1 : 0}, ${sqlText(sourceUpdatedAt)}, NULL)`
 }
 
 function deletePayloadChunksSql(entityTable, entityId) {
@@ -183,6 +219,22 @@ function chunkedPayloadStatements(entityTable, entityId, value, recordSql) {
   return statements
 }
 
+function providerStatements(provider) {
+  return chunkedPayloadStatements('providers', provider.id, provider, payload => providerSql(provider, payload))
+}
+
+function conversationStatements(conversation) {
+  return chunkedPayloadStatements('conversations', conversation.id, conversation, payload => conversationSql(conversation, payload))
+}
+
+function messageStatements(message) {
+  return chunkedPayloadStatements('messages', message.id, message, payload => messageSql(message, payload))
+}
+
+function attachmentStatements(attachment) {
+  return chunkedPayloadStatements('attachments', attachment.id, attachment, payload => attachmentSql(attachment, payload))
+}
+
 function characterStatements(character) {
   return chunkedPayloadStatements('characters', character.id, character, payload => characterSql(character, payload))
 }
@@ -192,11 +244,21 @@ function worldBookStatements(worldBook) {
 }
 
 function characterAssetStatements(asset) {
-  return chunkedPayloadStatements('character_assets', asset.id, asset, payload => characterAssetSql(asset, payload))
+  return [
+    ...chunkedPayloadStatements('character_assets', asset.id, asset, payload => characterAssetSql(asset, payload)),
+    syncLocalMetadataSql('characterAssets', asset.id, {
+      deleted: Boolean(asset.deletedAt),
+      sourceUpdatedAt: asset.updatedAt ?? asset.createdAt ?? null
+    })
+  ]
 }
 
-function keyValueSql(table, key, value) {
-  return `INSERT OR REPLACE INTO ${table} (key, payload) VALUES (${sqlText(key)}, ${sqlText(encodePayload(value))})`
+function keyValueSql(table, key, value, payload = encodePayload(value)) {
+  return `INSERT OR REPLACE INTO ${table} (key, payload) VALUES (${sqlText(key)}, ${sqlText(payload)})`
+}
+
+function keyValueStatements(table, key, value) {
+  return chunkedPayloadStatements(table, key, value, payload => keyValueSql(table, key, value, payload))
 }
 
 const SYNC_TABLE_BY_ENTITY = Object.freeze({
@@ -215,14 +277,14 @@ function importStatements({
   characters = [], worldBooks = [], characterAssets = [], settings = {}
 }) {
   return [
-    ...providers.map(providerSql),
-    ...conversations.map(conversationSql),
-    ...messages.map(messageSql),
-    ...attachments.map(attachmentSql),
+    ...providers.flatMap(providerStatements),
+    ...conversations.flatMap(conversationStatements),
+    ...messages.flatMap(messageStatements),
+    ...attachments.flatMap(attachmentStatements),
     ...characters.flatMap(characterStatements),
     ...worldBooks.flatMap(worldBookStatements),
     ...characterAssets.flatMap(characterAssetStatements),
-    ...Object.entries(settings).map(([key, value]) => keyValueSql('settings', key, value))
+    ...Object.entries(settings).flatMap(([key, value]) => keyValueStatements('settings', key, value))
   ]
 }
 
@@ -384,7 +446,7 @@ export class PlusSqliteRepository {
   }
 
   async #migrateLegacyLargePayloads() {
-    for (const { table, keyColumn } of LARGE_PAYLOAD_TABLES) {
+    for (const { table, keyColumn } of PAYLOAD_TABLES) {
       const rows = await this.#select(
         `SELECT ${keyColumn} AS entity_id, length(payload) AS payload_length FROM ${table} ` +
         `WHERE payload <> ${sqlText(PAYLOAD_CHUNK_MARKER)} AND length(payload) > ${PAYLOAD_CHUNK_CHARACTERS}`
@@ -428,17 +490,24 @@ export class PlusSqliteRepository {
 
   async #decodeStoredPayload(table, entityId, payload) {
     if (payload !== PAYLOAD_CHUNK_MARKER) return decodePayload(payload)
-    const rows = await this.#select(
-      `SELECT chunk_index, payload_chunk FROM payload_chunks WHERE entity_table = ${sqlText(table)} ` +
-      `AND entity_id = ${sqlText(entityId)} ORDER BY chunk_index ASC`
+    const countRows = await this.#select(
+      `SELECT COUNT(*) AS chunk_count FROM payload_chunks WHERE entity_table = ${sqlText(table)} ` +
+      `AND entity_id = ${sqlText(entityId)}`
     )
-    if (!rows.length) throw new Error(`SQLite 大字段分块缺失: ${table}/${entityId}`)
+    const chunkCount = Number(countRows[0]?.chunk_count)
+    if (!Number.isSafeInteger(chunkCount) || chunkCount <= 0) {
+      throw new Error(`SQLite 大字段分块缺失: ${table}/${entityId}`)
+    }
     const chunks = []
-    for (let index = 0; index < rows.length; index += 1) {
-      if (Number(rows[index].chunk_index) !== index || typeof rows[index].payload_chunk !== 'string') {
+    for (let index = 0; index < chunkCount; index += 1) {
+      const rows = await this.#select(
+        `SELECT payload_chunk FROM payload_chunks WHERE entity_table = ${sqlText(table)} ` +
+        `AND entity_id = ${sqlText(entityId)} AND chunk_index = ${index} LIMIT 1`
+      )
+      if (typeof rows[0]?.payload_chunk !== 'string') {
         throw new Error(`SQLite 大字段分块损坏: ${table}/${entityId}`)
       }
-      chunks.push(rows[index].payload_chunk)
+      chunks.push(rows[0].payload_chunk)
     }
     return decodePayload(chunks.join(''))
   }
@@ -462,29 +531,40 @@ export class PlusSqliteRepository {
   }
 
   async listProviders() {
-    const rows = await this.#select("SELECT payload FROM providers WHERE deleted_at IS NULL ORDER BY COALESCE(updated_at, '') DESC")
-    return rows.map((row) => decodePayload(row.payload))
+    const rows = await this.#select("SELECT id, payload FROM providers WHERE deleted_at IS NULL ORDER BY COALESCE(updated_at, '') DESC")
+    return this.#decodePayloadRows('providers', rows)
   }
 
   getProvider(id) { return this.#get('providers', 'id', id) }
-  async saveProvider(provider) { await this.#enqueueWrite(() => this.#execute(providerSql(provider))); return provider }
-  deleteProvider(id) { return this.#enqueueWrite(() => this.#execute(`DELETE FROM providers WHERE id = ${sqlText(id)}`)) }
+  async saveProvider(provider) { await this.#enqueueWrite(() => this.#transactional(providerStatements(provider))); return provider }
+  deleteProvider(id) {
+    return this.#enqueueWrite(() => this.#transactional([
+      deletePayloadChunksSql('providers', id),
+      `DELETE FROM providers WHERE id = ${sqlText(id)}`
+    ]))
+  }
 
   async listConversations() {
-    const rows = await this.#select("SELECT payload FROM conversations WHERE deleted_at IS NULL ORDER BY COALESCE(last_message_at, '') DESC")
-    return rows.map((row) => decodePayload(row.payload))
+    const rows = await this.#select("SELECT id, payload FROM conversations WHERE deleted_at IS NULL ORDER BY COALESCE(last_message_at, '') DESC")
+    return this.#decodePayloadRows('conversations', rows)
   }
 
   getConversation(id) { return this.#get('conversations', 'id', id) }
-  async saveConversation(conversation) { await this.#enqueueWrite(() => this.#execute(conversationSql(conversation))); return conversation }
+  async saveConversation(conversation) { await this.#enqueueWrite(() => this.#transactional(conversationStatements(conversation))); return conversation }
 
   async createConversationWithInitialMessage(conversation, message = null) {
-    await this.#enqueueWrite(() => this.#transactional([conversationSql(conversation), ...(message ? [messageSql(message)] : [])]))
+    await this.#enqueueWrite(() => this.#transactional([
+      ...conversationStatements(conversation),
+      ...(message ? messageStatements(message) : [])
+    ]))
     return conversation
   }
 
   async deleteConversation(id) {
     await this.#enqueueWrite(() => this.#transactional([
+      `DELETE FROM payload_chunks WHERE entity_table = 'attachments' AND entity_id IN (SELECT id FROM attachments WHERE conversation_id = ${sqlText(id)})`,
+      `DELETE FROM payload_chunks WHERE entity_table = 'messages' AND entity_id IN (SELECT id FROM messages WHERE conversation_id = ${sqlText(id)})`,
+      deletePayloadChunksSql('conversations', id),
       `DELETE FROM attachments WHERE conversation_id = ${sqlText(id)}`,
       `DELETE FROM messages WHERE conversation_id = ${sqlText(id)}`,
       `DELETE FROM conversations WHERE id = ${sqlText(id)}`
@@ -492,66 +572,121 @@ export class PlusSqliteRepository {
   }
 
   async listMessages(conversationId) {
-    const rows = await this.#select(`SELECT payload FROM messages WHERE conversation_id = ${sqlText(conversationId)} AND deleted_at IS NULL ORDER BY sequence ASC`)
-    return rows.map((row) => decodePayload(row.payload))
+    const rows = await this.#select(`SELECT id, payload FROM messages WHERE conversation_id = ${sqlText(conversationId)} AND deleted_at IS NULL ORDER BY sequence ASC`)
+    return this.#decodePayloadRows('messages', rows)
+  }
+
+  async listMessagePage(conversationId, { beforeSequence = null, limit = 60 } = {}) {
+    const pageLimit = normalizeMessagePageLimit(limit)
+    const before = Number(beforeSequence)
+    const hasBefore = beforeSequence !== null && beforeSequence !== undefined && Number.isFinite(before)
+    const beforeClause = hasBefore ? ` AND sequence < ${before}` : ''
+    const rows = await this.#select(
+      `SELECT id, payload FROM messages WHERE conversation_id = ${sqlText(conversationId)} ` +
+      `AND deleted_at IS NULL${beforeClause} ORDER BY sequence DESC LIMIT ${pageLimit + 1}`
+    )
+    const pageRows = rows.slice(0, pageLimit)
+    return {
+      messages: (await this.#decodePayloadRows('messages', pageRows)).reverse(),
+      hasMore: rows.length > pageLimit
+    }
+  }
+
+  async listLatestMessages(conversationIds = []) {
+    const ids = [...new Set(
+      (Array.isArray(conversationIds) ? conversationIds : [])
+        .map(value => String(value || '').trim())
+        .filter(Boolean)
+    )]
+    const messages = []
+    const seenConversations = new Set()
+    for (let offset = 0; offset < ids.length; offset += LATEST_MESSAGE_CURSOR_BATCH_SIZE) {
+      const batchIds = ids.slice(offset, offset + LATEST_MESSAGE_CURSOR_BATCH_SIZE)
+      const idList = batchIds.map(sqlText).join(', ')
+      const rows = await this.#select(
+        'SELECT messages.id, messages.payload FROM messages ' +
+        'INNER JOIN (' +
+          'SELECT conversation_id, MAX(sequence) AS max_sequence FROM messages ' +
+          `WHERE deleted_at IS NULL AND conversation_id IN (${idList}) GROUP BY conversation_id` +
+        ') AS latest ON latest.conversation_id = messages.conversation_id ' +
+          'AND latest.max_sequence = messages.sequence ' +
+        'WHERE messages.deleted_at IS NULL ORDER BY messages.conversation_id ASC'
+      )
+      const decoded = await this.#decodePayloadRows('messages', rows)
+      for (const message of decoded) {
+        if (!message?.conversationId || seenConversations.has(message.conversationId)) continue
+        seenConversations.add(message.conversationId)
+        messages.push(message)
+      }
+    }
+    return messages
   }
 
   async listAllMessages() {
-    const rows = await this.#select("SELECT payload FROM messages WHERE deleted_at IS NULL ORDER BY COALESCE(created_at, '') ASC, sequence ASC")
-    return rows.map((row) => decodePayload(row.payload))
+    const rows = await this.#select("SELECT id, payload FROM messages WHERE deleted_at IS NULL ORDER BY COALESCE(created_at, '') ASC, sequence ASC")
+    return this.#decodePayloadRows('messages', rows)
   }
 
   getMessage(id) { return this.#get('messages', 'id', id) }
-  async saveMessage(message) { await this.#enqueueWrite(() => this.#execute(messageSql(message))); return message }
-  async saveMessages(messages) { await this.#enqueueWrite(() => this.#transactional(messages.map(messageSql))); return messages }
+  async saveMessage(message) { await this.#enqueueWrite(() => this.#transactional(messageStatements(message))); return message }
+  async saveMessages(messages) { await this.#enqueueWrite(() => this.#transactional(messages.flatMap(messageStatements))); return messages }
 
   async createMessagePair(userMessage, assistantMessage, attachments = []) {
-    await this.#enqueueWrite(() => this.#transactional([messageSql(userMessage), messageSql(assistantMessage), ...attachments.map(attachmentSql)]))
+    await this.#enqueueWrite(() => this.#transactional([
+      ...messageStatements(userMessage),
+      ...messageStatements(assistantMessage),
+      ...attachments.flatMap(attachmentStatements)
+    ]))
     return [userMessage, assistantMessage]
   }
 
-  async saveAttachments(attachments) { await this.#enqueueWrite(() => this.#transactional(attachments.map(attachmentSql))); return attachments }
+  async saveAttachments(attachments) { await this.#enqueueWrite(() => this.#transactional(attachments.flatMap(attachmentStatements))); return attachments }
 
   async listAllAttachments() {
-    const rows = await this.#select("SELECT payload FROM attachments ORDER BY COALESCE(created_at, '') ASC")
-    return rows.map(row => decodePayload(row.payload)).filter(attachment => !attachment.deletedAt)
+    const rows = await this.#select("SELECT id, payload FROM attachments ORDER BY COALESCE(created_at, '') ASC")
+    return (await this.#decodePayloadRows('attachments', rows)).filter(attachment => !attachment.deletedAt)
   }
 
   getAttachment(id) { return this.#get('attachments', 'id', id) }
 
   async listMessageAttachments(messageId) {
-    const rows = await this.#select(`SELECT payload FROM attachments WHERE message_id = ${sqlText(messageId)} ORDER BY COALESCE(created_at, '') ASC`)
-    return rows.map(row => decodePayload(row.payload)).filter(attachment => !attachment.deletedAt)
+    const rows = await this.#select(`SELECT id, payload FROM attachments WHERE message_id = ${sqlText(messageId)} ORDER BY COALESCE(created_at, '') ASC`)
+    return (await this.#decodePayloadRows('attachments', rows)).filter(attachment => !attachment.deletedAt)
   }
 
   async listConversationAttachments(conversationId) {
-    const rows = await this.#select(`SELECT payload FROM attachments WHERE conversation_id = ${sqlText(conversationId)} ORDER BY COALESCE(created_at, '') ASC`)
-    return rows.map(row => decodePayload(row.payload)).filter(attachment => !attachment.deletedAt)
+    const rows = await this.#select(`SELECT id, payload FROM attachments WHERE conversation_id = ${sqlText(conversationId)} ORDER BY COALESCE(created_at, '') ASC`)
+    return (await this.#decodePayloadRows('attachments', rows)).filter(attachment => !attachment.deletedAt)
   }
 
   deleteAttachmentsByMessage(messageId) {
-    return this.#enqueueWrite(() => this.#execute(`DELETE FROM attachments WHERE message_id = ${sqlText(messageId)}`))
+    return this.#enqueueWrite(() => this.#transactional([
+      `DELETE FROM payload_chunks WHERE entity_table = 'attachments' AND entity_id IN (SELECT id FROM attachments WHERE message_id = ${sqlText(messageId)})`,
+      `DELETE FROM attachments WHERE message_id = ${sqlText(messageId)}`
+    ]))
   }
 
   async recoverGeneratingMessages(updatedAt = new Date().toISOString()) {
     return this.#enqueueWrite(async () => {
-      const rows = await this.#select("SELECT payload FROM messages WHERE status = 'generating'")
+      const rows = await this.#select("SELECT id, payload FROM messages WHERE status = 'generating'")
       if (!rows.length) return 0
-      const messages = rows.map((row) => ({ ...decodePayload(row.payload), status: 'interrupted', updatedAt }))
-      await this.#transactional(messages.map(messageSql))
+      const messages = (await this.#decodePayloadRows('messages', rows))
+        .map(message => ({ ...message, status: 'interrupted', updatedAt }))
+      await this.#transactional(messages.flatMap(messageStatements))
       return messages.length
     })
   }
 
-  async setSetting(key, value) { await this.#enqueueWrite(() => this.#execute(keyValueSql('settings', key, value))); return value }
+  async setSetting(key, value) { await this.#enqueueWrite(() => this.#transactional(keyValueStatements('settings', key, value))); return value }
   async getSetting(key, fallback = null) { return (await this.#get('settings', 'key', key)) ?? fallback }
 
   async listSettings() {
     const rows = await this.#select('SELECT key, payload FROM settings ORDER BY key ASC')
-    return Object.fromEntries(rows.map((row) => [row.key, decodePayload(row.payload)]))
+    const values = await this.#decodePayloadRows('settings', rows, 'key')
+    return Object.fromEntries(rows.map((row, index) => [row.key, values[index]]))
   }
 
-  async setSecret(key, value) { await this.#enqueueWrite(() => this.#execute(keyValueSql('secrets', key, value))); return value }
+  async setSecret(key, value) { await this.#enqueueWrite(() => this.#transactional(keyValueStatements('secrets', key, value))); return value }
   async getSecret(key) { return (await this.#get('secrets', 'key', key)) ?? null }
 
   async listCharacters() {
@@ -601,12 +736,74 @@ export class PlusSqliteRepository {
     return (await this.#decodePayloadRows('character_assets', rows)).filter(asset => !asset.deletedAt)
   }
 
+  async listCharacterAssetSyncMetadata() {
+    const rows = await this.#select(
+      `SELECT assets.id, assets.character_id, assets.created_at, metadata.local_revision, ` +
+      `metadata.deleted, metadata.source_updated_at, metadata.sync_hash ` +
+      `FROM character_assets AS assets LEFT JOIN sync_local_metadata AS metadata ` +
+      `ON metadata.entity_type = 'characterAssets' AND metadata.entity_id = assets.id ` +
+      `ORDER BY assets.id ASC`
+    )
+    return rows.map(row => ({
+      id: String(row.id),
+      characterId: String(row.character_id ?? ''),
+      createdAt: row.created_at ?? null,
+      localRevision: row.local_revision === null || row.local_revision === undefined
+        ? 0
+        : Math.max(0, Math.trunc(Number(row.local_revision) || 0)),
+      metadataKnown: row.local_revision !== null && row.local_revision !== undefined,
+      deleted: row.deleted === null || row.deleted === undefined ? null : Number(row.deleted) === 1,
+      sourceUpdatedAt: row.source_updated_at ?? row.created_at ?? null,
+      syncHash: typeof row.sync_hash === 'string' && row.sync_hash ? row.sync_hash : null
+    }))
+  }
+
+  async getCharacterAssetSyncMetadata(id) {
+    const rows = await this.#select(
+      `SELECT assets.id, assets.character_id, assets.created_at, metadata.local_revision, ` +
+      `metadata.deleted, metadata.source_updated_at, metadata.sync_hash ` +
+      `FROM character_assets AS assets LEFT JOIN sync_local_metadata AS metadata ` +
+      `ON metadata.entity_type = 'characterAssets' AND metadata.entity_id = assets.id ` +
+      `WHERE assets.id = ${sqlText(id)} LIMIT 1`
+    )
+    if (!rows[0]) return null
+    const row = rows[0]
+    return {
+      id: String(row.id),
+      characterId: String(row.character_id ?? ''),
+      createdAt: row.created_at ?? null,
+      localRevision: row.local_revision === null || row.local_revision === undefined
+        ? 0
+        : Math.max(0, Math.trunc(Number(row.local_revision) || 0)),
+      metadataKnown: row.local_revision !== null && row.local_revision !== undefined,
+      deleted: row.deleted === null || row.deleted === undefined ? null : Number(row.deleted) === 1,
+      sourceUpdatedAt: row.source_updated_at ?? row.created_at ?? null,
+      syncHash: typeof row.sync_hash === 'string' && row.sync_hash ? row.sync_hash : null
+    }
+  }
+
+  async cacheCharacterAssetSyncHash(id, { expectedRevision = 0, hash, sourceUpdatedAt = null } = {}) {
+    const revision = Math.max(0, Math.trunc(Number(expectedRevision) || 0))
+    const normalizedHash = String(hash ?? '').toLowerCase()
+    if (!/^[a-f0-9]{64}$/.test(normalizedHash)) throw new Error('Character asset sync hash is invalid')
+    await this.#enqueueWrite(() => this.#transactional([
+      `INSERT OR IGNORE INTO sync_local_metadata ` +
+        `(entity_type, entity_id, local_revision, deleted, source_updated_at, sync_hash) ` +
+        `VALUES ('characterAssets', ${sqlText(id)}, ${revision}, 0, ${sqlText(sourceUpdatedAt)}, ${sqlText(normalizedHash)})`,
+      `UPDATE sync_local_metadata SET sync_hash = ${sqlText(normalizedHash)} ` +
+        `WHERE entity_type = 'characterAssets' AND entity_id = ${sqlText(id)} ` +
+        `AND local_revision = ${revision} AND deleted = 0`
+    ]))
+    const metadata = await this.getCharacterAssetSyncMetadata(id)
+    return metadata?.localRevision === revision && metadata.deleted === false && metadata.syncHash === normalizedHash
+  }
+
   async importCharacterBundle({ character, worldBooks = [], characterAssets = [], conversations = [] }) {
     await this.#enqueueWrite(() => this.#transactional([
       ...characterStatements(character),
       ...worldBooks.flatMap(worldBookStatements),
       ...characterAssets.flatMap(characterAssetStatements),
-      ...conversations.map(conversationSql)
+      ...conversations.flatMap(conversationStatements)
     ]))
     return character
   }
@@ -619,7 +816,7 @@ export class PlusSqliteRepository {
     return worldBook
   }
 
-  async readBackupData() {
+  async readBackupData({ includeCharacterAssets = true } = {}) {
     return {
       providers: await this.listProviders(),
       conversations: await this.listConversations(),
@@ -627,7 +824,7 @@ export class PlusSqliteRepository {
       attachments: await this.listAllAttachments(),
       characters: await this.listCharacters(),
       worldBooks: await this.listAllWorldBooks(),
-      characterAssets: await this.listAllCharacterAssets(),
+      characterAssets: includeCharacterAssets ? await this.listAllCharacterAssets() : [],
       settings: await this.listSettings()
     }
   }

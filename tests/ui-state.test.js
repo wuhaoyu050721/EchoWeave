@@ -10,10 +10,12 @@ import {
   createProviderForm,
   createInitialUiState,
   navigationItems,
+  closeGroupEditor,
   closeSettingsDetails,
   closeCharacterDetails,
   openCharacterDetails,
   openConversationSettings,
+  openGroupEditor,
   openNsfwSettings,
   openSettingsDetails,
   openConversation,
@@ -34,6 +36,20 @@ test('opens chat from a conversation without changing the selected bottom tab', 
   assert.equal(state.screen, 'chat')
   assert.equal(state.activeTab, 'conversations')
   assert.equal(state.activeConversationId, 'product-review')
+})
+
+test('opens and closes the group editor within the conversations tab', () => {
+  const state = createInitialUiState()
+
+  openGroupEditor(state, 'group-1')
+  assert.equal(state.screen, 'group-editor')
+  assert.equal(state.activeTab, 'conversations')
+  assert.equal(state.groupEditorConversationId, 'group-1')
+  assert.equal(resolveAppBackAction(state), 'conversations')
+
+  closeGroupEditor(state)
+  assert.equal(state.screen, 'conversations')
+  assert.equal(state.groupEditorConversationId, null)
 })
 
 test('selecting provider screen leaves chat and activates provider tab', () => {

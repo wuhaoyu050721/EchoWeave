@@ -44,3 +44,16 @@ test('saved provider API keys stay masked until the user explicitly reveals them
   assert.match(source, /getApiKeyForEditing\(providerId\)/)
   assert.match(source, /apiKey: this\.providerApiKeyDirty \|\| !this\.providerForm\.hasApiKey/)
 })
+
+test('latest completed or interrupted assistant replies expose a continue-writing action', async () => {
+  const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+
+  assert.match(source, /v-if="canContinueMessage\(message\)"[^>]*data-testid="continue-writing"[^>]*@click="continueMessage\(message\.id\)"/)
+  assert.match(source, /v-if="canContinueMessage\(message\)"[^>]*data-testid="continue-interrupted"[^>]*@click="continueMessage\(message\.id\)"/)
+  assert.match(source, /async continueMessage\(messageId\)/)
+  assert.match(source, /chatService\.continueResponse\(messageId/)
+  assert.match(source, /\['completed', 'interrupted'\]\.includes\(message\.status\)/)
+  assert.match(source, /!this\.activeProvider && !message\.speakerProviderProfileId/)
+  assert.match(source, /latestMessage\?\.id === message\.id/)
+  assert.match(source, /<PlayOutline :size="14"/)
+})

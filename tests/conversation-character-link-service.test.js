@@ -99,3 +99,98 @@ test('does not guess when an orphan snapshot matches multiple active characters'
   assert.equal(result.repaired, 0)
   assert.equal(repository.records.conversations.get('orphan').characterId, null)
 })
+
+test('refreshes group member snapshots and relinks a reimported deleted member', async () => {
+  const repository = createRepository({
+    conversations: [{
+      id: 'group-1',
+      conversationKind: 'group',
+      participants: [
+        {
+          characterId: 'character-active',
+          nameSnapshot: 'Old active name',
+          avatarAssetId: 'old-avatar',
+          enabled: true
+        },
+        {
+          characterId: 'character-deleted',
+          nameSnapshot: 'Lin Xia',
+          avatarAssetId: 'deleted-avatar',
+          enabled: false,
+          characterDeletedAt: '2026-07-22T01:00:00.000Z'
+        }
+      ]
+    }],
+    characters: [
+      {
+        id: 'character-active', name: 'Su Mo', sourceHash: 'card-a', avatarAssetId: 'avatar-active', deletedAt: null
+      },
+      {
+        id: 'character-deleted', name: 'Lin Xia', sourceHash: 'card-b', avatarAssetId: null,
+        deletedAt: '2026-07-22T01:00:00.000Z'
+      },
+      {
+        id: 'character-reimported', name: 'Lin Xia', sourceHash: 'card-b', avatarAssetId: 'avatar-reimported', deletedAt: null
+      }
+    ]
+  })
+
+  const result = await repairConversationCharacterLinks(repository, {
+    now: () => '2026-07-23T04:00:00.000Z'
+  })
+  const group = repository.records.conversations.get('group-1')
+
+  assert.equal(result.repaired, 1)
+  assert.deepEqual(group.participants.map(participant => ({
+    characterId: participant.characterId,
+    nameSnapshot: participant.nameSnapshot,
+    avatarAssetId: participant.avatarAssetId,
+    enabled: participant.enabled
+  })), [
+    {
+      characterId: 'character-active',
+      nameSnapshot: 'Su Mo',
+      avatarAssetId: 'avatar-active',
+      enabled: true
+    },
+    {
+      characterId: 'character-reimported',
+      nameSnapshot: 'Lin Xia',
+      avatarAssetId: 'avatar-reimported',
+      enabled: true
+    }
+  ])
+  assert.equal('characterDeletedAt' in group.participants[1], false)
+})
+
+test('leaves AI interface group members untouched even when a character has the same name', async () => {
+  const providerParticipant = {
+    memberKind: 'provider',
+    providerProfileId: 'provider-1',
+    modelName: 'deepseek-chat',
+    nameSnapshot: '同名成员',
+    avatarSource: '/static/providers/deepseek.png',
+    enabled: true
+  }
+  const repository = createRepository({
+    conversations: [{
+      id: 'group-provider',
+      conversationKind: 'group',
+      participants: [providerParticipant, {
+        memberKind: 'character',
+        characterId: 'character-1',
+        nameSnapshot: '角色',
+        enabled: true
+      }]
+    }],
+    characters: [
+      { id: 'character-1', name: '角色', avatarAssetId: null, deletedAt: null },
+      { id: 'character-same-name', name: '同名成员', avatarAssetId: 'avatar-same', deletedAt: null }
+    ]
+  })
+
+  await repairConversationCharacterLinks(repository)
+
+  const [restoredProvider] = repository.records.conversations.get('group-provider').participants
+  assert.deepEqual(restoredProvider, providerParticipant)
+})

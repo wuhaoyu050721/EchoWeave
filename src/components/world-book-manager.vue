@@ -1,6 +1,6 @@
 <template>
 	<view v-if="open" class="world-book-manager-backdrop" @click.self="closeManager">
-		<view class="world-book-manager-sheet" role="dialog" aria-modal="true" :aria-label="editorOpen ? '编辑世界书' : '世界书管理'">
+		<view class="world-book-manager-sheet" :class="{ 'editor-open': editorOpen }" role="dialog" aria-modal="true" :aria-label="editorOpen ? '编辑世界书' : '世界书管理'">
 			<view class="manager-heading">
 				<button v-if="editorOpen" class="manager-icon-button" aria-label="返回世界书列表" title="返回" :disabled="operationBusy" @click="cancelEditor"><ArrowLeft :size="20" /></button>
 				<view v-else class="manager-heading-spacer" />
@@ -352,6 +352,7 @@
 		display: flex;
 		width: 100%;
 		max-width: 560px;
+		min-height: 0;
 		max-height: min(92vh, 820px);
 		overflow: hidden;
 		border: 1px solid #e8e5e9;
@@ -359,6 +360,10 @@
 		background: #fff;
 		box-shadow: 0 18px 52px rgba(32, 26, 35, 0.2);
 		flex-direction: column;
+	}
+
+	.world-book-manager-sheet.editor-open {
+		height: min(92vh, 820px);
 	}
 
 	.manager-heading {
@@ -401,7 +406,7 @@
 	.manager-list-scroll,
 	.manager-editor-scroll {
 		min-height: 0;
-		flex: 1;
+		flex: 1 1 auto;
 	}
 
 	.manager-list-scroll {
@@ -484,10 +489,14 @@
 
 	.manager-list-actions,
 	.manager-editor-actions {
+		position: relative;
+		z-index: 2;
 		display: grid;
 		gap: 10px;
-		padding: 12px 16px max(14px, env(safe-area-inset-bottom));
+		padding: 12px 16px 14px;
 		border-top: 1px solid #efedf0;
+		background: #fff;
+		flex: 0 0 auto;
 		grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.4fr);
 	}
 
@@ -515,8 +524,12 @@
 	}
 
 	.manager-editor-scroll {
+		width: 100%;
+		height: 0;
+		overflow: hidden;
 		padding: 0 16px;
 		background: #f7f6f8;
+		flex: 1 1 0;
 	}
 
 	.manager-section {
@@ -883,7 +896,8 @@
 	}
 
 	.manager-editor-tail {
-		height: 6px;
+		display: block;
+		height: 80px;
 	}
 
 	button:disabled,

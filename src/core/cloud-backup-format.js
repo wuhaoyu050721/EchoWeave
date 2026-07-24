@@ -1,4 +1,5 @@
 import { createRuntimeId } from './runtime-id.js'
+import { groupParticipantKey, groupParticipantKind } from './group-chat.js'
 import { hasValidImageAttachmentSource } from './image-output.js'
 
 function cloneJson(value) {
@@ -18,6 +19,7 @@ function validateEntities(payload) {
   requireEntityArrays(payload)
   const conversationIds = new Set()
   const messageIds = new Set()
+  const providerIds = new Set()
   const characterIds = new Set()
   const worldBookIds = new Set()
   const characterAssetIds = new Set()
@@ -34,6 +36,7 @@ function validateEntities(payload) {
       typeIds.add(entity.id)
       if (label === '会话') conversationIds.add(entity.id)
       if (label === '消息') messageIds.add(entity.id)
+      if (label === '接口') providerIds.add(entity.id)
       if (label === '角色') characterIds.add(entity.id)
       if (label === '世界书') worldBookIds.add(entity.id)
       if (label === '角色资源') characterAssetIds.add(entity.id)
@@ -63,6 +66,43 @@ function validateEntities(payload) {
   for (const conversation of payload.conversations) {
     if (conversation.characterId && !characterIds.has(conversation.characterId)) {
       throw new Error(`会话 ${conversation.id} 引用了不存在的角色`)
+    }
+    if (conversation.conversationKind !== 'group') continue
+    if (!Array.isArray(conversation.participants) || conversation.participants.length > 8) {
+      throw new Error(`群聊 ${conversation.id} 的成员列表无效`)
+    }
+    const participantIds = new Set()
+    for (const participant of conversation.participants) {
+      const participantKey = groupParticipantKey(participant)
+      if (!participantKey || participantIds.has(participantKey)) throw new Error(`群聊 ${conversation.id} 的成员无效`)
+      participantIds.add(participantKey)
+      if (groupParticipantKind(participant) === 'provider') {
+        const providerProfileId = String(participant?.providerProfileId ?? '').trim()
+        if (participant.enabled !== false && !providerIds.has(providerProfileId)) {
+          throw new Error(`群聊 ${conversation.id} 引用了不存在的接口`)
+        }
+        continue
+      }
+      const characterId = String(participant?.characterId ?? '').trim()
+      if (participant.enabled !== false && !characterIds.has(characterId)) {
+        throw new Error(`群聊 ${conversation.id} 引用了不存在的角色`)
+      }
+      if (participant.avatarAssetId && characterIds.has(characterId)) {
+        const avatar = assetById.get(participant.avatarAssetId)
+        if (!avatar || avatar.characterId !== characterId) throw new Error(`群聊 ${conversation.id} 引用了无效头像资源`)
+      }
+    }
+  }
+  for (const message of payload.messages) {
+    if (message.speakerProviderProfileId && !providerIds.has(message.speakerProviderProfileId) && !String(message.speakerNameSnapshot ?? '').trim()) {
+      throw new Error(`消息 ${message.id} 引用了不存在的发言接口`)
+    }
+    if (message.speakerCharacterId && !characterIds.has(message.speakerCharacterId) && !String(message.speakerNameSnapshot ?? '').trim()) {
+      throw new Error(`消息 ${message.id} 引用了不存在的发言角色`)
+    }
+    if (message.speakerAvatarAssetId && characterIds.has(message.speakerCharacterId)) {
+      const avatar = assetById.get(message.speakerAvatarAssetId)
+      if (!avatar || avatar.characterId !== message.speakerCharacterId) throw new Error(`消息 ${message.id} 引用了无效发言头像`)
     }
   }
   for (const character of payload.characters) {
@@ -140,7 +180,7 @@ export async function createCloudBackupPayload(data, vault, now = new Date()) {
   }
 
   return {
-    cloudFormatVersion: 3,
+    cloudFormatVersion: 5,
     exportedAt: now.toISOString(),
     providers,
     conversations,
@@ -157,7 +197,7 @@ export async function prepareCloudRestore(payload, {
   vault,
   idFactory = createRuntimeId
 } = {}) {
-  if (![1, 2, 3].includes(payload?.cloudFormatVersion)) throw new Error('不支持的云端备份格式版本')
+  if (![1, 2, 3, 4, 5].includes(payload?.cloudFormatVersion)) throw new Error('不支持的云端备份格式版本')
   const normalized = {
     ...payload,
     attachments: payload.cloudFormatVersion === 1 ? [] : payload.attachments,
@@ -191,6 +231,20 @@ export async function prepareCloudRestore(payload, {
       providerProfileId: providerIds.get(conversation.providerProfileId) ?? null,
       characterId: characterIds.get(conversation.characterId) ?? null,
       characterAvatarAssetId: characterAssetIds.get(conversation.characterAvatarAssetId) ?? null,
+      participants: Array.isArray(conversation.participants)
+        ? conversation.participants.map(participant => (
+            groupParticipantKind(participant) === 'provider'
+              ? {
+                  ...participant,
+                  providerProfileId: providerIds.get(participant.providerProfileId) ?? null
+                }
+              : {
+                  ...participant,
+                  characterId: characterIds.get(participant.characterId) ?? null,
+                  avatarAssetId: characterAssetIds.get(participant.avatarAssetId) ?? null
+                }
+          ))
+        : conversation.participants,
       encryptedSystemPrompt: conversation.systemPrompt
         ? await vault.encryptString(conversation.systemPrompt)
         : null
@@ -202,7 +256,10 @@ export async function prepareCloudRestore(payload, {
     id: messageIds.get(message.id),
     conversationId: conversationIds.get(message.conversationId),
     attachmentIds: (message.attachmentIds ?? []).map(id => attachmentIds.get(id)),
-    retryOfMessageId: messageIds.get(message.retryOfMessageId) ?? null
+    retryOfMessageId: messageIds.get(message.retryOfMessageId) ?? null,
+    speakerProviderProfileId: providerIds.get(message.speakerProviderProfileId) ?? null,
+    speakerCharacterId: characterIds.get(message.speakerCharacterId) ?? null,
+    speakerAvatarAssetId: characterAssetIds.get(message.speakerAvatarAssetId) ?? null
   }))
   const attachments = normalized.attachments.map(attachment => ({
     ...attachment,

@@ -196,6 +196,7 @@ export function buildCharacterPromptBundle({
   character,
   worldBooks = [],
   messages = [],
+  statusMessages = messages,
   userName = '用户',
   random = Math.random
 } = {}) {
@@ -205,7 +206,7 @@ export function buildCharacterPromptBundle({
   const resolvedUserName = cleanText(userName) || '用户'
   const render = value => renderCharacterTemplate(value, { characterName, userName: resolvedUserName })
   const { activated, skippedRegexEntries } = activateWorldBooks(worldBooks, messages, random, render)
-  const previousStatus = latestAssistantStatus(messages)
+  const previousStatus = latestAssistantStatus(statusMessages)
   const statusOutputProtocol = buildStatusOutputProtocol(previousStatus)
   const positionedContent = position => activated
     .filter(entry => entry.position === position)

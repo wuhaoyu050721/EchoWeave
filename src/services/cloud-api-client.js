@@ -11,10 +11,22 @@ function parseResponse(response) {
 
 function normalizeJsonExportBackup(backup) {
   if (!backup || typeof backup !== 'object') return backup
-  if ([1, 2, 3].includes(Number(backup.formatVersion))) return backup
-  if ([1, 2, 3].includes(Number(backup.cloudFormatVersion))) {
+  if ([1, 2, 3, 4, 5].includes(Number(backup.formatVersion))) return backup
+  if ([1, 2, 3, 4, 5].includes(Number(backup.cloudFormatVersion))) {
     const { cloudFormatVersion, ...rest } = backup
     return { formatVersion: Number(cloudFormatVersion), ...rest }
+  }
+  if (
+    backup.conversations?.some?.(conversation => conversation?.participants?.some?.(participant => participant?.providerProfileId)) ||
+    backup.messages?.some?.(message => message?.speakerProviderProfileId)
+  ) {
+    return { formatVersion: 5, ...backup }
+  }
+  if (
+    backup.conversations?.some?.(conversation => conversation?.conversationKind === 'group') ||
+    backup.messages?.some?.(message => message?.speakerCharacterId || message?.speakerNameSnapshot)
+  ) {
+    return { formatVersion: 4, ...backup }
   }
   if (Array.isArray(backup.characters) || Array.isArray(backup.worldBooks) || Array.isArray(backup.characterAssets)) {
     return { formatVersion: 3, ...backup }

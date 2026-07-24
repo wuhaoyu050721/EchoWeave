@@ -1,6 +1,7 @@
 import { extractModelErrorMessage, ModelHttpError } from '../../core/model-http-error.js'
 
 const BASE64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+const DEFAULT_PARTIAL_IDLE_TIMEOUT_MS = 60000
 let requestSequence = 0
 let installedNativeApi = null
 const pendingRequests = new Map()
@@ -50,7 +51,7 @@ function normalizeHeaders(value) {
   return result
 }
 
-function failureError(result = {}) {
+function failureError(result = {}, timeout = 60000) {
   const code = String(result.code || 'network_error')
   if (code === 'request_aborted') return createAbortError()
   const status = Number(result.statusCode || 0)
@@ -62,14 +63,32 @@ function failureError(result = {}) {
       code: status === 401 || status === 403 ? 'authentication_error' : 'http_error'
     })
   }
-  const error = new Error(String(result.message || 'Android 网络请求失败'))
-  error.code = code
+  const nativeMessage = String(result.message || '')
+  const timedOut = code === 'request_timeout' ||
+    /SocketTimeoutException|\btimeout\b|timed\s*out/i.test(nativeMessage)
+  const timeoutSeconds = Math.max(1, Math.round(Number(timeout) / 1000))
+  const error = new Error(timedOut
+    ? `模型接口响应超时（最长等待 ${timeoutSeconds} 秒），请重试或检查接口网络`
+    : nativeMessage || 'Android 网络请求失败')
+  error.code = timedOut ? 'request_timeout' : code
   if (status) error.statusCode = status
   return error
 }
 
+function createPartialIdleTimeoutError(timeout) {
+  const timeoutSeconds = Math.max(1, Math.round(Number(timeout) / 1000))
+  const error = new Error(`模型流式连接超过 ${timeoutSeconds} 秒没有新内容，已保留当前回复，可直接续写`)
+  error.code = 'stream_idle_timeout'
+  return error
+}
+
 export class NativeStreamingTransport {
-  constructor({ nativeApi } = {}) {
+  constructor({
+    nativeApi,
+    setTimeoutFn = setTimeout,
+    clearTimeoutFn = clearTimeout,
+    partialIdleTimeoutMs = DEFAULT_PARTIAL_IDLE_TIMEOUT_MS
+  } = {}) {
     if (
       typeof nativeApi?.onAiChatStreamEvent !== 'function' ||
       typeof nativeApi?.aiChatStreamRequest !== 'function' ||
@@ -78,6 +97,9 @@ export class NativeStreamingTransport {
       throw new Error('NativeStreamingTransport 需要 Android 原生流式 API')
     }
     this.nativeApi = nativeApi
+    this.setTimeoutFn = setTimeoutFn
+    this.clearTimeoutFn = clearTimeoutFn
+    this.partialIdleTimeoutMs = Math.max(1, Number(partialIdleTimeoutMs) || DEFAULT_PARTIAL_IDLE_TIMEOUT_MS)
     if (installedNativeApi !== nativeApi) {
       nativeApi.onAiChatStreamEvent((event = {}) => {
         pendingRequests.get(String(event.requestId || ''))?.(event)
@@ -103,7 +125,16 @@ export class NativeStreamingTransport {
     return new Promise((resolve, reject) => {
       let settled = false
       let aborted = false
-      const cleanup = () => signal?.removeEventListener('abort', abortRequest)
+      let partialIdleTimer = null
+      const clearPartialIdleTimer = () => {
+        if (partialIdleTimer === null) return
+        this.clearTimeoutFn(partialIdleTimer)
+        partialIdleTimer = null
+      }
+      const cleanup = () => {
+        clearPartialIdleTimer()
+        signal?.removeEventListener('abort', abortRequest)
+      }
       const settle = (callback, value) => {
         if (settled) return
         settled = true
@@ -111,13 +142,23 @@ export class NativeStreamingTransport {
         pendingRequests.delete(requestId)
         callback(value)
       }
+      const resetPartialIdleTimer = () => {
+        clearPartialIdleTimer()
+        partialIdleTimer = this.setTimeoutFn(() => {
+          if (settled || aborted || signal?.aborted) return
+          settle(reject, createPartialIdleTimeoutError(this.partialIdleTimeoutMs))
+          try {
+            this.nativeApi.aiChatStreamCancel(requestId)
+          } catch (_) {}
+        }, this.partialIdleTimeoutMs)
+      }
       const abortRequest = () => {
         if (settled || aborted) return
         aborted = true
-        settled = true
-        cleanup()
-        reject(createAbortError())
-        this.nativeApi.aiChatStreamCancel(requestId)
+        settle(reject, createAbortError())
+        try {
+          this.nativeApi.aiChatStreamCancel(requestId)
+        } catch (_) {}
       }
 
       signal?.addEventListener('abort', abortRequest, { once: true })
@@ -136,7 +177,10 @@ export class NativeStreamingTransport {
           const bytes = base64ToBytes(event.data)
           if (!bytes.length) return
           if (settled || aborted || signal?.aborted) onLateChunk?.(bytes)
-          else onChunk?.(bytes)
+          else {
+            resetPartialIdleTimer()
+            onChunk?.(bytes)
+          }
           return
         }
         if (settled || aborted || signal?.aborted) {
@@ -148,7 +192,7 @@ export class NativeStreamingTransport {
           settle(resolve, { status, headers: normalizeHeaders(event.headers), text: '' })
           return
         }
-        if (eventType === 'failure') settle(reject, failureError(event))
+        if (eventType === 'failure') settle(reject, failureError(event, timeout))
       })
       try {
         this.nativeApi.aiChatStreamRequest({

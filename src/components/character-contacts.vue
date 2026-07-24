@@ -3,7 +3,7 @@
 		<view class="contacts-header">
 			<text class="contacts-title">联系人</text>
 			<view class="contacts-header-actions">
-				<button class="contacts-world-books" :class="{ active: worldBookCount > 0 }" :aria-label="`管理世界书，当前 ${worldBookCount} 本`" @click="$emit('manage-world-books')"><FileText :size="23" /><text v-if="worldBookCount" class="contacts-world-book-count">{{ worldBookCount > 99 ? '99+' : worldBookCount }}</text></button>
+				<button class="contacts-world-books" :class="{ active: worldBookCount > 0 }" :aria-label="`管理世界书，当前 ${worldBookCount} 本`" @click="$emit('manage-world-books')"><view class="contacts-world-book-icon"><FileText :size="22" /></view><text v-if="worldBookCount" class="contacts-world-book-count">{{ worldBookCount > 99 ? '99+' : worldBookCount }}</text></button>
 				<button class="contacts-sort" :class="{ active: sortMode === 'recent' }" :aria-label="sortMode === 'name' ? '按导入时间排序' : '按名称排序'" @click="$emit('toggle-sort')"><Tune :size="25" /></button>
 			</view>
 		</view>
@@ -12,11 +12,14 @@
 			<input :value="query" placeholder="搜索联系人" confirm-type="search" @input="$emit('update:query', $event.detail?.value ?? $event.target?.value ?? '')" />
 			<button v-if="query" aria-label="清空联系人搜索" @click="$emit('update:query', '')"><X :size="17" /></button>
 		</view>
-		<scroll-view class="contacts-scroll" scroll-y>
+		<button class="contacts-character-maker" aria-label="点击前往制作角色卡" @click="$emit('open-character-maker')">
+			<text>想创建专属角色？</text><text class="contacts-character-maker-link">点击前往制作角色卡</text><ChevronRight :size="14" />
+		</button>
+		<scroll-view class="contacts-scroll" scroll-y @scrolltolower="$emit('load-more')">
 			<view v-if="items.length" class="contacts-list">
 				<text class="contacts-list-label">{{ sortMode === 'name' ? '按名称排序' : '按导入时间排序' }}</text>
-				<button v-for="character in items" :key="character.id" class="contact-row" :aria-label="`查看角色卡 ${character.name}`" @click="$emit('open-character-details', character)">
-					<ProviderLogo class="contact-avatar" :src="character.avatarDataUrl || '/static/zhiyu-logo.png'" :alt="character.name" mode="aspectFill" />
+				<button v-for="character in items" :key="character.id" v-memo="[character]" class="contact-row" :aria-label="`查看角色卡 ${character.name}`" @click="$emit('open-character-details', character)">
+					<ProviderLogo class="contact-avatar" :src="character.avatarDataUrl || '/static/zhiyu-logo.png'" :alt="character.name" mode="aspectFill" lazy-load />
 					<view class="contact-copy">
 						<text class="contact-name">{{ character.name }}</text>
 						<text class="contact-meta">{{ characterMeta(character) }}</text>
@@ -63,7 +66,7 @@
 			worldBookCount: { type: Number, default: 0 },
 			busy: { type: Boolean, default: false }
 		},
-		emits: ['create-character', 'import-character-file', 'import-character-gallery', 'manage-world-books', 'open-character-details', 'toggle-sort', 'update:query'],
+		emits: ['create-character', 'import-character-file', 'import-character-gallery', 'load-more', 'manage-world-books', 'open-character-details', 'open-character-maker', 'toggle-sort', 'update:query'],
 		data() {
 			return { addMenuOpen: false }
 		},
@@ -150,6 +153,17 @@
 
 	.contacts-world-books {
 		position: relative;
+		overflow: visible;
+	}
+
+	.contacts-world-book-icon {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 24px;
+		height: 24px;
+		pointer-events: none;
+		transform: translate(-2px, 2px);
 	}
 
 	.contacts-world-books.active {
@@ -158,13 +172,14 @@
 
 	.contacts-world-book-count {
 		position: absolute;
-		top: 1px;
+		top: -1px;
 		right: -1px;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		min-width: 16px;
-		height: 16px;
+		box-sizing: border-box;
+		min-width: 15px;
+		height: 15px;
 		padding: 0 3px;
 		border: 2px solid #f3f3f5;
 		border-radius: 8px;
@@ -172,6 +187,10 @@
 		color: #fff;
 		font-size: 9px;
 		font-weight: 700;
+		line-height: 11px;
+		pointer-events: none;
+		white-space: nowrap;
+		z-index: 1;
 	}
 
 	.contacts-search {
@@ -197,6 +216,36 @@
 	.contacts-search button {
 		width: 30px;
 		height: 30px;
+	}
+
+	.contacts-character-maker {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 4px;
+		width: 100%;
+		height: 34px;
+		margin-top: 4px;
+		background: transparent;
+		color: #85838a;
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.contacts-character-maker-link {
+		font-weight: 650;
+		color: #c03db3;
+		text-decoration: underline;
+		text-underline-offset: 2px;
+	}
+
+	.contacts-character-maker .app-icon {
+		color: #c03db3;
+		flex: 0 0 auto;
+	}
+
+	.contacts-character-maker:active {
+		opacity: 0.68;
 	}
 
 	.contacts-scroll {
@@ -230,6 +279,8 @@
 		padding: 8px 15px;
 		text-align: left;
 		color: #b0adb3;
+		content-visibility: auto;
+		contain-intrinsic-size: 76px;
 	}
 
 	.contact-row:active {

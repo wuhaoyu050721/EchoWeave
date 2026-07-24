@@ -168,6 +168,38 @@ test('creates a new avatar asset and refreshes linked conversation snapshots whe
   assert.equal(bundle.characterAssets[0].id, 'avatar-new')
 })
 
+test('refreshes a group participant avatar without rewriting historical message snapshots', async () => {
+  const character = characterFixture({ avatarAssetId: null, assetIds: [] })
+  const conversation = {
+    id: 'group-1',
+    conversationKind: 'group',
+    participants: [
+      { characterId: character.id, nameSnapshot: character.name, avatarAssetId: null, enabled: true },
+      { characterId: 'character-2', nameSnapshot: '林夏', avatarAssetId: 'avatar-2', enabled: true }
+    ]
+  }
+  let bundle = null
+  const repository = {
+    getCharacter: async () => clone(character),
+    saveCharacter: async () => {},
+    getCharacterAsset: async () => null,
+    listConversations: async () => [clone(conversation)],
+    importCharacterBundle: async value => { bundle = clone(value) }
+  }
+
+  await applyCharacterAvatar({
+    repository,
+    characterId: character.id,
+    avatar: DEFAULT_CHARACTER_AVATAR_DATA_URL,
+    idFactory: () => 'avatar-group-new',
+    now: () => '2026-07-23T05:00:00.000Z'
+  })
+
+  assert.equal(bundle.conversations[0].participants[0].avatarAssetId, 'avatar-group-new')
+  assert.equal(bundle.conversations[0].participants[1].avatarAssetId, 'avatar-2')
+  assert.equal('messages' in bundle, false)
+})
+
 test('creates a custom character and its staged avatar in one repository bundle', async () => {
   const character = characterFixture({
     id: 'custom-1',
@@ -251,6 +283,45 @@ test('soft-deletes a character and its assets while preserving and detaching cha
   assert.deepEqual(bundle.worldBooks, result.worldBooks)
   assert.equal(character.deletedAt, null)
   assert.equal(conversations[0].characterId, character.id)
+})
+
+test('soft-deleting a group member disables the participant and preserves its snapshot', async () => {
+  const character = characterFixture()
+  const group = {
+    id: 'group-1',
+    conversationKind: 'group',
+    participants: [
+      {
+        characterId: character.id,
+        nameSnapshot: character.name,
+        avatarAssetId: character.avatarAssetId,
+        enabled: true
+      },
+      { characterId: 'character-2', nameSnapshot: '林夏', avatarAssetId: 'avatar-2', enabled: true }
+    ]
+  }
+  let bundle = null
+  const repository = {
+    getCharacter: async () => clone(character),
+    saveCharacter: async () => {},
+    listCharacterAssets: async () => [],
+    listAllWorldBooks: async () => [],
+    listConversations: async () => [clone(group)],
+    importCharacterBundle: async value => { bundle = clone(value) }
+  }
+
+  await softDeleteCharacter({
+    repository,
+    characterId: character.id,
+    now: () => '2026-07-23T06:00:00.000Z'
+  })
+
+  const participant = bundle.conversations[0].participants[0]
+  assert.equal(participant.enabled, false)
+  assert.equal(participant.nameSnapshot, character.name)
+  assert.equal(participant.avatarAssetId, character.avatarAssetId)
+  assert.equal(participant.characterDeletedAt, '2026-07-23T06:00:00.000Z')
+  assert.equal(bundle.conversations[0].participants[1].enabled, true)
 })
 
 test('rolls back detached conversations when character deletion persistence fails', async () => {

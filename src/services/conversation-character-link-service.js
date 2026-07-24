@@ -1,3 +1,5 @@
+import { groupParticipantKind, isGroupConversation } from '../core/group-chat.js'
+
 function cloneJson(value) {
   return JSON.parse(JSON.stringify(value))
 }
@@ -72,6 +74,81 @@ function linkedConversationNeedsRefresh(conversation, character) {
     Boolean(conversation.deletedCharacterId || conversation.characterDeletedAt)
 }
 
+function groupParticipantNeedsRefresh(participant, character) {
+  return text(participant?.nameSnapshot) !== text(character?.name) ||
+    text(participant?.avatarAssetId) !== text(character?.avatarAssetId) ||
+    Boolean(participant?.characterDeletedAt)
+}
+
+function refreshedGroupParticipant(participant, character, { reenable = false } = {}) {
+  const refreshed = {
+    ...cloneJson(participant),
+    characterId: character.id,
+    nameSnapshot: character.name || participant.nameSnapshot || '未命名角色',
+    avatarAssetId: character.avatarAssetId || null,
+    enabled: reenable ? true : participant.enabled !== false
+  }
+  delete refreshed.characterDeletedAt
+  return refreshed
+}
+
+async function repairGroupConversation(repository, conversation, activeCharacters, activeById, formerCache, updatedAt) {
+  const sourceParticipants = Array.isArray(conversation.participants) ? conversation.participants : []
+  const occupiedIds = new Set(sourceParticipants
+    .map(participant => text(participant?.characterId))
+    .filter(characterId => activeById.has(characterId)))
+  let repaired = false
+  let refreshed = false
+  const participants = []
+
+  for (const source of sourceParticipants) {
+    const participant = cloneJson(source)
+    if (groupParticipantKind(participant) === 'provider') {
+      participants.push(participant)
+      continue
+    }
+    const characterId = text(participant.characterId)
+    const linkedCharacter = activeById.get(characterId)
+    if (linkedCharacter) {
+      if (groupParticipantNeedsRefresh(participant, linkedCharacter)) {
+        participants.push(refreshedGroupParticipant(participant, linkedCharacter))
+        refreshed = true
+      } else {
+        participants.push(participant)
+      }
+      continue
+    }
+
+    const formerCharacter = await formerCharacterForConversation(
+      repository,
+      { characterId, deletedCharacterId: characterId },
+      formerCache
+    )
+    const replacement = replacementFromSourceHash(activeCharacters, formerCharacter) ||
+      activeCharacterByName(activeCharacters, participant.nameSnapshot)
+    if (!replacement || occupiedIds.has(text(replacement.id))) {
+      participants.push(participant)
+      continue
+    }
+    occupiedIds.add(text(replacement.id))
+    participants.push(refreshedGroupParticipant(participant, replacement, {
+      reenable: Boolean(participant.characterDeletedAt)
+    }))
+    repaired = true
+  }
+
+  if (!repaired && !refreshed) return null
+  return {
+    conversation: {
+      ...cloneJson(conversation),
+      participants,
+      updatedAt
+    },
+    repaired,
+    refreshed
+  }
+}
+
 async function persistConversations(repository, conversations) {
   if (!conversations.length) return
   if (typeof repository.importRecords === 'function') {
@@ -102,6 +179,21 @@ export async function repairConversationCharacterLinks(repository, {
   let refreshed = 0
 
   for (const conversation of conversations) {
+    if (isGroupConversation(conversation)) {
+      const groupRepair = await repairGroupConversation(
+        repository,
+        conversation,
+        activeCharacters,
+        activeById,
+        formerCache,
+        timestampValue(now)
+      )
+      if (!groupRepair) continue
+      updates.push(groupRepair.conversation)
+      if (groupRepair.repaired) repaired += 1
+      else if (groupRepair.refreshed) refreshed += 1
+      continue
+    }
     if (!hasCharacterEvidence(conversation)) continue
     const linkedCharacter = activeById.get(text(conversation.characterId))
     if (linkedCharacter) {

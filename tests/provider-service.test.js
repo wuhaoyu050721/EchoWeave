@@ -44,6 +44,7 @@ test('encrypts API keys and exposes only hasApiKey to UI', async () => {
   assert.equal(JSON.stringify(stored).includes('sk-secret'), false)
   assert.equal(stored.protocolType, 'openai-compatible')
   assert.equal(stored.baseUrl, 'https://api.openai.com/v1')
+  assert.equal(stored.requestTimeout, 300000)
 })
 
 test('reveals a saved API key only through an explicit editing request', async () => {
@@ -85,6 +86,36 @@ test('preserves existing ciphertext when edited with a blank API key', async () 
 
   assert.equal(encryptedValues.length, 1)
   assert.deepEqual(updated.encryptedApiKey, original.encryptedApiKey)
+})
+
+test('updates only the default model for an existing provider', async () => {
+  const { repository, service } = await setup()
+  await service.saveProvider({
+    name: 'OpenAI',
+    baseUrl: 'https://api.openai.com',
+    apiKey: 'sk-secret',
+    defaultModel: 'gpt-old',
+    modelsCache: ['gpt-old', 'gpt-new']
+  })
+  const original = await repository.getProvider('provider-1')
+
+  const result = await service.setDefaultModel('provider-1', ' gpt-new ')
+  const updated = await repository.getProvider('provider-1')
+
+  assert.equal(result.defaultModel, 'gpt-new')
+  assert.equal(result.encryptedApiKey, undefined)
+  assert.equal(updated.defaultModel, 'gpt-new')
+  assert.deepEqual(updated.encryptedApiKey, original.encryptedApiKey)
+  assert.equal(updated.baseUrl, original.baseUrl)
+  assert.deepEqual(updated.modelsCache, original.modelsCache)
+})
+
+test('rejects invalid default model updates without creating a provider', async () => {
+  const { repository, service } = await setup()
+
+  await assert.rejects(() => service.setDefaultModel('missing-provider', 'model-a'), /当前接口不存在/)
+  await assert.rejects(() => service.setDefaultModel('missing-provider', '   '), /默认模型不能为空/)
+  assert.equal((await repository.listProviders()).length, 0)
 })
 
 test('tests connection with decrypted key and persists model cache', async () => {

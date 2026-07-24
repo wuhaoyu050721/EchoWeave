@@ -1,4 +1,5 @@
 import { normalizeProviderAvatar } from '../core/provider-avatar.js'
+import { resolveChatRequestTimeout } from '../core/model-request-timeout.js'
 import { normalizeProviderBaseUrl, normalizeProviderProtocol } from '../core/provider-protocol.js'
 import { createRuntimeId } from '../core/runtime-id.js'
 
@@ -54,7 +55,9 @@ export class ProviderService {
       defaultModel,
       modelsCache: Array.isArray(form.modelsCache) ? [...form.modelsCache] : existing?.modelsCache ?? [],
       avatar,
-      requestTimeout: Number(form.requestTimeout ?? existing?.requestTimeout ?? 60000),
+      requestTimeout: resolveChatRequestTimeout({
+        requestTimeout: form.requestTimeout ?? existing?.requestTimeout
+      }),
       streamEnabled: form.streamEnabled ?? existing?.streamEnabled ?? true,
       lastTestStatus: existing?.lastTestStatus ?? 'untested',
       lastTestError: existing?.lastTestError ?? '',
@@ -64,6 +67,22 @@ export class ProviderService {
     }
     await this.repository.saveProvider(record)
     return toPublicProvider(record)
+  }
+
+  async setDefaultModel(id, model) {
+    const defaultModel = String(model ?? '').trim()
+    if (!defaultModel) throw new Error('默认模型不能为空')
+
+    const existing = await this.repository.getProvider(id)
+    if (!existing) throw new Error('当前接口不存在')
+
+    const updated = {
+      ...existing,
+      defaultModel,
+      updatedAt: this.now()
+    }
+    await this.repository.saveProvider(updated)
+    return toPublicProvider(updated)
   }
 
   async deleteProvider(id) {

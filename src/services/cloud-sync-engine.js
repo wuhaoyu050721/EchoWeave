@@ -21,6 +21,7 @@ function toWireMutation(mutation) {
 }
 
 function descriptorHash(descriptor) {
+  if (typeof descriptor?.hash === 'string' && descriptor.hash) return descriptor.hash
   return descriptor ? hashSyncValue(descriptor.value) : null
 }
 
@@ -144,7 +145,10 @@ export class CloudSyncEngine {
   }
 
   async #stageLocalMutations(state, cipher, deviceId) {
-    const records = await this.adapter.readRecords()
+    const records = await this.adapter.readRecords({
+      manifest: state.manifest,
+      pending: state.pending
+    })
     const current = new Map()
     for (const descriptor of records) {
       const key = syncRecordKey(descriptor.entityType, descriptor.entityId)
@@ -155,12 +159,27 @@ export class CloudSyncEngine {
 
     const latestPending = latestPendingByKey(state.pending)
     for (const [key, descriptor] of current) {
+      let candidate = descriptor
       const pending = latestPending.get(key)
       const manifest = state.manifest[key]
       const baselineHash = pending?.operation === 'upsert'
         ? pending.localHash
         : (!pending && manifest && !manifest.deleted ? manifest.hash : null)
-      if (baselineHash === descriptor.hash) continue
+      if (baselineHash === candidate.hash) continue
+
+      if (candidate.value === undefined && typeof this.adapter.materializeRecord === 'function') {
+        const materialized = await this.adapter.materializeRecord(candidate)
+        if (!materialized) {
+          current.delete(key)
+          continue
+        }
+        candidate = { ...materialized, hash: descriptorHash(materialized) }
+        current.set(key, candidate)
+        if (baselineHash === candidate.hash) continue
+      }
+      if (candidate.value === undefined) {
+        throw new Error('Cloud sync record value is unavailable')
+      }
 
       const previousUpdatedAt = pending?.updatedAt ?? manifest?.updatedAt ?? -1
       const changed = Boolean(pending || manifest)
@@ -171,13 +190,13 @@ export class CloudSyncEngine {
           }
         : (manifest?.deleted ? manifest : null)
       let updatedAt
-      if (tombstoneBaseline && descriptor.sourceUpdatedAt !== null) {
-        updatedAt = descriptor.sourceUpdatedAt
-      } else if (tombstoneBaseline?.previousHash === descriptor.hash) {
+      if (tombstoneBaseline && candidate.sourceUpdatedAt !== null) {
+        updatedAt = candidate.sourceUpdatedAt
+      } else if (tombstoneBaseline?.previousHash === candidate.hash) {
         updatedAt = Math.max(0, Number(tombstoneBaseline.updatedAt) - 1)
       } else {
         updatedAt = nextMutationTimestamp({
-          record: descriptor.value,
+          record: candidate.value,
           previousUpdatedAt,
           now: this.now(),
           changed
@@ -185,23 +204,24 @@ export class CloudSyncEngine {
       }
       if (state.pending.length >= this.maxPendingMutations) return
       const plaintext = createSyncPlaintext({
-        entityType: descriptor.entityType,
-        entityId: descriptor.entityId,
+        entityType: candidate.entityType,
+        entityId: candidate.entityId,
         operation: 'upsert',
-        value: descriptor.value
+        value: candidate.value
       })
       const mutation = {
         mutationId: this.idFactory(),
-        entityType: descriptor.entityType,
-        entityId: descriptor.entityId,
+        entityType: candidate.entityType,
+        entityId: candidate.entityId,
         operation: 'upsert',
         updatedAt,
         deviceId,
-        localHash: descriptor.hash,
-        refs: descriptor.refs,
+        localHash: candidate.hash,
+        localRevision: candidate.localRevision ?? null,
+        refs: candidate.refs,
         envelope: await cipher.encrypt(plaintext, {
-          entityType: descriptor.entityType,
-          entityId: descriptor.entityId,
+          entityType: candidate.entityType,
+          entityId: candidate.entityId,
           operation: 'upsert',
           updatedAt
         })

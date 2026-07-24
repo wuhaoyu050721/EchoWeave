@@ -1,5 +1,6 @@
 import { buildOpenAIEndpoint } from '../core/provider-url.js'
 import { bytesToDataUrl, extractImageOutputs } from '../core/image-output.js'
+import { resolveChatRequestTimeout } from '../core/model-request-timeout.js'
 import { OpenAISseParser } from '../core/sse-parser.js'
 
 const IMAGE_GENERATION_TIMEOUT = 5 * 60 * 1000
@@ -39,6 +40,22 @@ function responseText(response) {
   if (typeof response?.text === 'string' && response.text) return response.text
   const bytes = responseBytes(response)
   return bytes.length ? new TextDecoder('utf-8', { fatal: false }).decode(bytes) : ''
+}
+
+function chatResponseText(payload) {
+  const textParts = []
+  for (const choice of Array.isArray(payload?.choices) ? payload.choices : []) {
+    const content = choice?.message?.content
+    if (typeof content === 'string') {
+      textParts.push(content)
+      continue
+    }
+    const parts = Array.isArray(content) ? content : content && typeof content === 'object' ? [content] : []
+    for (const part of parts) {
+      if (typeof part?.text === 'string') textParts.push(part.text)
+    }
+  }
+  return textParts.join('')
 }
 
 function sniffImageMimeType(bytes) {
@@ -126,6 +143,41 @@ export class OpenAIProvider {
   }
 
   async streamChat(profile, request, handlers = {}) {
+    if (request.stream === false) {
+      const response = await this.transport.request({
+        url: buildOpenAIEndpoint(profile.baseUrl, 'chat/completions'),
+        method: 'POST',
+        headers: buildHeaders(profile.apiKey),
+        body: JSON.stringify({
+          model: request.model,
+          messages: serializeOpenAIMessages(request.messages),
+          stream: false
+        }),
+        signal: request.signal,
+        timeout: resolveChatRequestTimeout(profile)
+      })
+      let payload
+      try {
+        payload = JSON.parse(responseText(response))
+      } catch {
+        throw new Error('对话响应不是有效 JSON')
+      }
+      if (payload?.error) throw new Error(String(payload.error.message || '模型请求失败'))
+
+      const content = chatResponseText(payload)
+      if (content) handlers.onDelta?.(content, payload)
+      const finishReason = (Array.isArray(payload?.choices) ? payload.choices : [])
+        .find(choice => choice?.finish_reason)?.finish_reason ?? null
+      if (finishReason) handlers.onFinishReason?.(finishReason, payload)
+      const images = await this.resolveImageOutputs(
+        extractImageOutputs(payload, { baseUrl: profile.baseUrl }),
+        request.signal
+      )
+      images.forEach(image => handlers.onImage?.(image, payload))
+      handlers.onDone?.()
+      return { finishReason, images }
+    }
+
     let finishReason = null
     let parseError = null
     const rawImages = []
@@ -154,6 +206,7 @@ export class OpenAIProvider {
         stream: true
       }),
       signal: request.signal,
+      timeout: resolveChatRequestTimeout(profile),
       onChunk: (chunk) => parser.feed(chunk)
     })
     parser.finish()

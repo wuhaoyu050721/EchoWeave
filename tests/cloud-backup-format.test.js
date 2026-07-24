@@ -17,7 +17,7 @@ test('moves device-encrypted secrets into the outer encrypted backup payload', a
     settings: { systemPrompt: { enabled: true, encryptedValue: { encrypted: 'old:global prompt' } } }
   }, createVault('old'), new Date('2026-07-14T00:00:00.000Z'))
 
-  assert.equal(payload.cloudFormatVersion, 3)
+  assert.equal(payload.cloudFormatVersion, 5)
   assert.deepEqual(payload.attachments, [])
   assert.deepEqual(payload.characters, [])
   assert.deepEqual(payload.worldBooks, [])
@@ -58,7 +58,7 @@ test('rejects malformed cloud payloads before encrypting or writing anything', a
   let encryptions = 0
   const vault = { encryptString: async () => { encryptions += 1; return {} } }
 
-  await assert.rejects(prepareCloudRestore({ cloudFormatVersion: 4 }, { vault }), /云端备份格式/)
+  await assert.rejects(prepareCloudRestore({ cloudFormatVersion: 6 }, { vault }), /云端备份格式/)
   await assert.rejects(prepareCloudRestore({ cloudFormatVersion: 1, providers: [], conversations: [], messages: [{ id: 'm1', conversationId: 'missing' }], settings: {} }, { vault }), /不存在的会话/)
   await assert.rejects(prepareCloudRestore({
     cloudFormatVersion: 2,
@@ -92,4 +92,86 @@ test('restores and remaps encrypted character data in cloud format 3', async () 
   assert.equal(restored.characters[0].avatarAssetId, restored.characterAssets[0].id)
   assert.equal(restored.worldBooks[0].characterId, restored.characters[0].id)
   assert.equal(restored.characterAssets[0].characterId, restored.characters[0].id)
+})
+
+test('restores group participant and speaker references in cloud format 4', async () => {
+  let sequence = 0
+  const restored = await prepareCloudRestore({
+    cloudFormatVersion: 4,
+    providers: [],
+    conversations: [{
+      id: 'group-1',
+      conversationKind: 'group',
+      participants: [
+        { characterId: 'char-1', nameSnapshot: '苏墨', avatarAssetId: 'asset-1', enabled: true },
+        { characterId: 'char-2', nameSnapshot: '林夏', avatarAssetId: 'asset-2', enabled: true }
+      ]
+    }],
+    messages: [{
+      id: 'message-1',
+      conversationId: 'group-1',
+      speakerCharacterId: 'char-2',
+      speakerNameSnapshot: '林夏',
+      speakerAvatarAssetId: 'asset-2'
+    }],
+    attachments: [],
+    characters: [
+      { id: 'char-1', avatarAssetId: 'asset-1', assetIds: ['asset-1'] },
+      { id: 'char-2', avatarAssetId: 'asset-2', assetIds: ['asset-2'] }
+    ],
+    worldBooks: [],
+    characterAssets: [
+      { id: 'asset-1', characterId: 'char-1', dataUrl: 'data:image/png;base64,AA==' },
+      { id: 'asset-2', characterId: 'char-2', dataUrl: 'data:image/png;base64,AA==' }
+    ],
+    settings: {}
+  }, {
+    vault: createVault('new'),
+    idFactory: () => `new-${++sequence}`
+  })
+
+  assert.equal(restored.conversations[0].participants[1].characterId, restored.characters[1].id)
+  assert.equal(restored.conversations[0].participants[1].avatarAssetId, restored.characterAssets[1].id)
+  assert.equal(restored.messages[0].speakerCharacterId, restored.characters[1].id)
+  assert.equal(restored.messages[0].speakerAvatarAssetId, restored.characterAssets[1].id)
+})
+
+test('restores provider members and their speaker references in cloud format 5', async () => {
+  let sequence = 0
+  const restored = await prepareCloudRestore({
+    cloudFormatVersion: 5,
+    providers: [
+      { id: 'p-common', apiKey: 'common-secret' },
+      { id: 'p-member', apiKey: 'member-secret', defaultModel: 'deepseek-chat' }
+    ],
+    conversations: [{
+      id: 'group-1',
+      providerProfileId: 'p-common',
+      conversationKind: 'group',
+      participants: [
+        { memberKind: 'character', characterId: 'char-1', nameSnapshot: '苏墨', enabled: true },
+        { memberKind: 'provider', providerProfileId: 'p-member', modelName: 'deepseek-chat', nameSnapshot: '独立接口', enabled: true }
+      ]
+    }],
+    messages: [{
+      id: 'message-1',
+      conversationId: 'group-1',
+      speakerProviderProfileId: 'p-member',
+      speakerModelName: 'deepseek-chat',
+      speakerNameSnapshot: '独立接口'
+    }],
+    attachments: [],
+    characters: [{ id: 'char-1', assetIds: [] }],
+    worldBooks: [],
+    characterAssets: [],
+    settings: {}
+  }, {
+    vault: createVault('new'),
+    idFactory: () => `new-${++sequence}`
+  })
+
+  assert.equal(restored.conversations[0].providerProfileId, restored.providers[0].id)
+  assert.equal(restored.conversations[0].participants[1].providerProfileId, restored.providers[1].id)
+  assert.equal(restored.messages[0].speakerProviderProfileId, restored.providers[1].id)
+  assert.deepEqual(restored.providers[1].encryptedApiKey, { encrypted: 'new:member-secret' })
 })

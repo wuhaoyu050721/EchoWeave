@@ -25,6 +25,13 @@ function createAdapter({ authorized = true } = {}) {
 test('builds compact reply notification titles and previews', () => {
   assert.equal(createReplyNotificationTitle({ characterNameSnapshot: '苏墨', title: '会话' }), '苏墨')
   assert.equal(createReplyNotificationTitle({ title: ' 普通会话 ' }), '普通会话')
+  assert.equal(
+    createReplyNotificationTitle(
+      { conversationKind: 'group', title: '避难所' },
+      { speakerNameSnapshot: '林夏' }
+    ),
+    '避难所 · 林夏'
+  )
   assert.equal(createReplyNotificationContent({ content: ' 第一行\n 第二行 ' }), '第一行 第二行')
   assert.equal(createReplyNotificationContent({ generationMode: 'image', content: '' }), '发来了一张图片')
   assert.equal(createReplyNotificationContent({ attachments: [{ kind: 'image' }, { kind: 'image' }] }), '发来了 2 张图片')

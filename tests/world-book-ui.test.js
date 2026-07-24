@@ -11,6 +11,9 @@ test('contacts wires the standalone world-book manager and import preview', asyn
   ])
 
   assert.match(contacts, /@click="\$emit\('manage-world-books'\)"/)
+  assert.match(contacts, /class="contacts-world-book-icon"><FileText/)
+  assert.match(contacts, /\.contacts-world-books\s*\{[^}]*overflow: visible;/s)
+  assert.match(contacts, /\.contacts-world-book-count\s*\{[^}]*pointer-events: none;/s)
   assert.match(page, /@manage-world-books="openWorldBookManager"/)
   assert.match(page, /<WorldBookManager/)
   assert.match(page, /:repository="services\?\.repository"/)

@@ -1,4 +1,5 @@
 import { createRuntimeId } from '../../core/runtime-id.js'
+import { isGroupConversation } from '../../core/group-chat.js'
 import { validateCharacterAvatar } from './avatar.js'
 import { asCharacterManagementError, characterManagementError } from './errors.js'
 
@@ -122,7 +123,66 @@ async function persistManagedCharacterBundle(repository, conversationChanges, ch
 async function linkedConversations(repository, characterId) {
   if (typeof repository.listConversations !== 'function') return []
   const conversations = await repository.listConversations()
-  return conversations.filter(conversation => conversation?.characterId === characterId)
+  return conversations.filter(conversation => (
+    conversation?.characterId === characterId ||
+    (
+      isGroupConversation(conversation) &&
+      Array.isArray(conversation.participants) &&
+      conversation.participants.some(participant => participant?.characterId === characterId)
+    )
+  ))
+}
+
+function refreshConversationAvatar(conversation, character, assetId, timestamp) {
+  if (!isGroupConversation(conversation)) {
+    return {
+      ...cloneJson(conversation),
+      characterAvatarAssetId: assetId,
+      updatedAt: timestamp
+    }
+  }
+  return {
+    ...cloneJson(conversation),
+    participants: conversation.participants.map(participant => (
+      participant?.characterId === character.id
+        ? {
+            ...cloneJson(participant),
+            nameSnapshot: character.name || participant.nameSnapshot,
+            avatarAssetId: assetId
+          }
+        : cloneJson(participant)
+    )),
+    updatedAt: timestamp
+  }
+}
+
+function detachCharacterConversation(conversation, character, timestamp) {
+  if (!isGroupConversation(conversation)) {
+    return {
+      ...cloneJson(conversation),
+      characterId: null,
+      characterAvatarAssetId: null,
+      characterNameSnapshot: conversation.characterNameSnapshot || character.name,
+      deletedCharacterId: character.id,
+      characterDeletedAt: timestamp,
+      updatedAt: timestamp
+    }
+  }
+  return {
+    ...cloneJson(conversation),
+    participants: conversation.participants.map(participant => (
+      participant?.characterId === character.id
+        ? {
+            ...cloneJson(participant),
+            nameSnapshot: participant.nameSnapshot || character.name,
+            avatarAssetId: participant.avatarAssetId || character.avatarAssetId || null,
+            enabled: false,
+            characterDeletedAt: timestamp
+          }
+        : cloneJson(participant)
+    )),
+    updatedAt: timestamp
+  }
 }
 
 function createAvatarAsset(existingAsset, avatar, {
@@ -214,11 +274,7 @@ export async function applyCharacterAvatar(options = {}, positionalCharacterId, 
       : await linkedConversations(repository, character.id)
     const conversationChanges = conversations.map(conversation => ({
       original: cloneJson(conversation),
-      updated: {
-        ...cloneJson(conversation),
-        characterAvatarAssetId: assetId,
-        updatedAt: timestamp
-      }
+      updated: refreshConversationAvatar(conversation, character, assetId, timestamp)
     }))
     await persistManagedCharacterBundle(
       repository,
@@ -396,15 +452,7 @@ export async function softDeleteCharacter(options = {}, positionalCharacterId) {
     ))
     const conversationChanges = conversations.map(conversation => ({
       original: cloneJson(conversation),
-      updated: {
-        ...cloneJson(conversation),
-        characterId: null,
-        characterAvatarAssetId: null,
-        characterNameSnapshot: conversation.characterNameSnapshot || character.name,
-        deletedCharacterId: character.id,
-        characterDeletedAt: timestamp,
-        updatedAt: timestamp
-      }
+      updated: detachCharacterConversation(conversation, character, timestamp)
     }))
     await persistManagedCharacterBundle(
       repository,

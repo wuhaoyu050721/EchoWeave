@@ -11,9 +11,10 @@ test('browser-only Vite config does not override the HBuilderX app compiler', as
   assert.equal(packageJson.scripts.build, 'vite build --config vite.browser.config.js')
 })
 
-test('browser preview keeps its dedicated entry point and proxy', async () => {
+test('browser preview keeps its dedicated entry point, proxy, and static assets', async () => {
   const { default: config } = await import(`../vite.browser.config.js?browser=${Date.now()}`)
 
   assert.equal(config.build.rollupOptions.input, 'preview/index.html')
   assert.equal(config.plugins.some((plugin) => plugin?.name === 'local-ai-proxy'), true)
+  assert.equal(config.plugins.some((plugin) => plugin?.name === 'copy-static-assets'), true)
 })

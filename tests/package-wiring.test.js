@@ -189,3 +189,32 @@ test('page declarations, static assets, and UTS APIs are wired into the package'
     }
   }
 })
+
+test('Android package declares every directly used native capability', async () => {
+  const [manifestSource, appExporter, appServices, pageSource, notificationAdapter] = await Promise.all([
+    readFile(path.join(projectRoot, 'manifest.json'), 'utf8'),
+    readFile(path.join(projectRoot, 'src/platform/app/app-file-exporter.js'), 'utf8'),
+    readFile(path.join(projectRoot, 'src/app/create-app-services.js'), 'utf8'),
+    readFile(path.join(projectRoot, 'pages/index/index.vue'), 'utf8'),
+    readFile(path.join(projectRoot, 'src/platform/app/uni-push-notification-adapter.js'), 'utf8')
+  ])
+  const appSources = [appExporter, appServices, pageSource, notificationAdapter].join('\n')
+  const moduleByUsage = new Map([
+    ['plusApi?.os', 'Device'],
+    ['uniApi?.downloadFile', 'Downloader'],
+    ['plusApi?.io', 'File'],
+    ['plusApi?.gallery', 'Gallery'],
+    ['plusApi?.android', 'Invocation'],
+    ['plusApi?.nativeObj', 'NativeObj'],
+    ['plusApi?.push', 'Push'],
+    ['plus.speech', 'Speech'],
+    ['plusApi?.sqlite', 'SQLite']
+  ])
+
+  for (const [usage, moduleName] of moduleByUsage) {
+    assert.match(appSources, new RegExp(usage.replace(/[?.]/g, '\\$&')))
+    assert.match(manifestSource, new RegExp(`"${moduleName}"\\s*:\\s*\\{\\}`))
+  }
+  assert.match(manifestSource, /android\.permission\.POST_NOTIFICATIONS/)
+  assert.match(manifestSource, /"uniStatistics"\s*:\s*\{\s*"enable"\s*:\s*false\s*\}/)
+})

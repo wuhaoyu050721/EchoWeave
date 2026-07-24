@@ -104,7 +104,7 @@ test('home follows the compact conversation list and floating navigation referen
 	assert.match(source, /\.bottom-nav\s*\{[^}]*position:\s*absolute[^}]*left:\s*16px[^}]*right:\s*16px[^}]*height:\s*68px[^}]*border-radius:\s*34px/s)
 	assert.match(source, /class="nav-indicator"[^>]*activeNavigationIndex \* 100/)
 	assert.match(source, /activeNavigationIndex\(\)\s*\{[^}]*findIndex/s)
-	assert.match(source, /\.nav-indicator\s*\{[^}]*width:\s*calc\(25% - 4\.5px\)[^}]*background:\s*#fff0fb[^}]*transition:\s*transform 280ms/s)
+	assert.match(source, /\.nav-indicator\s*\{[^}]*width:\s*calc\(25% - 4\.5px\)[^}]*background:\s*#fff0fb[^}]*transition:\s*transform 140ms/s)
 	assert.match(source, /\.nav-item\.active\s*\{[^}]*color:\s*#d43bc2/s)
 	assert.doesNotMatch(source, /class="gesture-handle"/)
 })
@@ -125,8 +125,8 @@ test('new user and assistant message surfaces pop in once without replaying duri
 
 	assert.match(source, /class="user-message-stack" :class="\{ 'message-pop': animatedMessageIds\.includes\(message\.id\) \}" @animationend="finishMessageAnimation\(message\.id\)"/)
 	assert.match(source, /class="assistant-message-stack" :class="\{ 'message-pop': animatedMessageIds\.includes\(message\.id\) \}" @animationend="finishMessageAnimation\(message\.id\)"/)
-	assert.match(source, /this\.animatedMessageIds = \[\][^]*const messages = await this\.services\.repository\.listMessages/)
-	assert.match(source, /if \(index === -1\) \{\s*this\.animatedMessageIds\.push\(next\.id\)\s*this\.messageItems\.push\(next\)/s)
+	assert.match(source, /this\.animatedMessageIds = \[\][^]*const page = await this\.readChatMessagePage\(conversationId\)/)
+	assert.match(source, /if \(index === -1\) \{\s*this\.animatedMessageIds\.push\(next\.id\)[^]*this\.messageItems\.push\(next\)/s)
 	assert.match(source, /\.user-message-stack\.message-pop\s*\{[^}]*animation:\s*user-message-pop-in 260ms/s)
 	assert.match(source, /\.assistant-message-stack\.message-pop\s*\{[^}]*animation:\s*assistant-message-pop-in 260ms/s)
 	assert.match(source, /@keyframes user-message-pop-in/)
@@ -134,11 +134,60 @@ test('new user and assistant message surfaces pop in once without replaying duri
 	assert.match(source, /finishMessageAnimation\(messageId\)\s*\{\s*this\.animatedMessageIds = this\.animatedMessageIds\.filter/s)
 })
 
+test('large chats render a bounded page and throttle streaming work', async () => {
+	const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+
+	assert.match(source, /const CHAT_MESSAGE_PAGE_SIZE = 60/)
+	assert.match(source, /repository\.listMessagePage\(conversationId, \{ beforeSequence, limit \}\)/)
+	assert.match(source, /messageHistoryHasMore[^]*loadEarlierMessages/)
+	assert.match(source, /加载更早消息/)
+	assert.match(source, /const scrollSnapshot = this\.captureChatScrollSnapshot\(anchorId\)/)
+	assert.match(source, /if \(!this\.restoreChatScrollSnapshot\(scrollSnapshot\)\)/)
+	assert.match(source, /target\.scrollTop = \(Number\(target\.scrollTop\) \|\| 0\) \+ anchorTop - snapshot\.anchorTop/)
+	assert.match(source, /STREAMING_RENDER_INTERVAL = 40/)
+	assert.match(source, /message\.status === 'generating' && !statusParsingStarted/)
+	assert.match(source, /if \(this\.chatScrollTimer\) return/)
+	assert.doesNotMatch(source, /this\.services\.repository\.listMessages\(conversationId\)/)
+})
+
+test('primary tabs stay mounted and reuse bounded cached lists', async () => {
+	const [source, contacts, providerLogo] = await Promise.all([
+		readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8'),
+		readFile(new URL('../src/components/character-contacts.vue', import.meta.url), 'utf8'),
+		readFile(new URL('../src/components/provider-logo.js', import.meta.url), 'utf8')
+	])
+	const goToTab = source.match(/goToTab\(tab\)\s*\{([^]*?)\n\t\t\t\},/)?.[1] || ''
+	const backToConversations = source.match(/backToConversations\(\)\s*\{([^]*?)\n\t\t\t\},/)?.[1] || ''
+
+	assert.match(source, /v-show="ui\.screen === 'conversations'" class="screen-view conversations-view primary-tab-view"/)
+	assert.match(source, /<CharacterContacts\s+v-show="ui\.screen === 'contacts'"\s+class="primary-tab-view"/)
+	assert.match(source, /const PRIMARY_LIST_BATCH_SIZE = 16/)
+	assert.match(source, /v-for="conversation in renderedConversations"/)
+	assert.match(source, /v-memo="\[conversation\]"/)
+	assert.match(source, /:items="renderedCharacters"/)
+	assert.match(source, /repository\.listLatestMessages\(conversationIds\)/)
+	assert.doesNotMatch(goToTab, /loadCharacters|loadWorldBooks|loadConversations/)
+	assert.doesNotMatch(backToConversations, /loadConversations/)
+	assert.match(contacts, /@scrolltolower="\$emit\('load-more'\)"/)
+	assert.match(contacts, /v-memo="\[character\]"/)
+	assert.match(contacts, /mode="aspectFill" lazy-load/)
+	assert.match(providerLogo, /lazyLoad: \{ type: Boolean, default: false \}/)
+	assert.match(providerLogo, /elementProps\['lazy-load'\] = true/)
+	assert.match(providerLogo, /elementProps\.loading = 'lazy'/)
+	assert.match(source, /\.screen-view\.primary-tab-view\s*\{[^}]*animation:\s*none/s)
+	assert.match(source, /\.conversation-row\s*\{[^}]*content-visibility:\s*auto/s)
+	assert.match(contacts, /\.contact-row\s*\{[^}]*content-visibility:\s*auto/s)
+})
+
 test('provider model selection and chat auto-scroll use App-compatible controls', async () => {
 	const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
 
 	assert.match(source, /<picker class="select-field-picker"[^>]*:range="providerModelOptions"[^>]*@change="selectProviderModel"/)
 	assert.match(source, /applyProviderModelSelection\(this\.providerForm, this\.providerModelOptions, event\?\.detail\?\.value\)/)
+	assert.match(source, /data-testid="set-default-model"[^>]*:disabled="!canSetDefaultProviderModel"[^>]*@click="setDefaultProviderModel"/)
+	assert.match(source, /providerServiceOrThrow\(\)\.setDefaultModel\(providerId, defaultModel\)/)
+	assert.match(source, /createConversation\(\{ providerProfileId: provider\.id, providerNameSnapshot: provider\.name, modelName: provider\.defaultModel \}\)/)
+	assert.match(source, /createCharacterConversation\(\{[^}]*modelName: provider\.defaultModel/s)
 	assert.match(source, /addProvider\(\)[^\n]*defaultModel: ''/)
 	assert.doesNotMatch(source, /<select\s+v-model="providerForm\.defaultModel"/)
 	assert.match(source, /class="provider-protocol-control"[^>]*role="group"/)

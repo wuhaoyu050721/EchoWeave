@@ -178,6 +178,25 @@ test('uses the latest recognized assistant status as data while keeping the cano
   assert.match(bundle.userTurnPrompt, /上一轮状态参考[\s\S]*\[当前状态\|警觉\]/)
 })
 
+test('can scan shared dialogue while continuing status from only the active group character', () => {
+  const bundle = buildCharacterPromptBundle({
+    character: character(),
+    messages: [
+      { role: 'user', content: '苏墨：门外有声音', sequence: 1 },
+      { role: 'assistant', content: '林夏：我也听见了', sequence: 2 }
+    ],
+    statusMessages: [{
+      role: 'assistant',
+      status: 'completed',
+      sequence: 3,
+      content: '回应\n<status>\n[当前状态|警觉]\n[当前位置|门边]\n</status>'
+    }]
+  })
+
+  assert.match(bundle.systemPrompt, /\[当前状态\|警觉\]/)
+  assert.match(bundle.userTurnPrompt, /\[当前位置\|门边\]/)
+})
+
 test('adds the status protocol when the card and history do not request one', () => {
   const bundle = buildCharacterPromptBundle({ character: character() })
 

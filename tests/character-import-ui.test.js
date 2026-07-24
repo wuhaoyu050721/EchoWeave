@@ -50,3 +50,32 @@ test('contacts can open a blank custom character editor without importing a file
   assert.match(page, /this\.customCharacterDraft = null/)
   assert.match(page, /creating \? '角色已创建' : '角色卡已保存'/)
 })
+
+test('character-card import shows staged loading feedback while parsing and saving', async () => {
+  const page = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+
+  assert.match(page, /v-if="characterImportBusy"\s+class="character-import-loading-layer"/)
+  assert.match(page, /characterImportStage: ''/)
+  assert.match(page, /this\.characterImportStage = 'selecting'/)
+  assert.match(page, /this\.characterImportStage = 'parsing'/)
+  assert.match(page, /this\.characterImportStage = 'saving'/)
+  assert.match(page, /this\.characterImportStage = 'parsing'[^]*await this\.\$nextTick\(\)[^]*setTimeout\(resolve, 16\)/)
+  assert.match(page, /class="character-import-loading-spinner"/)
+  assert.match(page, /class="character-import-loading-progress"/)
+  assert.match(page, /@keyframes character-import-loading-progress/)
+  assert.match(page, /\.character-import-loading-spinner,[^]*animation:\s*none/)
+})
+
+test('contacts link to the external character-card maker', async () => {
+  const [page, contacts] = await Promise.all([
+    readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8'),
+    readFile(new URL('../src/components/character-contacts.vue', import.meta.url), 'utf8')
+  ])
+
+  assert.match(contacts, /点击前往制作角色卡/)
+  assert.match(contacts, /\$emit\('open-character-maker'\)/)
+  assert.match(page, /@open-character-maker="openCharacterMaker"/)
+  assert.match(page, /const CHARACTER_MAKER_URL = 'https:\/\/www\.surtr\.cn:8019\/'/)
+  assert.match(page, /plusApi\.runtime\.openURL\(CHARACTER_MAKER_URL/)
+  assert.match(page, /browserWindow\.open\(CHARACTER_MAKER_URL, '_blank', 'noopener,noreferrer'\)/)
+})

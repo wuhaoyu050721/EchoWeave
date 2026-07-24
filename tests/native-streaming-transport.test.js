@@ -98,4 +98,112 @@ test('maps native HTTP and network failures', async () => {
     body: ''
   })
   await assert.rejects(networkPending, error => error.code === 'network_error' && /offline/.test(error.message))
+
+  const timeoutPending = transport.request({ url: 'https://example.com', timeout: 300000 })
+  streamListener({
+    requestId: options.requestId,
+    eventType: 'failure',
+    code: 'network_error',
+    message: 'java.net.SocketTimeoutException: timeout',
+    statusCode: 0,
+    body: ''
+  })
+  await assert.rejects(
+    timeoutPending,
+    error => error.code === 'request_timeout' && /300 秒/.test(error.message) && !/java\.net/.test(error.message)
+  )
+})
+
+test('stops a partial stream after it stays idle and preserves a distinct error code', async () => {
+  let options
+  let streamListener
+  let cancelledId = ''
+  const timers = []
+  const nativeApi = {
+    onAiChatStreamEvent(callback) { streamListener = callback },
+    aiChatStreamRequest(value) { options = value },
+    aiChatStreamCancel(requestId) {
+      cancelledId = requestId
+      streamListener({ requestId, eventType: 'failure', code: 'request_aborted' })
+      return true
+    }
+  }
+  const transport = new NativeStreamingTransport({
+    nativeApi,
+    partialIdleTimeoutMs: 60000,
+    setTimeoutFn(callback, delay) {
+      const timer = { callback, delay, cleared: false }
+      timers.push(timer)
+      return timer
+    },
+    clearTimeoutFn(timer) {
+      timer.cleared = true
+    }
+  })
+  const chunks = []
+  const pending = transport.request({
+    url: 'https://example.com',
+    onChunk: bytes => chunks.push(new TextDecoder().decode(bytes))
+  })
+
+  assert.equal(timers.length, 0)
+  streamListener({ requestId: options.requestId, eventType: 'chunk', data: Buffer.from('first').toString('base64') })
+  assert.equal(timers.length, 1)
+  assert.equal(timers[0].delay, 60000)
+  streamListener({ requestId: options.requestId, eventType: 'chunk', data: Buffer.from(' second').toString('base64') })
+  assert.equal(timers[0].cleared, true)
+  assert.equal(timers.length, 2)
+
+  timers[1].callback()
+
+  await assert.rejects(
+    pending,
+    error => error.code === 'stream_idle_timeout' && /60 秒没有新内容/.test(error.message) && /可直接续写/.test(error.message)
+  )
+  assert.deepEqual(chunks, ['first', ' second'])
+  assert.equal(timers[1].cleared, true)
+  assert.equal(cancelledId, options.requestId)
+})
+
+test('clears the partial-stream idle timer after success and abort', async () => {
+  let options
+  let streamListener
+  let cancelCount = 0
+  const timers = []
+  const nativeApi = {
+    onAiChatStreamEvent(callback) { streamListener = callback },
+    aiChatStreamRequest(value) { options = value },
+    aiChatStreamCancel() {
+      cancelCount += 1
+      return true
+    }
+  }
+  const transport = new NativeStreamingTransport({
+    nativeApi,
+    setTimeoutFn(callback, delay) {
+      const timer = { callback, delay, cleared: false }
+      timers.push(timer)
+      return timer
+    },
+    clearTimeoutFn(timer) {
+      timer.cleared = true
+    }
+  })
+
+  const completed = transport.request({ url: 'https://example.com', onChunk() {} })
+  streamListener({ requestId: options.requestId, eventType: 'chunk', data: Buffer.from('done').toString('base64') })
+  streamListener({ requestId: options.requestId, eventType: 'success', statusCode: 200 })
+  await completed
+  assert.equal(timers[0].cleared, true)
+  timers[0].callback()
+  assert.equal(cancelCount, 0)
+
+  const controller = new AbortController()
+  const aborted = transport.request({ url: 'https://example.com', signal: controller.signal, onChunk() {} })
+  streamListener({ requestId: options.requestId, eventType: 'chunk', data: Buffer.from('partial').toString('base64') })
+  controller.abort()
+  await assert.rejects(aborted, error => error.code === 'request_aborted')
+  assert.equal(timers[1].cleared, true)
+  timers[1].callback()
+  assert.equal(cancelCount, 1)
 })

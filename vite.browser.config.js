@@ -1,5 +1,7 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import { cp } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import { filterProxyRequestHeaders, validateProxyTarget } from './src/platform/browser/proxy-rules.js'
 
 function aiProxyPlugin() {
@@ -54,9 +56,21 @@ function aiProxyPlugin() {
   }
 }
 
+function staticAssetsPlugin() {
+  return {
+    name: 'copy-static-assets',
+    apply: 'build',
+    async writeBundle(outputOptions) {
+      const outputDirectory = resolve(outputOptions.dir || 'dist-preview')
+      await cp(resolve('static'), resolve(outputDirectory, 'static'), { recursive: true })
+    }
+  }
+}
+
 export default defineConfig({
   plugins: [
     aiProxyPlugin(),
+    staticAssetsPlugin(),
     vue({
       template: {
         compilerOptions: {

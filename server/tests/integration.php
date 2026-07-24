@@ -169,6 +169,64 @@ $legacyJsonToken = basename($legacyJsonExport['export']['download_url'] ?? '');
 [$status, $normalizedLegacyJson] = callApi($app, 'GET', '/api/v1/json-exports/' . $legacyJsonToken);
 expect($status === 200 && ($normalizedLegacyJson['formatVersion'] ?? 0) === 3, 'legacy JSON export should be normalized before storage');
 
+$groupJsonBackup = $jsonBackup;
+$groupJsonBackup['formatVersion'] = 4;
+$groupJsonBackup['conversations'] = [[
+    'id' => 'group-1',
+    'conversationKind' => 'group',
+    'participants' => [],
+]];
+[$status] = callApi($app, 'POST', '/api/v1/json-exports', [
+    'backup' => $groupJsonBackup,
+], $refreshed['access_token']);
+expect($status === 201, 'group JSON export format 4 should be accepted');
+
+$legacyGroupJsonBackup = $groupJsonBackup;
+unset($legacyGroupJsonBackup['formatVersion']);
+[$status, $legacyGroupJsonExport] = callApi($app, 'POST', '/api/v1/json-exports', [
+    'backup' => $legacyGroupJsonBackup,
+], $refreshed['access_token']);
+expect($status === 201, 'legacy group JSON export should be accepted');
+$legacyGroupJsonToken = basename($legacyGroupJsonExport['export']['download_url'] ?? '');
+[$status, $normalizedLegacyGroupJson] = callApi($app, 'GET', '/api/v1/json-exports/' . $legacyGroupJsonToken);
+expect($status === 200 && ($normalizedLegacyGroupJson['formatVersion'] ?? 0) === 4, 'legacy group JSON export should infer format 4');
+
+$providerGroupJsonBackup = $jsonBackup;
+$providerGroupJsonBackup['formatVersion'] = 5;
+$providerGroupJsonBackup['providers'] = [[
+    'id' => 'provider-member',
+    'name' => 'Independent provider',
+]];
+$providerGroupJsonBackup['conversations'] = [[
+    'id' => 'provider-group-1',
+    'conversationKind' => 'group',
+    'participants' => [[
+        'memberKind' => 'provider',
+        'providerProfileId' => 'provider-member',
+        'nameSnapshot' => 'Independent provider',
+    ]],
+]];
+$providerGroupJsonBackup['messages'] = [[
+    'id' => 'provider-message-1',
+    'conversationId' => 'provider-group-1',
+    'speakerProviderProfileId' => 'provider-member',
+    'speakerNameSnapshot' => 'Independent provider',
+]];
+[$status] = callApi($app, 'POST', '/api/v1/json-exports', [
+    'backup' => $providerGroupJsonBackup,
+], $refreshed['access_token']);
+expect($status === 201, 'provider group JSON export format 5 should be accepted');
+
+$legacyProviderGroupJsonBackup = $providerGroupJsonBackup;
+unset($legacyProviderGroupJsonBackup['formatVersion']);
+[$status, $legacyProviderGroupJsonExport] = callApi($app, 'POST', '/api/v1/json-exports', [
+    'backup' => $legacyProviderGroupJsonBackup,
+], $refreshed['access_token']);
+expect($status === 201, 'legacy provider group JSON export should be accepted');
+$legacyProviderGroupJsonToken = basename($legacyProviderGroupJsonExport['export']['download_url'] ?? '');
+[$status, $normalizedLegacyProviderGroupJson] = callApi($app, 'GET', '/api/v1/json-exports/' . $legacyProviderGroupJsonToken);
+expect($status === 200 && ($normalizedLegacyProviderGroupJson['formatVersion'] ?? 0) === 5, 'legacy provider group JSON export should infer format 5');
+
 $oversizedJson = $jsonBackup;
 $oversizedJson['settings']['padding'] = str_repeat('x', 256);
 [$status, $tooLargeJson] = callApi($limitedApp, 'POST', '/api/v1/json-exports', [

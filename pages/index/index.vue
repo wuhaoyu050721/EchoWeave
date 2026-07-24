@@ -1,7 +1,6 @@
 <template>
 	<view class="app-shell" :class="{ 'chat-active': ui.screen === 'chat' }">
-		<template v-if="ui.screen === 'conversations'">
-			<view class="screen-view conversations-view">
+		<view v-show="ui.screen === 'conversations'" class="screen-view conversations-view primary-tab-view">
 				<view class="screen-header conversations-header">
 					<text class="screen-title">织语</text>
 					<view class="conversation-header-actions">
@@ -13,36 +12,51 @@
 				<view v-if="homeMenuOpen" class="home-menu-backdrop" @click="homeMenuOpen = false" />
 				<view v-if="homeMenuOpen" class="home-action-menu">
 					<button @click="createConversationFromMenu"><Plus :size="19" /><text>新建会话</text></button>
+					<button @click="createGroupConversationFromMenu"><Contact :size="19" /><text>新建群聊</text></button>
 					<button @click="refreshConversationsFromMenu"><RefreshCw :size="18" /><text>刷新会话</text></button>
 				</view>
-				<scroll-view class="conversation-list" scroll-y>
+				<scroll-view class="conversation-list" scroll-y @scrolltolower="showMoreConversations">
 					<view v-if="!filteredConversations.length" class="empty-state"><text>暂无会话</text></view>
-					<view v-for="conversation in filteredConversations" :key="conversation.id" class="conversation-row" :data-conversation-id="conversation.id">
+					<view v-for="conversation in renderedConversations" :key="conversation.id" v-memo="[conversation]" class="conversation-row" :data-conversation-id="conversation.id">
 						<button class="conversation-open" :aria-label="`打开会话 ${conversation.title}`" @click="openChat(conversation.id)" @longpress.stop="manageConversation(conversation)" @contextmenu.prevent.stop="manageConversation(conversation)">
-							<view class="conversation-avatar"><ProviderLogo class="conversation-avatar-logo provider-logo" :src="conversationProviderLogo(conversation)" :alt="conversation.title" mode="aspectFill" /></view>
+							<GroupAvatar v-if="isGroupChat(conversation)" class="conversation-group-avatar" :participants="conversation.participants" :size="50" :name="conversation.title" />
+							<view v-else class="conversation-avatar"><ProviderLogo class="conversation-avatar-logo provider-logo" :src="conversationProviderLogo(conversation)" :alt="conversation.title" mode="aspectFill" lazy-load /></view>
 							<view class="conversation-copy"><view class="row-title-line"><text class="row-title">{{ conversation.title }}</text></view><text class="row-preview">{{ conversation.preview }}</text></view>
 						</button>
 						<button class="row-time" :aria-label="`管理会话 ${conversation.title}`" @click.stop="manageConversation(conversation)">{{ conversation.time }}</button>
 					</view>
 					<view class="conversation-scroll-tail" />
 				</scroll-view>
-			</view>
-		</template>
+		</view>
 
-		<template v-else-if="ui.screen === 'contacts'">
-			<CharacterContacts
-				:items="filteredCharacters"
-				:query="contactSearchQuery"
-				:sort-mode="contactSortMode"
-				:busy="characterImportBusy"
-				:world-book-count="worldBookItems.length"
-				@update:query="contactSearchQuery = $event"
-				@toggle-sort="toggleContactSort"
-				@create-character="openCustomCharacterEditor"
-				@import-character-gallery="openCharacterCardPicker('gallery')"
-				@import-character-file="openCharacterCardPicker('file')"
-				@manage-world-books="openWorldBookManager"
-				@open-character-details="openCharacterDetailsView"
+		<CharacterContacts
+			v-show="ui.screen === 'contacts'"
+			class="primary-tab-view"
+			:items="renderedCharacters"
+			:query="contactSearchQuery"
+			:sort-mode="contactSortMode"
+			:busy="characterImportBusy"
+			:world-book-count="worldBookItems.length"
+			@update:query="contactSearchQuery = $event"
+			@toggle-sort="toggleContactSort"
+			@load-more="showMoreCharacters"
+			@create-character="openCustomCharacterEditor"
+			@import-character-gallery="openCharacterCardPicker('gallery')"
+			@import-character-file="openCharacterCardPicker('file')"
+			@manage-world-books="openWorldBookManager"
+			@open-character-details="openCharacterDetailsView"
+			@open-character-maker="openCharacterMaker"
+		/>
+
+		<template v-if="ui.screen === 'group-editor'">
+			<GroupChatEditor
+				:characters="characterItems"
+				:providers="providerItems"
+				:conversation="groupEditorConversation"
+				:saving="groupEditorSaving"
+				@back="closeGroupChatEditor"
+				@limit="showToast('群聊最多选择 8 位成员')"
+				@save="saveGroupChat"
 			/>
 		</template>
 
@@ -69,14 +83,15 @@
 			<view class="chat-toolbar">
 				<button class="icon-button chat-back-button" data-testid="back-to-conversations" aria-label="返回会话" @click="backToConversations"><ArrowLeft :size="26" /></button>
 				<button class="model-selector" :disabled="ui.generating" @click="toggleModelMenu">
-					<ProviderLogo class="toolbar-provider-logo provider-logo" :src="activeAssistantAvatar" mode="aspectFill" />
+					<GroupAvatar v-if="activeGroupConversation" class="toolbar-group-avatar" :participants="activeGroupParticipants" :size="42" :name="activeConversation.title" />
+					<ProviderLogo v-else class="toolbar-provider-logo provider-logo" :src="activeAssistantAvatar" mode="aspectFill" />
 					<view class="model-selector-copy"><text class="model-selector-title">{{ chatProviderName }}</text><text class="model-selector-subtitle">{{ chatModelName }}</text></view>
 				</button>
 				<button class="icon-button chat-more-button" aria-label="管理会话" @click="manageConversation(activeConversation)"><MoreVertical class="chat-more-icon" :size="23" /></button>
 			</view>
 			<button v-if="latestAssistantStatus && assistantStatusOverview" class="character-status-bar" :aria-expanded="assistantStatusOpen" :title="latestAssistantStatus.summary" aria-label="查看角色状态" @click="assistantStatusOpen = true">
 				<view class="character-status-icon"><Activity :size="17" /></view>
-				<text class="character-status-label">角色状态</text>
+				<text class="character-status-label">{{ activeGroupConversation ? selectedGroupStatusName : '角色状态' }}</text>
 				<view class="character-status-field character-status-primary"><text>{{ assistantStatusOverview.primary }}</text></view>
 				<view v-if="assistantStatusOverview.location" class="character-status-field character-status-location"><text>{{ assistantStatusOverview.location }}</text></view>
 				<view v-if="assistantStatusOverview.scoreValue" class="character-status-field character-status-score"><text>{{ assistantStatusOverview.scoreLabel || '好感度' }} {{ assistantStatusOverview.scoreValue }}</text></view>
@@ -87,46 +102,49 @@
 				<text class="popover-label">选择接口与模型</text>
 				<view class="generation-mode-tabs" role="tablist">
 					<button class="generation-mode-tab" :class="{ active: ui.generationMode === 'chat' }" @click="setChatGenerationMode"><MessageCircle :size="15" /><text>聊天</text></button>
-					<button class="generation-mode-tab" :class="{ active: ui.generationMode === 'image' }" @click="setImageGenerationMode"><Image :size="15" /><text>生图</text></button>
+					<button v-if="!activeGroupConversation" class="generation-mode-tab" :class="{ active: ui.generationMode === 'image' }" @click="setImageGenerationMode"><Image :size="15" /><text>生图</text></button>
 				</view>
 				<button v-for="provider in providerItems" :key="provider.id" class="popover-option" @click="selectConversationProvider(provider)">
 					<text>{{ provider.name }}</text><text>{{ provider.defaultModel }}</text>
 				</button>
 			</view>
 			<scroll-view ref="chatScroll" class="chat-scroll" :class="{ 'has-character-status': latestAssistantStatus }" scroll-y :scroll-into-view="chatScrollIntoView">
+				<view v-if="messageHistoryHasMore || (messageHistoryLoading && messageItems.length)" class="chat-history-loader">
+					<button :disabled="messageHistoryLoading || ui.generating" @click="loadEarlierMessages"><ChevronDown class="chat-history-icon" :size="15" /><text>{{ messageHistoryLoading ? '加载中…' : '加载更早消息' }}</text></button>
+				</view>
 				<view class="date-divider"><text>今天</text></view>
-				<view v-if="!messageItems.length" class="empty-chat"><MessageCircle :size="40" /><text>开始新对话</text></view>
+				<view v-if="!messageItems.length && !messageHistoryLoading" class="empty-chat"><MessageCircle :size="40" /><text>开始新对话</text></view>
 				<template v-for="message in messageItems" :key="message.id">
-					<view v-if="message.role === 'user'" class="message message-user">
+					<view v-if="message.role === 'user'" :id="messageAnchorId(message)" class="message message-user">
 						<view class="user-message-stack" :class="{ 'message-pop': animatedMessageIds.includes(message.id) }" @animationend="finishMessageAnimation(message.id)">
-							<view v-if="imageAttachments(message).length" class="media-message user-media-message">
-								<view class="sent-image-grid" :class="{ single: imageAttachments(message).length === 1 }">
-									<view v-for="attachment in imageAttachments(message)" :key="attachment.id" class="sent-image-item"><button class="sent-image-button" :aria-label="`预览图片 ${attachment.name}`" @click="previewImageAttachment(attachment)"><AppImage class="attachment-image" :src="attachmentSource(attachment)" :alt="attachment.name" :mode="imageAttachments(message).length === 1 ? 'widthFix' : 'aspectFill'" /></button><button class="image-download-button" :disabled="imageDownloadBusy" :aria-label="`保存图片 ${attachment.name}`" title="保存到相册" @click.stop="downloadImageAttachment(attachment)"><Download :size="16" /></button></view>
+							<view v-if="message.imageAttachments.length" class="media-message user-media-message">
+								<view class="sent-image-grid" :class="{ single: message.imageAttachments.length === 1 }">
+									<view v-for="attachment in message.imageAttachments" :key="attachment.id" class="sent-image-item"><button class="sent-image-button" :aria-label="`预览图片 ${attachment.name}`" @click="previewImageAttachment(attachment)"><AppImage class="attachment-image" :src="attachmentSource(attachment)" :alt="attachment.name" :mode="message.imageAttachments.length === 1 ? 'widthFix' : 'aspectFill'" /></button><button class="image-download-button" :disabled="imageDownloadBusy" :aria-label="`保存图片 ${attachment.name}`" title="保存到相册" @click.stop="downloadImageAttachment(attachment)"><Download :size="16" /></button></view>
 								</view>
-								<view v-if="!message.content && !textAttachments(message).length" class="media-message-meta user-media-meta"><text>{{ formatMessageTime(message.updatedAt) }}</text><CheckCheck v-if="isUserMessageRead(message)" class="read-receipt" :size="15" :stroke-width="2.2" /></view>
+								<view v-if="!message.content && !message.textAttachments.length" class="media-message-meta user-media-meta"><text>{{ formatMessageTime(message.updatedAt) }}</text><CheckCheck v-if="isUserMessageRead(message)" class="read-receipt" :size="15" :stroke-width="2.2" /></view>
 							</view>
-							<view v-if="message.content || textAttachments(message).length" class="message-bubble user-bubble">
-								<view v-if="textAttachments(message).length" class="message-attachments">
-									<button v-for="attachment in textAttachments(message)" :key="attachment.id" class="sent-file-button" :aria-label="`预览文件 ${attachment.name}`" @click="previewTextAttachment(attachment)"><FileText :size="18" /><view class="sent-file-copy"><text>{{ attachment.name }}</text><text>{{ formatAttachmentSize(attachment.byteSize) }}</text></view><ChevronRight :size="15" /></button>
+							<view v-if="message.content || message.textAttachments.length" class="message-bubble user-bubble">
+								<view v-if="message.textAttachments.length" class="message-attachments">
+									<button v-for="attachment in message.textAttachments" :key="attachment.id" class="sent-file-button" :aria-label="`预览文件 ${attachment.name}`" @click="previewTextAttachment(attachment)"><FileText :size="18" /><view class="sent-file-copy"><text>{{ attachment.name }}</text><text>{{ formatAttachmentSize(attachment.byteSize) }}</text></view><ChevronRight :size="15" /></button>
 								</view>
 								<text v-if="message.content" class="message-content" selectable user-select>{{ message.content }}</text>
 								<view class="message-meta user-message-meta"><text class="message-time">{{ formatMessageTime(message.updatedAt) }}</text><CheckCheck v-if="isUserMessageRead(message)" class="read-receipt" :size="16" :stroke-width="2.2" /></view>
 							</view>
 						</view>
 					</view>
-					<view v-else class="message message-assistant">
-						<ProviderLogo class="assistant-avatar provider-logo" :src="activeAssistantAvatar" mode="aspectFill" />
+					<view v-else :id="messageAnchorId(message)" class="message message-assistant">
+						<ProviderLogo class="assistant-avatar provider-logo" :src="messageAssistantAvatar(message)" mode="aspectFill" />
 						<view class="assistant-message-stack" :class="{ 'message-pop': animatedMessageIds.includes(message.id) }" @animationend="finishMessageAnimation(message.id)">
 							<view v-if="message.displayContent || message.status !== 'completed'" class="assistant-body" :class="{ 'generating-message': message.status === 'generating' }">
-								<text class="assistant-name">{{ chatProviderName }}</text>
+								<text class="assistant-name">{{ messageAssistantName(message) }}</text>
 								<text v-if="message.displayContent" class="message-content" selectable user-select>{{ message.displayContent }}</text>
 								<view v-if="message.status === 'generating'" class="generation-status"><view class="generation-dots"><i /><i /><i /></view><button class="stop-inline" @click="stopGeneration"><Square :size="12" fill="currentColor" /><text>停止生成</text></button></view>
-								<view v-else-if="message.status !== 'completed'" class="message-status"><view class="message-status-copy"><text>{{ statusLabel(message.status) }}</text><text v-if="message.errorMessage" class="message-status-detail">{{ message.errorMessage }}</text></view><button class="retry-button" @click="retryMessage(message.id)">重试</button></view>
-								<view v-else class="assistant-footer"><view class="message-actions"><button v-if="message.displayContent" aria-label="复制" @click="copyMessage(message.displayContent)"><Copy :size="16" /></button><button aria-label="赞同"><ThumbsUp :size="16" /></button><button aria-label="不赞同"><ThumbsDown :size="16" /></button><button v-if="!message.isGreeting" class="retry-action" @click="retryMessage(message.id)"><RotateCcw :size="14" /><text>重试</text></button></view><text class="assistant-time">{{ formatMessageTime(message.updatedAt) }}</text></view>
+								<view v-else-if="message.status !== 'completed'" class="message-status"><view class="message-status-copy"><text>{{ statusLabel(message.status) }}</text><text v-if="message.errorMessage" class="message-status-detail">{{ message.errorMessage }}</text></view><view class="message-status-actions"><button v-if="canContinueMessage(message)" class="continue-button" data-testid="continue-interrupted" aria-label="从中断处续写" @click="continueMessage(message.id)"><PlayOutline :size="13" /><text>续写</text></button><button class="retry-button" @click="retryMessage(message.id)">重试</button></view></view>
+								<view v-else class="assistant-footer"><view class="message-actions"><button v-if="message.displayContent" aria-label="复制" @click="copyMessage(message.displayContent)"><Copy :size="16" /></button><button aria-label="赞同"><ThumbsUp :size="16" /></button><button aria-label="不赞同"><ThumbsDown :size="16" /></button><button v-if="!message.isGreeting" class="retry-action" @click="retryMessage(message.id)"><RotateCcw :size="14" /><text>重试</text></button><button v-if="canContinueMessage(message)" class="continue-action" data-testid="continue-writing" aria-label="继续续写" @click="continueMessage(message.id)"><PlayOutline :size="14" /><text>续写</text></button></view><text class="assistant-time">{{ formatMessageTime(message.updatedAt) }}</text></view>
 							</view>
-							<view v-if="imageAttachments(message).length" class="media-message assistant-image-surface">
-								<view class="sent-image-grid assistant-image-grid" :class="{ single: imageAttachments(message).length === 1 }">
-									<view v-for="attachment in imageAttachments(message)" :key="attachment.id" class="sent-image-item"><button class="sent-image-button" :aria-label="`预览生成图片 ${attachment.name}`" @click="previewImageAttachment(attachment)"><AppImage class="attachment-image" :src="attachmentSource(attachment)" :alt="attachment.name" :mode="imageAttachments(message).length === 1 ? 'widthFix' : 'aspectFill'" /></button><button class="image-download-button" :disabled="imageDownloadBusy" :aria-label="`保存图片 ${attachment.name}`" title="保存到相册" @click.stop="downloadImageAttachment(attachment)"><Download :size="16" /></button></view>
+							<view v-if="message.imageAttachments.length" class="media-message assistant-image-surface">
+								<view class="sent-image-grid assistant-image-grid" :class="{ single: message.imageAttachments.length === 1 }">
+									<view v-for="attachment in message.imageAttachments" :key="attachment.id" class="sent-image-item"><button class="sent-image-button" :aria-label="`预览生成图片 ${attachment.name}`" @click="previewImageAttachment(attachment)"><AppImage class="attachment-image" :src="attachmentSource(attachment)" :alt="attachment.name" :mode="message.imageAttachments.length === 1 ? 'widthFix' : 'aspectFill'" /></button><button class="image-download-button" :disabled="imageDownloadBusy" :aria-label="`保存图片 ${attachment.name}`" title="保存到相册" @click.stop="downloadImageAttachment(attachment)"><Download :size="16" /></button></view>
 								</view>
 								<view v-if="!message.displayContent && message.status === 'completed'" class="media-message-meta assistant-media-meta"><text>{{ formatMessageTime(message.updatedAt) }}</text></view>
 								<view v-if="!message.displayContent && message.status === 'completed'" class="assistant-image-footer"><button aria-label="重新生成图片" @click="retryMessage(message.id)"><RotateCcw :size="14" /></button></view>
@@ -138,13 +156,22 @@
 			</scroll-view>
 			<view v-if="attachmentMenuOpen || emojiMenuOpen" class="attachment-backdrop" @click="closeComposerMenus" />
 			<view class="composer" :class="{ 'menu-open': attachmentMenuOpen || emojiMenuOpen, 'has-attachments': pendingAttachments.length || attachmentProcessing, 'is-multiline': composerMultiline }">
+				<scroll-view v-if="groupMentionSuggestions.length" class="group-mention-popover" scroll-y>
+					<button v-for="participant in groupMentionSuggestions" :key="groupMemberKey(participant)" @click="selectGroupMention(participant)">
+						<ProviderLogo class="group-mention-avatar" :src="participant.avatarDataUrl || participant.avatarSource || '/static/zhiyu-logo.png'" :alt="participant.nameSnapshot" mode="aspectFill" />
+						<view><text>{{ participant.nameSnapshot }}</text><text>点名该成员回复</text></view>
+					</button>
+				</scroll-view>
 				<view v-if="attachmentMenuOpen" class="attachment-popover">
 					<button v-for="action in attachmentActions" :key="action.id" class="attachment-action" :aria-label="action.label" @click="chooseAttachmentAction(action)"><component :is="iconMap[action.icon]" :size="28" /><text>{{ action.label }}</text></button>
 				</view>
 				<view v-if="emojiMenuOpen" class="emoji-popover">
 					<button v-for="emoji in emojiOptions" :key="emoji" :aria-label="`插入表情 ${emoji}`" @click="appendEmoji(emoji)"><text>{{ emoji }}</text></button>
 				</view>
-				<button class="composer-emoji" aria-label="选择表情" @click="toggleEmojiMenu"><AppImage class="composer-smile-icon" src="/static/chat/smile.png" alt="" mode="aspectFit" /></button>
+				<view class="composer-leading-actions" :class="{ 'has-mention': activeGroupConversation && ui.generationMode === 'chat' }">
+					<button class="composer-emoji" aria-label="选择表情" @click="toggleEmojiMenu"><AppImage class="composer-smile-icon" src="/static/chat/smile.png" alt="" mode="aspectFit" /></button>
+					<button v-if="activeGroupConversation && ui.generationMode === 'chat'" class="composer-mention" aria-label="点名群成员" @click="openGroupMention"><text>@</text></button>
+				</view>
 				<view class="composer-main">
 					<scroll-view v-if="pendingAttachments.length || attachmentProcessing" class="pending-attachment-strip" scroll-x>
 						<view class="pending-attachment-list">
@@ -187,7 +214,7 @@
 						<view class="provider-form provider-form-card">
 							<button class="provider-avatar-selector" :disabled="!ready || providerAvatarBusy" @click="openProviderAvatarMenu">
 								<view class="provider-avatar-preview">
-									<ProviderLogo class="provider-avatar-preview-image" :src="providerFormAvatarSource" :alt="providerForm.name || '接口头像'" :mode="providerForm.avatar.mode === 'custom' ? 'aspectFill' : 'aspectFit'" />
+									<ProviderLogo class="provider-avatar-preview-image" :src="providerFormAvatarSource" :alt="providerForm.name || '接口头像'" mode="aspectFill" />
 									<view v-if="providerAvatarBusy" class="provider-avatar-loading"><RefreshCw class="spinning" :size="16" /></view>
 								</view>
 								<view class="provider-avatar-selector-copy"><text>接口头像</text><text>{{ providerFormAvatarDescription }}</text></view>
@@ -197,7 +224,7 @@
 							<view class="form-row"><text>接口格式</text><view class="provider-protocol-control" role="group" aria-label="接口格式"><button v-for="protocol in providerProtocols" :key="protocol.id" class="provider-protocol-option" :class="{ active: providerForm.protocolType === protocol.id }" :disabled="providerBusy" :aria-pressed="providerForm.protocolType === protocol.id" @click="selectProviderProtocol(protocol.id)">{{ protocol.label }}</button></view></view>
 							<label class="form-row"><text>基础地址</text><input v-model="providerForm.baseUrl" :placeholder="activeProviderProtocol.defaultBaseUrl" /></label>
 							<view class="form-row"><text>API 密钥</text><view class="password-field" :class="{ 'is-saved': providerForm.hasApiKey && !providerApiKeyDirty }"><input v-model="providerForm.apiKey" :disabled="providerBusy" :type="showApiKey ? 'text' : 'password'" :placeholder="providerApiKeyPlaceholder" autocomplete="off" @input="handleProviderApiKeyInput" /><button :disabled="providerBusy" :aria-label="providerApiKeyToggleLabel" :title="providerApiKeyToggleLabel" @click.stop="toggleProviderApiKeyVisibility"><RefreshCw v-if="providerApiKeyBusy" class="spinning" :size="16" /><EyeOff v-else :size="17" /></button></view></view>
-							<label class="form-row"><text>默认模型</text><view class="select-field-wrap"><picker class="select-field-picker" mode="selector" :range="providerModelOptions" :value="providerModelIndex" :disabled="providerBusy || !providerModelOptions.length" @change="selectProviderModel"><view class="select-field"><text>{{ providerForm.defaultModel || '获取模型后选择' }}</text></view></picker><ChevronDown class="select-chevron" :size="17" /></view></label>
+							<view class="form-row"><text>模型选择</text><view class="select-field-wrap"><picker class="select-field-picker" mode="selector" :range="providerModelOptions" :value="providerModelIndex" :disabled="providerBusy || !providerModelOptions.length" @change="selectProviderModel"><view class="select-field"><text>{{ providerForm.defaultModel || '获取模型后选择' }}</text></view></picker><ChevronDown class="select-chevron" :size="17" /></view><view class="provider-default-model"><text class="provider-default-model-current">当前默认：{{ savedProviderDefaultModel || '未设置' }}</text><button class="provider-default-model-button" data-testid="set-default-model" :disabled="!canSetDefaultProviderModel" @click="setDefaultProviderModel"><Check :size="16" /><text>{{ providerDefaultSaving ? '设置中...' : (providerDefaultModelSaved ? '已是默认' : '设为默认') }}</text></button></view></view>
 							<label class="form-row"><text>手动模型</text><input v-model="providerForm.defaultModel" :placeholder="activeProviderProtocol.modelPlaceholder" /></label>
 							<view class="provider-form-actions"><button class="provider-action-button" :disabled="providerBusy" @click="fetchProviderModels"><RefreshCw :class="{ spinning: providerLoadingModels }" :size="17" /><text>{{ providerLoadingModels ? '获取中...' : '获取模型列表' }}</text></button><button class="provider-action-button" :disabled="providerBusy" @click="testConnection"><Activity :size="17" /><text>{{ providerTesting ? '测试中...' : '测试连接' }}</text></button></view>
 							<button class="provider-save-button" :disabled="providerBusy" @click="saveProvider"><Check :size="18" /><text>{{ providerSaving ? '保存中...' : '保存' }}</text></button>
@@ -210,7 +237,7 @@
 			</view>
 		</template>
 
-		<template v-else>
+		<template v-else-if="ui.screen === 'settings'">
 			<view v-if="ui.settingsView === 'overview'" class="screen-view settings-overview">
 				<scroll-view class="settings-screen reference-scroll" scroll-y>
 					<view class="settings-profile">
@@ -223,6 +250,7 @@
 
 					<view v-if="settingsSearchHasResults" class="settings-card settings-primary-card settings-menu-card">
 						<button v-if="matchesSettingsSearch('对话设置 系统提示词 全局提示词')" class="settings-row" data-testid="conversation-settings-entry" @click="openConversationSettings(ui)"><view class="settings-icon settings-icon-orange"><FileCog :size="22" /></view><view class="settings-copy"><text>对话设置</text><text>{{ systemPromptSettingLabel }}</text></view><ChevronRight :size="18" /></button>
+						<button v-if="matchesSettingsSearch('流式传输 实时回答 完整回答 非流式')" class="settings-row" data-testid="streaming-toggle" role="switch" :aria-checked="streamingEnabled" :disabled="streamingSaving" @click="toggleStreaming"><view class="settings-icon settings-icon-teal"><Activity :size="22" /></view><view class="settings-copy"><text>流式传输</text><text>{{ streamingSettingLabel }}</text></view><view class="toggle" :class="{ enabled: streamingEnabled }"><view class="toggle-thumb" /></view></button>
 						<button v-if="matchesSettingsSearch('账号与云端 登录 自动备份 同步')" class="settings-row" @click="openCloudModal"><view class="settings-icon settings-icon-blue"><Cloud :size="22" /></view><view class="settings-copy"><text>账号与云端</text><text>{{ cloudConnected ? settingsProfileName : '本地模式，不会自动上传' }}</text></view></button>
 						<button v-if="matchesSettingsSearch('隐私与安全 API 密钥 应用锁 加密 通知 回复提醒')" class="settings-row" @click="openSettingsDetails(ui)"><view class="settings-icon settings-icon-green"><KeyRound :size="22" /></view><view class="settings-copy"><text>隐私与安全</text><text>API 密钥、应用锁与回复通知</text></view></button>
 						<button v-if="matchesSettingsSearch('NSFW 设置 成人 私密状态 状态栏')" class="settings-row" data-testid="nsfw-settings-entry" @click="openNsfwSettings(ui)"><view class="settings-icon settings-icon-red"><EyeOff :size="22" /></view><view class="settings-copy"><text>NSFW 设置</text><text>{{ nsfwSettingLabel }}</text></view><ChevronRight :size="18" /></button>
@@ -302,13 +330,27 @@
 			</view>
 		</template>
 
-		<view v-if="ui.screen !== 'chat' && ui.screen !== 'character-detail'" class="bottom-nav">
+		<view v-if="ui.screen !== 'chat' && ui.screen !== 'character-detail' && ui.screen !== 'group-editor'" class="bottom-nav">
 			<view class="nav-indicator" aria-hidden="true" :style="{ transform: `translateX(${activeNavigationIndex * 100}%)` }" />
 			<button v-for="item in navigationItems" :key="item.id" class="nav-item" :data-tab="item.id" :class="{ active: ui.activeTab === item.id }" :aria-current="ui.activeTab === item.id ? 'page' : undefined" @click="goToTab(item.id)"><component :is="iconMap[item.icon]" :size="24" /><text>{{ item.label }}</text></button>
 		</view>
 
 		<input ref="characterCardInput" class="hidden-file-input" type="file" accept="image/png,.png" @change="handleCharacterCardSelection" />
 		<input ref="characterAvatarInput" class="hidden-file-input" type="file" accept="image/*" @change="handleCharacterAvatarSelection" />
+		<view
+			v-if="characterImportBusy"
+			class="character-import-loading-layer"
+			role="status"
+			aria-live="polite"
+			:aria-label="characterImportLoadingTitle"
+		>
+			<view class="character-import-loading-panel">
+				<view class="character-import-loading-icon"><RefreshCw class="character-import-loading-spinner" :size="30" /></view>
+				<text class="character-import-loading-title">{{ characterImportLoadingTitle }}</text>
+				<text class="character-import-loading-detail">{{ characterImportLoadingDetail }}</text>
+				<view class="character-import-loading-progress" aria-hidden="true"><view /></view>
+			</view>
+		</view>
 		<view v-if="characterImportPreview" class="modal-backdrop character-import-backdrop" @click.self="closeCharacterImportPreview">
 			<view class="character-import-modal" role="dialog" aria-modal="true" aria-label="角色卡导入预览">
 				<view class="modal-heading"><text>导入角色卡</text><button aria-label="关闭角色卡预览" :disabled="characterImportBusy" @click="closeCharacterImportPreview"><X :size="19" /></button></view>
@@ -427,14 +469,14 @@
 				<view class="modal-heading"><view><text>接口头像</text><text class="provider-avatar-modal-subtitle">自动识别或手动固定品牌</text></view><button aria-label="关闭接口头像选择" :disabled="providerAvatarBusy" @click="providerAvatarMenuOpen = false"><X :size="19" /></button></view>
 				<scroll-view class="provider-avatar-modal-content" scroll-y>
 					<button class="provider-avatar-auto-option" :class="{ selected: providerForm.avatar.mode === 'auto' }" @click="selectAutomaticProviderAvatar">
-						<ProviderLogo class="provider-avatar-option-image" :src="automaticProviderAvatarSource" alt="自动识别头像" mode="aspectFit" />
+						<ProviderLogo class="provider-avatar-option-image" :src="automaticProviderAvatarSource" alt="自动识别头像" mode="aspectFill" />
 						<view><text>自动识别</text><text>{{ automaticProviderAvatarLabel }}</text></view>
 						<view class="provider-avatar-option-check"><Check v-if="providerForm.avatar.mode === 'auto'" :size="15" /></view>
 					</button>
 					<text class="provider-avatar-section-label">默认头像</text>
 					<view class="provider-avatar-preset-grid">
 						<button v-for="preset in providerAvatarPresets" :key="preset.id" class="provider-avatar-preset" :class="{ selected: providerForm.avatar.mode === 'preset' && providerForm.avatar.presetId === preset.id }" :aria-label="`使用 ${preset.label} 头像`" @click="selectProviderAvatarPreset(preset.id)">
-							<view class="provider-avatar-preset-image-wrap"><ProviderLogo class="provider-avatar-preset-image" :src="preset.source" :alt="preset.label" mode="aspectFit" /><view v-if="providerForm.avatar.mode === 'preset' && providerForm.avatar.presetId === preset.id" class="provider-avatar-preset-check"><Check :size="12" /></view></view>
+							<view class="provider-avatar-preset-image-wrap"><ProviderLogo class="provider-avatar-preset-image" :src="preset.source" :alt="preset.label" mode="aspectFill" /><view v-if="providerForm.avatar.mode === 'preset' && providerForm.avatar.presetId === preset.id" class="provider-avatar-preset-check"><Check :size="12" /></view></view>
 							<text>{{ preset.label }}</text>
 						</button>
 					</view>
@@ -458,6 +500,25 @@
 			<view class="assistant-status-modal" role="dialog" aria-modal="true" aria-label="角色状态详情" @click.stop>
 				<view class="assistant-status-grabber" aria-hidden="true" />
 				<button class="assistant-status-close" aria-label="关闭角色状态" @click="assistantStatusOpen = false"><X :size="21" /></button>
+				<scroll-view v-if="activeGroupConversation && groupStatusParticipants.length > 1" class="group-status-participants" scroll-x>
+					<view class="group-status-participant-list">
+						<button
+							v-for="participant in groupStatusParticipants"
+							:key="participant.participantKey"
+							class="group-status-participant"
+							:class="{ active: participant.participantKey === selectedGroupStatusParticipantKey }"
+							@click="selectGroupStatusParticipant(participant.participantKey)"
+						>
+							<view class="group-status-participant-avatar-shell">
+								<ProviderLogo class="group-status-participant-avatar" :src="participant.avatarDataUrl || participant.avatarSource || '/static/zhiyu-logo.png'" :alt="participant.nameSnapshot" mode="aspectFill" />
+							</view>
+							<view class="group-status-participant-copy">
+								<text>{{ participant.nameSnapshot }}</text>
+								<text>{{ participant.statusSummary }}</text>
+							</view>
+						</button>
+					</view>
+				</scroll-view>
 				<view class="assistant-status-hero">
 					<view class="assistant-status-hero-item"><text>当前状态</text><text>{{ assistantStatusOverview.primary }}</text></view>
 					<view v-if="assistantStatusOverview.scoreValue" class="assistant-status-hero-item assistant-status-hero-score"><text>{{ assistantStatusOverview.scoreLabel || '好感度' }}</text><text>{{ assistantStatusOverview.scoreValue }}</text></view>
@@ -497,13 +558,15 @@
 	import {
 		Activity, AlertCircle, ArrowLeft, Camera, Check, CheckCheck, ChevronDown, ChevronRight, CircleHelp, Cloud, Copy, Database,
 		Contact, Download, EyeOff, FileCog, FileText, Image, Import, Info, KeyRound, LockKeyhole, MessageCircle, Mic,
-		MoreVertical, Paperclip, Plus, RefreshCw, RotateCcw, Search, Send, Server, Settings,
+		MoreVertical, Paperclip, PlayOutline, Plus, RefreshCw, RotateCcw, Search, Send, Server, Settings,
 		Square, ThumbsDown, ThumbsUp, Trash2, Upload, X
 	} from '../../src/components/app-icons.js'
 	import AppDialogLayer from '../../src/components/app-dialog-layer.vue'
 	import AppImage from '../../src/components/app-image.js'
 	import CharacterContacts from '../../src/components/character-contacts.vue'
 	import CharacterDetail from '../../src/components/character-detail.vue'
+	import GroupAvatar from '../../src/components/group-avatar.vue'
+	import GroupChatEditor from '../../src/components/group-chat-editor.vue'
 	import ProviderLogo from '../../src/components/provider-logo.js'
 	import WorldBookManager from '../../src/components/world-book-manager.vue'
 	import { createCloudServices } from '../../src/app/create-cloud-services.js'
@@ -511,8 +574,13 @@
 	import { createPlatformServices, createPlatformWorkspaceManager } from '../../src/app/create-platform-services.js'
 	import { assistantStatusProgressColor, assistantStatusSectionsForDisplay, createAssistantStatusOverview, extractAssistantStatus } from '../../src/core/assistant-status.js'
 	import { DEFAULT_CLOUD_BASE_URL, normalizeCloudBaseUrl, resolveCloudRequestBaseUrl } from '../../src/core/cloud-base-url.js'
+	import {
+		groupMentionQuery, groupMessageSpeakerKey, groupParticipantKey, groupParticipantKind, insertGroupMention,
+		isGroupConversation, normalizeGroupParticipants
+	} from '../../src/core/group-chat.js'
 	import { imageAttachmentSource } from '../../src/core/image-output.js'
 	import { PROFILE_AVATAR_SETTING_KEY, createProfileAvatar, normalizeProfileAvatar } from '../../src/core/profile-avatar.js'
+	import { STREAMING_SETTING_KEY, readStreamingEnabled } from '../../src/core/streaming-setting.js'
 	import {
 		PROVIDER_AVATAR_PRESETS, createAutomaticProviderAvatar, createProviderCustomAvatar, createProviderPresetAvatar,
 		describeProviderAvatar, detectProviderAvatarPreset, resolveProviderAvatarSource
@@ -529,8 +597,8 @@
 	import { commitWorldBookImport, inspectWorldBook } from '../../src/features/world-book-import/importWorldBook.js'
 	import {
 		applyFetchedModels, applyProviderModelSelection, applyProviderProtocolSelection, attachmentActions, canSendMessage, closeCharacterDetails as closeCharacterDetailsState,
-		closeSettingsDetails, createInitialUiState, createProviderForm, isUserMessageRead, navigationItems,
-		openCharacterDetails as openCharacterDetailsState, openConversation, openConversationSettings, openNsfwSettings, openSettingsDetails, selectTab, setGenerating,
+		closeGroupEditor as closeGroupEditorState, closeSettingsDetails, createInitialUiState, createProviderForm, isUserMessageRead, navigationItems,
+		openCharacterDetails as openCharacterDetailsState, openConversation, openConversationSettings, openGroupEditor, openNsfwSettings, openSettingsDetails, selectTab, setGenerating,
 		resolveAppBackAction, setGenerationMode, summarizeConversation, toggleAppLock
 	} from '../../src/ui-state.js'
 
@@ -538,10 +606,14 @@
 	const COMPOSER_MIN_HEIGHT = 44
 	const COMPOSER_MAX_HEIGHT = 132
 	const COMPOSER_LINE_HEIGHT = 22
+	const CHAT_MESSAGE_PAGE_SIZE = 60
+	const STREAMING_RENDER_INTERVAL = 40
+	const PRIMARY_LIST_BATCH_SIZE = 16
+	const CHARACTER_MAKER_URL = 'https://www.surtr.cn:8019/'
 	const SAVED_API_KEY_MASK = '••••••••••••'
 	const NSFW_SETTING_KEY = 'nsfwEnabled'
 	const SETTINGS_SEARCH_ITEMS = [
-		'对话设置 系统提示词 全局提示词', '账号与云端 登录 自动备份 同步', '隐私与安全 API 密钥 应用锁 加密 通知 回复提醒',
+		'对话设置 系统提示词 全局提示词', '流式传输 实时回答 完整回答 非流式', '账号与云端 登录 自动备份 同步', '隐私与安全 API 密钥 应用锁 加密 通知 回复提醒',
 		'NSFW 设置 成人 私密状态 状态栏',
 		'数据与存储 本地数据库 SQLite IndexedDB', '导入与导出 JSON 备份 恢复', '设备与诊断 Android 流式 日志',
 		'关于应用 版本 信息', '检查更新 最新版本', '帮助与反馈 使用问题 问题反馈'
@@ -552,28 +624,34 @@
 	export default {
 		components: {
 			Activity, AlertCircle, ArrowLeft, Camera, Check, CheckCheck, ChevronDown, ChevronRight, CircleHelp, Cloud, Copy, Database,
-			Download, EyeOff, FileCog, FileText, Image, Import, Info, KeyRound, LockKeyhole, MessageCircle, Mic,
-			MoreVertical, Paperclip, Plus, AppDialogLayer, AppImage, CharacterContacts, CharacterDetail, ProviderLogo, WorldBookManager, RefreshCw, RotateCcw, Search, Send, Square,
+			Contact, Download, EyeOff, FileCog, FileText, Image, Import, Info, KeyRound, LockKeyhole, MessageCircle, Mic,
+			MoreVertical, Paperclip, PlayOutline, Plus, AppDialogLayer, AppImage, CharacterContacts, CharacterDetail, GroupAvatar, GroupChatEditor, ProviderLogo, WorldBookManager, RefreshCw, RotateCcw, Search, Send, Square,
 			ThumbsDown, ThumbsUp, Trash2, Upload, X
 		},
 		data() {
 			return {
 				ui: createInitialUiState(), iconMap, navigationItems, attachmentActions, services: null, workspaceManager: null, ready: false, initializing: false, initializationError: '',
-				conversationItems: [], characterItems: [], worldBookItems: [], providerItems: [], messageItems: [], animatedMessageIds: [], assistantStatusOpen: false, chatScrollIntoView: '', chatScrollRevision: 0, chatScrollTimer: null, searchQuery: '', searchOpen: false, homeMenuOpen: false, draftMessage: '', composerInputHeight: COMPOSER_MIN_HEIGHT,
+				conversationItems: [], characterItems: [], worldBookItems: [], providerItems: [], messageItems: [], animatedMessageIds: [], assistantStatusOpen: false, groupStatusSpeakerKey: '',
+				conversationRenderLimit: PRIMARY_LIST_BATCH_SIZE, characterRenderLimit: PRIMARY_LIST_BATCH_SIZE,
+				conversationLoadPromise: null, characterLoadPromise: null, worldBookLoadPromise: null, dataLoadRevision: 0,
+				characterAvatarSources: markRaw(new Map()), characterAvatarLoadPromises: markRaw(new Map()),
+				messageHistoryLoading: false, messageHistoryHasMore: false, chatLoadRevision: 0, pendingStreamingMessage: null, streamingRenderTimer: null,
+				chatScrollIntoView: '', chatScrollRevision: 0, chatScrollTimer: null, searchQuery: '', searchOpen: false, homeMenuOpen: false, draftMessage: '', composerInputHeight: COMPOSER_MIN_HEIGHT,
+				groupEditorSaving: false, groupEditorReturnScreen: 'conversations',
 				conversationActionSheet: null, conversationActionResolver: null, appDialog: null, appDialogValue: '', appDialogResolver: null,
 				contactSearchQuery: '', contactSortMode: 'name', customCharacterDraft: null, customCharacterAvatar: null, characterDetailEditing: false, characterSaveBusy: false, pendingCharacterAvatarId: '',
-				characterImportBusy: false, characterImportPreview: null, characterImportConfirmed: false,
+				characterImportBusy: false, characterImportStage: '', characterImportPreview: null, characterImportConfirmed: false,
 				worldBookManagerOpen: false, worldBookImportBusy: false, worldBookImportPreview: null, worldBookImportConfirmed: false,
 				worldBookApplyToAll: true, worldBookSelectedCharacterIds: [],
 				pendingAttachments: [], attachmentProcessing: false, attachmentPreview: null, imageDownloadBusy: false,
 				textAttachmentAccept: TEXT_ATTACHMENT_ACCEPT,
 				modelMenuOpen: false, attachmentMenuOpen: false, emojiMenuOpen: false,
 				emojiOptions: ['😀', '😂', '😊', '😍', '👍', '🙏', '🎉', '❤️'],
-				providerForm: createProviderForm(), providerSaving: false,
+				providerForm: createProviderForm(), providerSaving: false, providerDefaultSaving: false,
 				providerTesting: false, providerLoadingModels: false, connectionStatus: 'untested', showApiKey: false,
 				providerApiKeyBusy: false, providerApiKeyDirty: false, providerApiKeyLoadedValue: '', providerApiKeyRequestId: 0,
 				providerAvatarPresets: PROVIDER_AVATAR_PRESETS, providerProtocols: PROVIDER_PROTOCOLS, providerAvatarMenuOpen: false, providerAvatarBusy: false,
-				systemPromptEnabled: false, systemPrompt: '', systemPromptSaving: false, nsfwEnabled: false, nsfwSaving: false, backupMenuOpen: false, backupBusy: false,
+				systemPromptEnabled: false, systemPrompt: '', systemPromptSaving: false, streamingEnabled: true, streamingSaving: false, nsfwEnabled: false, nsfwSaving: false, backupMenuOpen: false, backupBusy: false,
 				cloudExportUrl: '', cloudImportUrl: '',
 				settingsSearchOpen: false, settingsSearchQuery: '', profileName: '', profileAvatar: null, profileAvatarMenuOpen: false, profileAvatarBusy: false,
 				cloudOpen: false, cloudBusy: false, cloudServices: null, cloudSession: null, networkSyncHandler: null,
@@ -607,17 +685,26 @@
 			},
 			settingsProfileAvatarSource() { return this.profileAvatar?.dataUrl || this.activeProviderLogo },
 			latestAssistantStatus() {
+				const selectedSpeakerId = this.activeGroupConversation ? this.selectedGroupStatusCharacterId : ''
 				for (let index = this.messageItems.length - 1; index >= 0; index -= 1) {
 					const message = this.messageItems[index]
+					if (selectedSpeakerId && message.speakerCharacterId !== selectedSpeakerId) continue
 					if (message.role === 'assistant' && message.status === 'completed' && message.assistantStatus) {
-						return { ...message.assistantStatus, messageId: message.id, updatedAt: message.updatedAt }
+						return {
+							...message.assistantStatus,
+							messageId: message.id,
+							speakerCharacterId: message.speakerCharacterId || null,
+							updatedAt: message.updatedAt
+						}
 					}
 				}
 				return null
 			},
 			latestCompletedAssistantMessage() {
+				const selectedSpeakerId = this.activeGroupConversation ? this.selectedGroupStatusCharacterId : ''
 				for (let index = this.messageItems.length - 1; index >= 0; index -= 1) {
 					const message = this.messageItems[index]
+					if (selectedSpeakerId && message.speakerCharacterId !== selectedSpeakerId) continue
 					if (message.role === 'assistant' && message.status === 'completed' && message.generationMode !== 'image') return message
 				}
 				return null
@@ -636,6 +723,17 @@
 				return length ? `已启用 · ${length} 字` : '已启用 · 内容为空'
 			},
 			nsfwSettingLabel() { return this.nsfwEnabled ? '已开启，显示私密状态' : '已关闭，隐藏私密状态' },
+			streamingSettingLabel() { return this.streamingEnabled ? '回答内容实时显示' : '等待完整回答后显示' },
+			characterImportLoadingTitle() {
+				if (this.characterImportStage === 'saving') return '正在导入角色卡'
+				if (this.characterImportStage === 'selecting') return '正在读取角色卡'
+				return '正在解析角色卡'
+			},
+			characterImportLoadingDetail() {
+				if (this.characterImportStage === 'saving') return '正在保存角色、头像和关联世界书'
+				if (this.characterImportStage === 'selecting') return '正在从设备读取所选 PNG 文件'
+				return '正在识别角色资料与内嵌数据'
+			},
 			assistantStatusUpdateLabel() {
 				if (this.assistantStatusIssue) return this.assistantStatusIssue
 				const value = this.latestAssistantStatus?.updatedAt
@@ -657,6 +755,9 @@
 				if (!keyword) return this.conversationItems
 				return this.conversationItems.filter((item) => `${item.title} ${item.preview}`.toLowerCase().includes(keyword))
 			},
+			renderedConversations() {
+				return this.filteredConversations.slice(0, this.conversationRenderLimit)
+			},
 			filteredCharacters() {
 				const keyword = this.contactSearchQuery.trim().toLowerCase()
 				const filtered = keyword
@@ -666,7 +767,75 @@
 					? String(right.importedAt || '').localeCompare(String(left.importedAt || ''))
 					: String(left.name || '').localeCompare(String(right.name || '')))
 			},
+			renderedCharacters() {
+				return this.filteredCharacters.slice(0, this.characterRenderLimit)
+			},
 			activeConversation() { return this.conversationItems.find((item) => item.id === this.ui.activeConversationId) || null },
+			groupEditorConversation() { return this.conversationItems.find(item => item.id === this.ui.groupEditorConversationId) || null },
+			activeGroupConversation() { return isGroupConversation(this.activeConversation) },
+			activeGroupParticipants() {
+				return this.activeGroupConversation
+					? (Array.isArray(this.activeConversation.participants) ? this.activeConversation.participants : [])
+						.filter(participant => participant?.enabled !== false)
+					: []
+			},
+			groupStatusParticipants() {
+				if (!this.activeGroupConversation) return []
+				const latestBySpeaker = new Map()
+				for (let index = this.messageItems.length - 1; index >= 0; index -= 1) {
+					const message = this.messageItems[index]
+					if (message.role !== 'assistant' || message.status !== 'completed' || !message.assistantStatus) continue
+					const speakerKey = groupMessageSpeakerKey(message)
+					if (speakerKey && !latestBySpeaker.has(speakerKey)) latestBySpeaker.set(speakerKey, message)
+				}
+				return this.activeGroupParticipants
+					.filter(participant => groupParticipantKind(participant) === 'character')
+					.map(participant => {
+						const participantKey = groupParticipantKey(participant)
+						const message = latestBySpeaker.get(participantKey)
+						if (!message) return null
+						const overview = createAssistantStatusOverview(message.assistantStatus)
+						return {
+							...participant,
+							participantKey,
+							statusSummary: overview?.primary || '状态已更新'
+						}
+					})
+					.filter(Boolean)
+			},
+			selectedGroupStatusParticipantKey() {
+				if (!this.activeGroupConversation) return ''
+				const available = this.groupStatusParticipants
+				if (available.some(participant => participant.participantKey === this.groupStatusSpeakerKey)) {
+					return this.groupStatusSpeakerKey
+				}
+				for (let index = this.messageItems.length - 1; index >= 0; index -= 1) {
+					const message = this.messageItems[index]
+					const speakerKey = message.assistantStatus ? groupMessageSpeakerKey(message) : ''
+					if (speakerKey && available.some(participant => participant.participantKey === speakerKey)) return speakerKey
+				}
+				return available[0]?.participantKey || ''
+			},
+			selectedGroupStatusCharacterId() {
+				if (!this.activeGroupConversation) return ''
+				return this.groupStatusParticipants
+					.find(participant => participant.participantKey === this.selectedGroupStatusParticipantKey)
+					?.characterId || ''
+			},
+			selectedGroupStatusName() {
+				return this.groupStatusParticipants
+					.find(participant => participant.participantKey === this.selectedGroupStatusParticipantKey)
+					?.nameSnapshot || '角色状态'
+			},
+			groupMentionSuggestions() {
+				if (!this.activeGroupConversation || this.ui.generationMode !== 'chat' || this.ui.generating) return []
+				const query = groupMentionQuery(this.draftMessage)
+				if (query === null) return []
+				const keyword = String(query).trim().toLowerCase()
+				return this.activeGroupParticipants
+					.filter(participant => !keyword || String(participant.nameSnapshot || '').toLowerCase().includes(keyword))
+					.slice(0, 8)
+			},
 			selectedCharacter() {
 				if (this.customCharacterDraft?.id === this.ui.activeCharacterId) return this.customCharacterDraft
 				return this.characterItems.find(item => item.id === this.ui.activeCharacterId) || null
@@ -694,8 +863,13 @@
 			activeProvider() { return this.providerItems.find((item) => item.id === this.activeConversation?.providerProfileId) || this.providerItems.find((item) => item.id === this.ui.activeProviderId) || null },
 			activeProviderLogo() { return this.activeProvider?.logo || '/static/providers/openai.png' },
 			activeAssistantAvatar() { return this.activeCharacter?.avatarDataUrl || this.activeConversation?.characterAvatarDataUrl || this.activeProviderLogo },
-			chatProviderName() { return this.activeCharacter?.name || this.activeConversation?.characterNameSnapshot || this.activeProvider?.name || this.activeConversation?.providerNameSnapshot || 'AI 助手' },
-			chatModelName() { return this.activeConversation?.modelName || this.activeProvider?.defaultModel || '选择模型' },
+			chatProviderName() { return this.activeGroupConversation ? this.activeConversation.title : (this.activeCharacter?.name || this.activeConversation?.characterNameSnapshot || this.activeProvider?.name || this.activeConversation?.providerNameSnapshot || 'AI 助手') },
+			chatModelName() {
+				const model = this.activeConversation?.modelName || this.activeProvider?.defaultModel || '选择模型'
+				if (!this.activeGroupConversation) return model
+				const hasProviderMember = this.activeGroupParticipants.some(participant => groupParticipantKind(participant) === 'provider')
+				return `${this.activeGroupParticipants.length} 位成员 · ${hasProviderMember ? '多接口' : model}`
+			},
 			chatHeader() { return this.activeConversation ? `${this.activeProvider?.name || this.activeConversation.providerNameSnapshot || '接口'} · ${this.activeConversation.modelName || '模型'}` : '选择接口' },
 			providerModelOptions() {
 				const models = Array.isArray(this.providerForm.modelsCache) ? this.providerForm.modelsCache.filter(Boolean) : []
@@ -705,6 +879,17 @@
 			providerModelIndex() {
 				const index = this.providerModelOptions.indexOf(String(this.providerForm.defaultModel ?? '').trim())
 				return index < 0 ? 0 : index
+			},
+			savedProviderDefaultModel() {
+				const provider = this.providerItems.find(item => item.id === this.providerForm.id)
+				return String(provider?.defaultModel ?? '').trim()
+			},
+			providerDefaultModelSaved() {
+				const selectedModel = String(this.providerForm.defaultModel ?? '').trim()
+				return Boolean(selectedModel && selectedModel === this.savedProviderDefaultModel)
+			},
+			canSetDefaultProviderModel() {
+				return Boolean(this.providerForm.id && String(this.providerForm.defaultModel ?? '').trim() && !this.providerDefaultModelSaved && !this.providerBusy)
 			},
 			activeProviderProtocol() { return getProviderProtocol(this.providerForm.protocolType) },
 			providerFormAvatarSource() { return resolveProviderAvatarSource(this.providerForm) },
@@ -723,9 +908,15 @@
 			automaticProviderAvatarLabel() { return `当前识别为 ${this.automaticProviderAvatar.label}` },
 			canSend() { return canSendMessage(this.ui, this.draftMessage, Boolean(this.activeProvider), this.pendingAttachments.length, this.attachmentProcessing) },
 			composerMultiline() { return this.composerInputHeight > COMPOSER_MIN_HEIGHT },
-			providerBusy() { return !this.ready || this.providerSaving || this.providerTesting || this.providerLoadingModels || this.providerApiKeyBusy }
+			providerBusy() { return !this.ready || this.providerSaving || this.providerDefaultSaving || this.providerTesting || this.providerLoadingModels || this.providerApiKeyBusy }
 		},
 		watch: {
+			searchQuery() {
+				this.conversationRenderLimit = PRIMARY_LIST_BATCH_SIZE
+			},
+			contactSearchQuery() {
+				this.characterRenderLimit = PRIMARY_LIST_BATCH_SIZE
+			},
 			draftMessage(value) {
 				if (!value) {
 					this.composerInputHeight = COMPOSER_MIN_HEIGHT
@@ -754,6 +945,7 @@
 		beforeUnmount() {
 			clearTimeout(this.toastTimer)
 			clearTimeout(this.chatScrollTimer)
+			clearTimeout(this.streamingRenderTimer)
 			this.unbindNetworkSyncListener()
 			const closeWorkspace = async () => {
 				await this.stopCloudActivityAndWait()
@@ -783,6 +975,10 @@
 				if (this.ui.screen === 'character-detail' && this.characterDetailEditing) {
 					if (this.customCharacterDraft) this.closeCharacterDetailsView()
 					else this.characterDetailEditing = false
+					return true
+				}
+				if (this.ui.screen === 'group-editor') {
+					if (!this.groupEditorSaving) this.closeGroupChatEditor()
 					return true
 				}
 				if (this.attachmentPreview) {
@@ -873,6 +1069,10 @@
 				this.homeMenuOpen = false
 				await this.addConversation()
 			},
+			async createGroupConversationFromMenu() {
+				this.homeMenuOpen = false
+				await this.openGroupChatEditor()
+			},
 			async refreshConversationsFromMenu() {
 				this.homeMenuOpen = false
 				await this.loadConversations()
@@ -881,6 +1081,12 @@
 			providerLogoSource(provider = {}) {
 				return provider.logo || resolveProviderAvatarSource(provider)
 			},
+			isGroupChat(conversation) {
+				return isGroupConversation(conversation)
+			},
+			groupMemberKey(participant) {
+				return groupParticipantKey(participant)
+			},
 			conversationProviderLogo(conversation) {
 				const character = this.characterItems.find(item => item.id === conversation?.characterId)
 				if (character?.avatarDataUrl) return character.avatarDataUrl
@@ -888,8 +1094,71 @@
 				const provider = this.providerItems.find(item => item.id === conversation?.providerProfileId)
 				return provider?.logo || this.providerLogoSource({ name: conversation?.providerNameSnapshot })
 			},
+			messageAssistantAvatar(message) {
+				if (message?.speakerAvatarDataUrl) return message.speakerAvatarDataUrl
+				if (message?.speakerAvatarSource) return message.speakerAvatarSource
+				if (message?.speakerProviderProfileId) {
+					const participant = this.activeGroupParticipants.find(item => (
+						groupParticipantKey(item) === groupMessageSpeakerKey(message)
+					))
+					const provider = this.providerItems.find(item => item.id === message.speakerProviderProfileId)
+					return provider?.logo || participant?.avatarDataUrl || participant?.avatarSource || this.activeProviderLogo
+				}
+				if (!message?.speakerCharacterId) return this.activeAssistantAvatar
+				const participant = this.activeGroupParticipants.find(item => groupParticipantKey(item) === groupMessageSpeakerKey(message))
+				return participant?.avatarDataUrl || this.activeAssistantAvatar
+			},
+			messageAssistantName(message) {
+				if (message?.speakerNameSnapshot) return message.speakerNameSnapshot
+				if (message?.speakerProviderProfileId) {
+					const participant = this.activeGroupParticipants.find(item => (
+						groupParticipantKey(item) === groupMessageSpeakerKey(message)
+					))
+					const provider = this.providerItems.find(item => item.id === message.speakerProviderProfileId)
+					return participant?.nameSnapshot || provider?.name || 'AI 接口'
+				}
+				if (!message?.speakerCharacterId) return this.chatProviderName
+				const participant = this.activeGroupParticipants.find(item => groupParticipantKey(item) === groupMessageSpeakerKey(message))
+				return participant?.nameSnapshot || '群成员'
+			},
+			selectGroupStatusParticipant(participantKey) {
+				this.groupStatusSpeakerKey = String(participantKey || '')
+			},
 			toggleContactSort() {
 				this.contactSortMode = this.contactSortMode === 'name' ? 'recent' : 'name'
+				this.characterRenderLimit = PRIMARY_LIST_BATCH_SIZE
+			},
+			showMoreConversations() {
+				this.conversationRenderLimit = Math.min(
+					this.filteredConversations.length,
+					this.conversationRenderLimit + PRIMARY_LIST_BATCH_SIZE
+				)
+			},
+			showMoreCharacters() {
+				this.characterRenderLimit = Math.min(
+					this.filteredCharacters.length,
+					this.characterRenderLimit + PRIMARY_LIST_BATCH_SIZE
+				)
+			},
+			openCharacterMaker() {
+				const plusApi = typeof plus !== 'undefined' ? plus : null
+				if (typeof plusApi?.runtime?.openURL === 'function') {
+					try {
+						plusApi.runtime.openURL(CHARACTER_MAKER_URL, () => {
+							this.showToast('无法打开角色卡制作页面')
+						})
+					} catch (error) {
+						this.handleError(error, '角色卡制作页面打开失败')
+					}
+					return
+				}
+				const browserWindow = getBrowserWindow()
+				if (typeof browserWindow?.open === 'function') {
+					const opened = browserWindow.open(CHARACTER_MAKER_URL, '_blank', 'noopener,noreferrer')
+					if (!opened && browserWindow.location) browserWindow.location.href = CHARACTER_MAKER_URL
+					return
+				}
+				this.showToast('当前环境无法打开角色卡制作页面')
 			},
 			openCharacterDetailsView(character) {
 				if (!character?.id) return
@@ -929,8 +1198,9 @@
 						await this.characterManager().createCharacter(updated, { avatar: this.customCharacterAvatar })
 					} else {
 						await this.services.repository.saveCharacter(updated)
+						await this.repairCharacterConversationLinks()
 					}
-					await this.loadCharacters()
+					await Promise.all([this.loadCharacters(), this.loadConversations()])
 					if (creating) {
 						this.customCharacterDraft = null
 						this.customCharacterAvatar = null
@@ -1085,21 +1355,76 @@
 				if (!this.selectedCharacter || this.characterSaveBusy) return
 				await this.startCharacterChat(this.selectedCharacter)
 			},
+			loadCharacterAvatarSource(assetId) {
+				const id = String(assetId || '').trim()
+				if (!id) return Promise.resolve('')
+				if (this.characterAvatarSources.has(id)) {
+					return Promise.resolve(this.characterAvatarSources.get(id) || '')
+				}
+				if (this.characterAvatarLoadPromises.has(id)) {
+					return this.characterAvatarLoadPromises.get(id)
+				}
+				const repository = this.services?.repository
+				const promise = Promise.resolve(repository?.getCharacterAsset?.(id))
+					.then(asset => {
+						const source = asset?.dataUrl || asset?.sourceUrl || ''
+						if (this.services?.repository === repository) this.characterAvatarSources.set(id, source)
+						return source
+					})
+					.finally(() => {
+						if (this.characterAvatarLoadPromises.get(id) === promise) {
+							this.characterAvatarLoadPromises.delete(id)
+						}
+					})
+				this.characterAvatarLoadPromises.set(id, promise)
+				return promise
+			},
 			async loadCharacters() {
-				if (!this.services?.repository?.listCharacters) return
-				const characters = await this.services.repository.listCharacters()
-				this.characterItems = await Promise.all(characters.map(async character => {
-					const avatar = character.avatarAssetId
-						? await this.services.repository.getCharacterAsset(character.avatarAssetId)
-						: null
-					return { ...character, avatarDataUrl: avatar?.dataUrl || avatar?.sourceUrl || '' }
-				}))
+				if (this.characterLoadPromise) return this.characterLoadPromise
+				const repository = this.services?.repository
+				if (!repository?.listCharacters) return []
+				const revision = this.dataLoadRevision
+				this.characterAvatarSources.clear()
+				const promise = (async () => {
+					const characters = await repository.listCharacters()
+					const items = await Promise.all(characters.map(async character => markRaw({
+						...character,
+						avatarDataUrl: await this.loadCharacterAvatarSource(character.avatarAssetId)
+					})))
+					if (this.services?.repository === repository && this.dataLoadRevision === revision) {
+						this.characterItems = items
+						this.characterRenderLimit = PRIMARY_LIST_BATCH_SIZE
+					}
+					return items
+				})()
+				this.characterLoadPromise = promise
+				try {
+					return await promise
+				} finally {
+					if (this.characterLoadPromise === promise) this.characterLoadPromise = null
+				}
 			},
 			async loadWorldBooks() {
-				if (!this.services?.repository?.listAllWorldBooks) return
-				this.worldBookItems = (await this.services.repository.listAllWorldBooks())
-					.filter(book => book && !book.deletedAt)
-					.sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')))
+				if (this.worldBookLoadPromise) return this.worldBookLoadPromise
+				const repository = this.services?.repository
+				if (!repository?.listAllWorldBooks) return []
+				const revision = this.dataLoadRevision
+				const promise = (async () => {
+					const items = (await repository.listAllWorldBooks())
+						.filter(book => book && !book.deletedAt)
+						.sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')))
+						.map(book => markRaw(book))
+					if (this.services?.repository === repository && this.dataLoadRevision === revision) {
+						this.worldBookItems = items
+					}
+					return items
+				})()
+				this.worldBookLoadPromise = promise
+				try {
+					return await promise
+				} finally {
+					if (this.worldBookLoadPromise === promise) this.worldBookLoadPromise = null
+				}
 			},
 			openWorldBookManager() {
 				if (this.worldBookImportBusy) return
@@ -1244,6 +1569,7 @@
 			},
 			async pickNativeCharacterCard(source) {
 				this.characterImportBusy = true
+				this.characterImportStage = 'selecting'
 				this.errorMessage = ''
 				try {
 					const file = await this.services.nativeCharacterCardPicker.pick(source)
@@ -1252,6 +1578,7 @@
 					this.handleError(error, '角色卡识别失败')
 				} finally {
 					this.characterImportBusy = false
+					this.characterImportStage = ''
 				}
 			},
 			async handleCharacterCardSelection(event) {
@@ -1259,6 +1586,7 @@
 				const file = input?.files?.[0]
 				if (!file || this.characterImportBusy) return
 				this.characterImportBusy = true
+				this.characterImportStage = 'parsing'
 				this.errorMessage = ''
 				try {
 					await this.inspectSelectedCharacterCard(file)
@@ -1266,10 +1594,14 @@
 					this.handleError(error, '角色卡识别失败')
 				} finally {
 					this.characterImportBusy = false
+					this.characterImportStage = ''
 					if (input) input.value = ''
 				}
 			},
 			async inspectSelectedCharacterCard(file) {
+				this.characterImportStage = 'parsing'
+				await this.$nextTick()
+				await new Promise(resolve => setTimeout(resolve, 16))
 				this.characterImportPreview = markRaw(await inspectCharacterCard(file))
 				this.characterImportConfirmed = !this.characterImportPreview.requiresSensitiveExtensionConfirmation
 			},
@@ -1285,8 +1617,11 @@
 					return
 				}
 				this.characterImportBusy = true
+				this.characterImportStage = 'saving'
 				this.errorMessage = ''
 				try {
+					await this.$nextTick()
+					await new Promise(resolve => setTimeout(resolve, 16))
 					const result = await commitCharacterImport(this.characterImportPreview, {
 						repository: this.services.repository,
 						allowSensitiveExtensions: this.characterImportConfirmed
@@ -1300,6 +1635,7 @@
 					this.handleError(error, '角色卡导入失败')
 				} finally {
 					this.characterImportBusy = false
+					this.characterImportStage = ''
 				}
 			},
 			async startCharacterChat(character) {
@@ -1345,6 +1681,25 @@
 			toggleAttachmentMenu() { this.modelMenuOpen = false; this.emojiMenuOpen = false; this.attachmentMenuOpen = !this.attachmentMenuOpen },
 			toggleEmojiMenu() { this.modelMenuOpen = false; this.attachmentMenuOpen = false; this.emojiMenuOpen = !this.emojiMenuOpen },
 			appendEmoji(emoji) { this.draftMessage += emoji; this.emojiMenuOpen = false },
+			focusComposer() {
+				this.$nextTick(() => {
+					const ref = Array.isArray(this.$refs.composerInput) ? this.$refs.composerInput[0] : this.$refs.composerInput
+					const input = ref?.focus ? ref : ref?.$el?.querySelector?.('textarea')
+					input?.focus?.()
+				})
+			},
+			openGroupMention() {
+				if (!this.activeGroupConversation || this.ui.generating) return
+				this.closeComposerMenus()
+				if (groupMentionQuery(this.draftMessage) === null) {
+					this.draftMessage = `${this.draftMessage}${this.draftMessage && !/\s$/.test(this.draftMessage) ? ' ' : ''}@`
+				}
+				this.focusComposer()
+			},
+			selectGroupMention(participant) {
+				this.draftMessage = insertGroupMention(this.draftMessage, participant?.nameSnapshot)
+				this.focusComposer()
+			},
 			chooseAttachmentAction(action) {
 				this.closeComposerMenus()
 				if (this.services?.nativeAttachmentPicker) {
@@ -1419,8 +1774,6 @@
 				if (this.attachmentProcessing) return
 				this.pendingAttachments.splice(index, 1)
 			},
-			imageAttachments(message) { return (message?.attachments || []).filter(attachment => attachment.kind === 'image') },
-			textAttachments(message) { return (message?.attachments || []).filter(attachment => attachment.kind === 'text') },
 			attachmentSource: imageAttachmentSource,
 			attachmentPreviewImageStyle(attachment) { return { backgroundImage: `url(${this.attachmentSource(attachment)})` } },
 			previewImageAttachment(attachment) { this.attachmentPreview = { kind: 'image', attachment } },
@@ -1484,6 +1837,7 @@
 				const app = await this.services.repository.getSetting('app', { appLockEnabled: false })
 				this.ui.appLockEnabled = Boolean(app.appLockEnabled)
 				this.replyNotificationsEnabled = Boolean(await this.services.repository.getSetting(REPLY_NOTIFICATION_SETTING_KEY, true))
+				this.streamingEnabled = await readStreamingEnabled(this.services.repository)
 				this.nsfwEnabled = Boolean(await this.services.repository.getSetting(NSFW_SETTING_KEY, false))
 				const prompt = await this.services.repository.getSetting('systemPrompt', { enabled: false, encryptedValue: null })
 				this.systemPromptEnabled = Boolean(prompt.enabled)
@@ -1521,16 +1875,34 @@
 				if (!this.conversationItems.length && this.providerItems[0]) await this.addConversation(false)
 			},
 			resetWorkspaceViewState() {
+				this.dataLoadRevision += 1
+				this.conversationLoadPromise = null
+				this.characterLoadPromise = null
+				this.worldBookLoadPromise = null
+				this.characterAvatarSources.clear()
+				this.characterAvatarLoadPromises.clear()
+				this.chatLoadRevision += 1
+				clearTimeout(this.streamingRenderTimer)
+				this.streamingRenderTimer = null
+				this.pendingStreamingMessage = null
 				this.ui.activeConversationId = null
+				this.ui.groupEditorConversationId = null
 				this.ui.activeCharacterId = null
 				this.ui.generating = false
 				this.messageItems = []
+				this.messageHistoryLoading = false
+				this.messageHistoryHasMore = false
 				this.conversationItems = []
 				this.characterItems = []
 				this.worldBookItems = []
+				this.conversationRenderLimit = PRIMARY_LIST_BATCH_SIZE
+				this.characterRenderLimit = PRIMARY_LIST_BATCH_SIZE
 				this.providerItems = []
 				this.pendingAttachments = []
 				this.assistantStatusOpen = false
+				this.groupStatusSpeakerKey = ''
+				this.groupEditorSaving = false
+				this.groupEditorReturnScreen = 'conversations'
 				this.customCharacterDraft = null
 				this.characterDetailEditing = false
 				this.resetProviderApiKeyState()
@@ -1574,54 +1946,215 @@
 				this.providerItems = (await this.providerServiceOrThrow().listProviders()).map(item => ({ ...item, logo: this.providerLogoSource(item) }))
 			},
 			async loadConversations() {
-				if (!this.services) return
-				const conversations = await this.services.repository.listConversations()
-				this.conversationItems = await Promise.all(conversations.map(async (conversation) => {
-					const [messages, avatar] = await Promise.all([
-						this.services.repository.listMessages(conversation.id),
-						conversation.characterAvatarAssetId
-							? this.services.repository.getCharacterAsset?.(conversation.characterAvatarAssetId)
-							: null
-					])
-					return {
-						...summarizeConversation(conversation, messages[messages.length - 1]),
-						characterAvatarDataUrl: avatar?.dataUrl || avatar?.sourceUrl || ''
+				if (this.conversationLoadPromise) return this.conversationLoadPromise
+				const repository = this.services?.repository
+				if (!repository?.listConversations) return []
+				const revision = this.dataLoadRevision
+				const promise = (async () => {
+					const conversations = await repository.listConversations()
+					const conversationIds = conversations.map(conversation => conversation.id)
+					const latestMessages = typeof repository.listLatestMessages === 'function'
+						? await repository.listLatestMessages(conversationIds)
+						: (await Promise.all(conversationIds.map(async conversationId => (
+							(await this.readChatMessagePage(conversationId, null, 1)).messages[0] || null
+						)))).filter(Boolean)
+					const latestByConversation = new Map(
+						latestMessages.map(message => [message.conversationId, message])
+					)
+					const items = await Promise.all(conversations.map(async conversation => {
+						const groupParticipants = isGroupConversation(conversation)
+							? await Promise.all(normalizeGroupParticipants(conversation.participants).map(async participant => {
+								if (groupParticipantKind(participant) === 'provider') {
+									const provider = this.providerItems.find(item => item.id === participant.providerProfileId)
+									return {
+										...participant,
+										nameSnapshot: provider?.name || participant.nameSnapshot,
+										modelName: participant.modelName || provider?.defaultModel || '',
+										avatarDataUrl: provider?.logo || participant.avatarSource || ''
+									}
+								}
+								return {
+									...participant,
+									avatarDataUrl: await this.loadCharacterAvatarSource(participant.avatarAssetId)
+								}
+							}))
+							: []
+						return markRaw({
+							...summarizeConversation(conversation, latestByConversation.get(conversation.id)),
+							participants: groupParticipants.length ? groupParticipants : conversation.participants,
+							characterAvatarDataUrl: await this.loadCharacterAvatarSource(conversation.characterAvatarAssetId)
+						})
+					}))
+					if (this.services?.repository === repository && this.dataLoadRevision === revision) {
+						this.conversationItems = items
+						this.conversationRenderLimit = PRIMARY_LIST_BATCH_SIZE
 					}
-				}))
+					return items
+				})()
+				this.conversationLoadPromise = promise
+				try {
+					return await promise
+				} finally {
+					if (this.conversationLoadPromise === promise) this.conversationLoadPromise = null
+				}
 			},
 			async repairCharacterConversationLinks() {
 				return repairConversationCharacterLinks(this.services?.repository)
 			},
+			async readChatMessagePage(conversationId, beforeSequence = null, limit = CHAT_MESSAGE_PAGE_SIZE) {
+				const repository = this.services?.repository
+				if (!repository) return { messages: [], hasMore: false }
+				if (typeof repository.listMessagePage === 'function') {
+					return repository.listMessagePage(conversationId, { beforeSequence, limit })
+				}
+				const messages = await repository.listMessages(conversationId)
+				const before = Number(beforeSequence)
+				const hasBefore = beforeSequence !== null && beforeSequence !== undefined && Number.isFinite(before)
+				const eligible = messages.filter(message => !hasBefore || (Number(message.sequence) || 0) < before)
+				return {
+					messages: eligible.slice(-limit),
+					hasMore: eligible.length > limit
+				}
+			},
+			async hydrateChatMessages(messages) {
+				const repository = this.services?.repository
+				const attachmentIds = [...new Set(messages.flatMap(message => (
+					Array.isArray(message?.attachmentIds) ? message.attachmentIds : []
+				)))]
+				const avatarIds = [...new Set(messages.map(message => message?.speakerAvatarAssetId).filter(Boolean))]
+				const [attachments, avatars] = await Promise.all([
+					Promise.all(attachmentIds.map(id => repository?.getAttachment?.(id))),
+					Promise.all(avatarIds.map(id => repository?.getCharacterAsset?.(id)))
+				])
+				const attachmentsById = new Map(
+					attachments.filter(attachment => attachment && !attachment.deletedAt).map(attachment => [attachment.id, attachment])
+				)
+				const avatarsById = new Map(
+					avatars.map((avatar, index) => avatar ? [avatarIds[index], avatar] : null).filter(Boolean)
+				)
+				return messages.map(message => {
+					const speakerAvatar = avatarsById.get(message.speakerAvatarAssetId)
+					return this.decorateChatMessage({
+						...message,
+						attachments: (message.attachmentIds || []).map(id => attachmentsById.get(id)).filter(Boolean),
+						speakerAvatarDataUrl: speakerAvatar?.dataUrl || speakerAvatar?.sourceUrl || ''
+					})
+				})
+			},
 			decorateChatMessage(message) {
 				const rawContent = String(message?.content ?? '')
+				const attachments = Array.isArray(message?.attachments) ? message.attachments : []
+				const presentation = {
+					...message,
+					attachments,
+					imageAttachments: attachments.filter(attachment => attachment.kind === 'image'),
+					textAttachments: attachments.filter(attachment => attachment.kind === 'text')
+				}
 				if (message?.role !== 'assistant') {
-					return { ...message, displayContent: rawContent, assistantStatus: null }
+					return { ...presentation, displayContent: rawContent, assistantStatus: null, statusParsingStarted: false }
+				}
+				const statusParsingStarted = Boolean(message.statusParsingStarted) ||
+					/<\s*sumo_monitor\b/i.test(rawContent.slice(-4096))
+				if (message.status === 'generating' && !statusParsingStarted) {
+					return { ...presentation, displayContent: rawContent, assistantStatus: null, statusParsingStarted: false }
 				}
 				const extracted = extractAssistantStatus(rawContent, { hideIncomplete: message.status === 'generating' })
-				return { ...message, displayContent: extracted.content, assistantStatus: extracted.status }
+				return {
+					...presentation,
+					displayContent: extracted.content,
+					assistantStatus: extracted.status,
+					statusParsingStarted
+				}
 			},
 			async openChat(conversationId) {
 				this.homeMenuOpen = false
+				clearTimeout(this.streamingRenderTimer)
+				this.streamingRenderTimer = null
+				this.pendingStreamingMessage = null
 				openConversation(this.ui, conversationId)
+				if (isGroupConversation(this.activeConversation)) setGenerationMode(this.ui, 'chat')
 				this.services?.replyNotificationService?.setActiveConversationId(conversationId)
 				this.animatedMessageIds = []
 				this.assistantStatusOpen = false
-				const messages = await this.services.repository.listMessages(conversationId)
-				this.messageItems = await Promise.all(messages.map(async message => {
-					if (!message.attachmentIds?.length) return this.decorateChatMessage({ ...message, attachments: [] })
-					const attachments = await this.services.repository.listMessageAttachments(message.id)
-					const attachmentsById = new Map(attachments.map(attachment => [attachment.id, attachment]))
-					return this.decorateChatMessage({ ...message, attachments: message.attachmentIds.map(id => attachmentsById.get(id)).filter(Boolean) })
-				}))
-				this.modelMenuOpen = false
-				this.closeComposerMenus()
-				this.scrollChatToBottom()
+				this.messageItems = []
+				this.messageHistoryHasMore = false
+				this.messageHistoryLoading = true
+				const loadRevision = ++this.chatLoadRevision
+				try {
+					const page = await this.readChatMessagePage(conversationId)
+					const messages = await this.hydrateChatMessages(page.messages)
+					if (loadRevision !== this.chatLoadRevision || this.ui.activeConversationId !== conversationId) return
+					this.messageItems = messages
+					this.messageHistoryHasMore = page.hasMore
+					this.groupStatusSpeakerKey = ''
+					for (let index = this.messageItems.length - 1; index >= 0; index -= 1) {
+						const message = this.messageItems[index]
+						const speakerKey = message.assistantStatus ? groupMessageSpeakerKey(message) : ''
+						if (speakerKey) {
+							this.groupStatusSpeakerKey = speakerKey
+							break
+						}
+					}
+					this.modelMenuOpen = false
+					this.closeComposerMenus()
+					this.scrollChatToBottom(true)
+				} catch (error) {
+					if (loadRevision === this.chatLoadRevision) this.handleError(error, '对话加载失败')
+				} finally {
+					if (loadRevision === this.chatLoadRevision) this.messageHistoryLoading = false
+				}
 			},
-			backToConversations() { this.closeComposerMenus(); this.assistantStatusOpen = false; this.services?.replyNotificationService?.setActiveConversationId(null); selectTab(this.ui, 'conversations'); this.loadConversations() },
+			async loadEarlierMessages() {
+				if (this.messageHistoryLoading || !this.messageHistoryHasMore || this.ui.generating || !this.messageItems.length) return
+				const conversationId = this.ui.activeConversationId
+				const firstMessage = this.messageItems[0]
+				const anchorId = this.messageAnchorId(firstMessage)
+				const scrollSnapshot = this.captureChatScrollSnapshot(anchorId)
+				this.messageHistoryLoading = true
+				clearTimeout(this.chatScrollTimer)
+				this.chatScrollTimer = null
+				try {
+					const page = await this.readChatMessagePage(conversationId, Number(firstMessage.sequence) || 0)
+					const earlier = await this.hydrateChatMessages(page.messages)
+					if (this.ui.activeConversationId !== conversationId) return
+					const existingIds = new Set(this.messageItems.map(message => message.id))
+					this.messageItems = [
+						...earlier.filter(message => !existingIds.has(message.id)),
+						...this.messageItems
+					]
+					this.messageHistoryHasMore = page.hasMore
+					this.chatScrollRevision += 1
+					this.chatScrollIntoView = ''
+					await this.$nextTick()
+					if (!this.restoreChatScrollSnapshot(scrollSnapshot)) {
+						this.chatScrollIntoView = anchorId
+					}
+				} catch (error) {
+					this.handleError(error, '历史消息加载失败')
+				} finally {
+					if (this.ui.activeConversationId === conversationId) this.messageHistoryLoading = false
+				}
+			},
+			messageAnchorId(message) {
+				const sequence = Number(message?.sequence) || 0
+				const id = String(message?.id || '').replace(/[^A-Za-z0-9_-]/g, '-').slice(-32)
+				return `chat-message-${sequence}-${id}`
+			},
+			backToConversations() {
+				this.chatLoadRevision += 1
+				clearTimeout(this.streamingRenderTimer)
+				this.streamingRenderTimer = null
+				this.pendingStreamingMessage = null
+				this.messageHistoryLoading = false
+				this.closeComposerMenus()
+				this.assistantStatusOpen = false
+				this.groupStatusSpeakerKey = ''
+				this.services?.replyNotificationService?.setActiveConversationId(null)
+				selectTab(this.ui, 'conversations')
+			},
 			goToTab(tab) {
 				if (tab !== 'providers') this.hideProviderApiKey()
 				this.closeComposerMenus(); this.homeMenuOpen = false; this.characterDetailEditing = false; this.services?.replyNotificationService?.setActiveConversationId(null); selectTab(this.ui, tab); this.modelMenuOpen = false
-				if (tab === 'contacts') Promise.all([this.loadCharacters(), this.loadWorldBooks()]).catch(error => this.handleError(error, '联系人加载失败'))
 			},
 			toggleSettingsSearch() {
 				this.settingsSearchOpen = !this.settingsSearchOpen
@@ -1732,9 +2265,63 @@
 					if (open) await this.openChat(conversation.id)
 				} catch (error) { this.handleError(error) }
 			},
+			async openGroupChatEditor(conversation = null) {
+				if (this.ui.generating || this.groupEditorSaving) return
+				this.groupEditorReturnScreen = this.ui.screen === 'chat' ? 'chat' : 'conversations'
+				this.homeMenuOpen = false
+				try {
+					await Promise.all([this.loadCharacters(), this.loadProviders()])
+					openGroupEditor(this.ui, conversation?.id || null)
+				} catch (error) {
+					this.handleError(error, '群聊设置加载失败')
+				}
+			},
+			async closeGroupChatEditor() {
+				if (this.groupEditorSaving) return
+				const conversationId = this.ui.groupEditorConversationId
+				const returnToChat = this.groupEditorReturnScreen === 'chat' && conversationId
+				closeGroupEditorState(this.ui)
+				this.groupEditorReturnScreen = 'conversations'
+				if (returnToChat) await this.openChat(conversationId)
+			},
+			async saveGroupChat(payload) {
+				if (this.groupEditorSaving) return
+				this.groupEditorSaving = true
+				this.errorMessage = ''
+				try {
+					let conversation
+					if (payload?.id) {
+						conversation = await this.services.chatService.updateGroupConversation(payload.id, payload)
+					} else {
+						const providerMember = (Array.isArray(payload?.participants) ? payload.participants : [])
+							.find(participant => groupParticipantKind(participant) === 'provider')
+						const provider = this.providerItems.find(item => item.id === providerMember?.providerProfileId) ||
+							this.providerItems.find(item => item.id === this.ui.activeProviderId) ||
+							this.providerItems[0]
+						if (!provider) throw new Error('请先添加一个模型接口')
+						conversation = await this.services.chatService.createGroupConversation({
+							...payload,
+							providerProfileId: provider.id,
+							providerNameSnapshot: provider.name,
+							modelName: provider.defaultModel
+						})
+					}
+					await this.loadConversations()
+					this.groupEditorReturnScreen = 'conversations'
+					await this.openChat(conversation.id)
+					this.showToast(payload?.id ? '群聊设置已保存' : '群聊已创建')
+				} catch (error) {
+					this.handleError(error, payload?.id ? '群聊设置保存失败' : '群聊创建失败')
+				} finally {
+					this.groupEditorSaving = false
+				}
+			},
 			chooseConversationAction(conversation) {
 				if (this.conversationActionResolver) this.resolveConversationAction(null)
-				this.conversationActionSheet = { title: String(conversation?.title || '未命名会话') }
+				this.conversationActionSheet = {
+					title: String(conversation?.title || '未命名会话'),
+					group: isGroupConversation(conversation)
+				}
 				return new Promise(resolve => { this.conversationActionResolver = resolve })
 			},
 			resolveConversationAction(action) {
@@ -1792,11 +2379,14 @@
 						if (title === null) return
 					}
 					if (!action) return
-					if (action === 'delete') {
+					if (action === 'group-settings') {
+						await this.openGroupChatEditor(conversation)
+						return
+					} else if (action === 'delete') {
 						if (!await this.confirmAction('删除会话', '确定删除这个会话及其消息吗？', '删除')) return
 						await this.services.chatService.deleteConversation(conversation.id)
 						if (this.ui.activeConversationId === conversation.id) this.backToConversations()
-					} else {
+					} else if (action === 'rename') {
 						const normalizedTitle = String(title).trim()
 						if (!normalizedTitle) { this.showToast('会话名称不能为空'); return }
 						await this.services.chatService.renameConversation(conversation.id, normalizedTitle)
@@ -1804,18 +2394,49 @@
 					await this.loadConversations()
 				} catch (error) { this.handleError(error) }
 			},
-			upsertMessage(message) {
+			commitMessageUpdate(message) {
+				if (message?.conversationId && message.conversationId !== this.ui.activeConversationId) return
 				const index = this.messageItems.findIndex((item) => item.id === message.id)
 				const current = index === -1 ? null : this.messageItems[index]
 				const next = this.decorateChatMessage({ ...current, ...message, attachments: message.attachments ?? current?.attachments ?? [] })
 				if (index === -1) {
 					this.animatedMessageIds.push(next.id)
-					this.messageItems.push(next)
+					const lastSequence = Number(this.messageItems[this.messageItems.length - 1]?.sequence) || 0
+					if (!this.messageItems.length || (Number(next.sequence) || 0) >= lastSequence) {
+						this.messageItems.push(next)
+					} else {
+						const insertionIndex = this.messageItems.findIndex(item => (Number(item.sequence) || 0) > (Number(next.sequence) || 0))
+						this.messageItems.splice(insertionIndex < 0 ? this.messageItems.length : insertionIndex, 0, next)
+					}
 				} else {
 					this.messageItems.splice(index, 1, next)
 				}
-				this.messageItems.sort((left, right) => left.sequence - right.sequence)
+				if (next.status === 'completed' && next.assistantStatus && next.speakerCharacterId) {
+					this.groupStatusSpeakerKey = groupMessageSpeakerKey(next)
+				}
 				this.scrollChatToBottom()
+			},
+			upsertMessage(message) {
+				if (message?.conversationId && message.conversationId !== this.ui.activeConversationId) return
+				const index = this.messageItems.findIndex(item => item.id === message?.id)
+				const shouldThrottle = index >= 0 && message?.role === 'assistant' && message?.status === 'generating'
+				if (!shouldThrottle) {
+					if (this.pendingStreamingMessage?.id === message?.id) {
+						clearTimeout(this.streamingRenderTimer)
+						this.streamingRenderTimer = null
+						this.pendingStreamingMessage = null
+					}
+					this.commitMessageUpdate(message)
+					return
+				}
+				this.pendingStreamingMessage = message
+				if (this.streamingRenderTimer) return
+				this.streamingRenderTimer = setTimeout(() => {
+					this.streamingRenderTimer = null
+					const pending = this.pendingStreamingMessage
+					this.pendingStreamingMessage = null
+					if (pending) this.commitMessageUpdate(pending)
+				}, STREAMING_RENDER_INTERVAL)
 			},
 			finishMessageAnimation(messageId) {
 				this.animatedMessageIds = this.animatedMessageIds.filter((id) => id !== messageId)
@@ -1829,7 +2450,7 @@
 				this.draftMessage = ''
 				this.errorMessage = ''
 				try {
-					await this.services.chatService.send({
+					const result = await this.services.chatService.send({
 						conversationId: this.ui.activeConversationId,
 						providerProfileId: this.activeProvider?.id || null,
 						content,
@@ -1844,6 +2465,7 @@
 						},
 						onState: ({ generating }) => setGenerating(this.ui, generating)
 					})
+					if (result?.autoHandoffLimitReached) this.showToast('AI 接力已达到每轮 8 条上限')
 					await this.loadConversations()
 				} catch (error) {
 					if (!userMessagePersisted) {
@@ -1870,6 +2492,28 @@
 			async retryMessage(messageId) {
 				try { await this.services.chatService.retry(messageId, { providerProfileId: this.activeProvider?.id || null, onMessage: this.upsertMessage, onState: ({ generating }) => setGenerating(this.ui, generating) }); await this.loadConversations() }
 				catch (error) { this.handleError(error) }
+			},
+			canContinueMessage(message) {
+				if (!message || this.ui.generating || (!this.activeProvider && !message.speakerProviderProfileId)) return false
+				if (!['completed', 'interrupted'].includes(message.status) || message.generationMode === 'image' || !String(message.content ?? message.displayContent ?? '').trim()) return false
+				const visibleMessages = this.messageItems.filter(item => !item.deletedAt)
+				const latestMessage = visibleMessages[visibleMessages.length - 1]
+				return latestMessage?.id === message.id
+			},
+			async continueMessage(messageId) {
+				if (this.ui.generating) return
+				this.closeComposerMenus()
+				this.errorMessage = ''
+				try {
+					await this.services.chatService.continueResponse(messageId, {
+						providerProfileId: this.activeProvider?.id || null,
+						onMessage: this.upsertMessage,
+						onState: ({ generating }) => setGenerating(this.ui, generating)
+					})
+					await this.loadConversations()
+				} catch (error) {
+					this.handleError(error, '续写失败')
+				}
 			},
 			async copyMessage(content) { try { await this.writeClipboard(content); this.showToast('已复制') } catch { this.showToast('复制失败') } },
 			openProviderAvatarMenu() {
@@ -2002,6 +2646,26 @@
 			selectProviderModel(event) {
 				applyProviderModelSelection(this.providerForm, this.providerModelOptions, event?.detail?.value)
 			},
+			async setDefaultProviderModel() {
+				const providerId = this.providerForm.id
+				const defaultModel = String(this.providerForm.defaultModel ?? '').trim()
+				if (!providerId) { this.showToast('请先保存接口'); return }
+				if (!defaultModel) { this.showToast('请先选择或输入模型'); return }
+
+				this.providerDefaultSaving = true
+				this.errorMessage = ''
+				try {
+					const saved = await this.providerServiceOrThrow().setDefaultModel(providerId, defaultModel)
+					await this.loadProviders()
+					if (this.providerForm.id === providerId) this.providerForm.defaultModel = saved.defaultModel
+					this.ui.activeProviderId = providerId
+					this.showToast('默认模型已更新')
+				} catch (error) {
+					this.handleError(error, '默认模型设置失败')
+				} finally {
+					this.providerDefaultSaving = false
+				}
+			},
 			selectProviderProtocol(protocolType) {
 				if (this.providerProtocols.some(protocol => protocol.id === protocolType)) {
 					applyProviderProtocolSelection(this.providerForm, protocolType)
@@ -2059,6 +2723,21 @@
 				finally { this.systemPromptSaving = false }
 			},
 			async toggleLock() { toggleAppLock(this.ui); await this.services.repository.setSetting('app', { appLockEnabled: this.ui.appLockEnabled }) },
+			async toggleStreaming() {
+				if (this.streamingSaving || !this.services?.repository) return
+				const previous = this.streamingEnabled
+				this.streamingEnabled = !previous
+				this.streamingSaving = true
+				try {
+					await this.services.repository.setSetting(STREAMING_SETTING_KEY, this.streamingEnabled)
+					this.showToast(this.streamingEnabled ? '流式传输已开启' : '流式传输已关闭')
+				} catch (error) {
+					this.streamingEnabled = previous
+					this.handleError(error, '流式传输设置保存失败')
+				} finally {
+					this.streamingSaving = false
+				}
+			},
 			async toggleNsfw() {
 				if (this.nsfwSaving || !this.services?.repository) return
 				const previous = this.nsfwEnabled
@@ -2532,6 +3211,38 @@
 			},
 			formatMessageTime(value) { const date = value ? new Date(value) : new Date(); return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}` },
 			statusLabel(status) { return ({ failed: '回答失败', interrupted: '回答已中断', cancelled: '已停止生成' })[status] || '回答未完成' },
+			chatScrollTarget() {
+				const ref = Array.isArray(this.$refs.chatScroll) ? this.$refs.chatScroll[0] : this.$refs.chatScroll
+				return ref?.$el || ref || null
+			},
+			captureChatScrollSnapshot(anchorId) {
+				const target = this.chatScrollTarget()
+				if (!target) return { anchorId }
+				const anchor = target.querySelector?.(`#${anchorId}`)
+				const anchorTop = anchor?.getBoundingClientRect?.().top
+				return {
+					anchorId,
+					anchorTop: Number.isFinite(anchorTop) ? anchorTop : null,
+					scrollTop: Number(target.scrollTop) || 0,
+					scrollHeight: Number(target.scrollHeight) || 0
+				}
+			},
+			restoreChatScrollSnapshot(snapshot = {}) {
+				const target = this.chatScrollTarget()
+				if (!target || !('scrollTop' in target)) return false
+				const anchor = snapshot.anchorId ? target.querySelector?.(`#${snapshot.anchorId}`) : null
+				const anchorTop = anchor?.getBoundingClientRect?.().top
+				if (Number.isFinite(snapshot.anchorTop) && Number.isFinite(anchorTop)) {
+					target.scrollTop = (Number(target.scrollTop) || 0) + anchorTop - snapshot.anchorTop
+					return true
+				}
+				const currentHeight = Number(target.scrollHeight)
+				if (Number.isFinite(snapshot.scrollHeight) && Number.isFinite(currentHeight)) {
+					target.scrollTop = (Number(snapshot.scrollTop) || 0) + Math.max(0, currentHeight - snapshot.scrollHeight)
+					return true
+				}
+				return false
+			},
 			requestChatScrollToBottom() {
 				const revision = this.chatScrollRevision + 1
 				this.chatScrollRevision = revision
@@ -2547,10 +3258,21 @@
 					})
 				})
 			},
-			scrollChatToBottom() {
-				clearTimeout(this.chatScrollTimer)
-				this.requestChatScrollToBottom()
-				this.chatScrollTimer = setTimeout(() => this.requestChatScrollToBottom(), 80)
+			scrollChatToBottom(immediate = false) {
+				if (immediate) {
+					clearTimeout(this.chatScrollTimer)
+					this.requestChatScrollToBottom()
+					this.chatScrollTimer = setTimeout(() => {
+						this.chatScrollTimer = null
+						this.requestChatScrollToBottom()
+					}, 80)
+					return
+				}
+				if (this.chatScrollTimer) return
+				this.chatScrollTimer = setTimeout(() => {
+					this.chatScrollTimer = null
+					this.requestChatScrollToBottom()
+				}, 64)
 			},
 			showToast(message) { this.toastMessage = message; clearTimeout(this.toastTimer); this.toastTimer = setTimeout(() => { this.toastMessage = '' }, 2200) },
 			handleError(error, prefix = '') { const message = error?.message || '操作失败'; this.errorMessage = prefix ? `${prefix}：${message}` : message }
@@ -2653,6 +3375,10 @@
 		flex-direction: column;
 		min-height: 0;
 		animation: page-switch-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+	}
+
+	.screen-view.primary-tab-view {
+		animation: none;
 	}
 
 	.chat-toolbar,
@@ -2895,6 +3621,8 @@
 		width: 100%;
 		min-height: 78px;
 		background: #fff;
+		content-visibility: auto;
+		contain-intrinsic-size: 78px;
 	}
 
 	.conversation-open {
@@ -2938,6 +3666,11 @@
 		border-radius: 8px;
 		background: var(--soft-strong);
 		color: var(--accent);
+		flex: 0 0 auto;
+	}
+
+	.conversation-group-avatar {
+		margin: 1px;
 		flex: 0 0 auto;
 	}
 
@@ -3013,8 +3746,12 @@
 		width: 38px;
 		height: 38px;
 		padding: 0;
-		background: rgba(255, 255, 255, 0.9);
+		background: transparent;
 		box-shadow: 0 1px 4px rgba(52, 78, 104, 0.14);
+		flex: 0 0 auto;
+	}
+
+	.toolbar-group-avatar {
 		flex: 0 0 auto;
 	}
 
@@ -3263,6 +4000,39 @@
 
 	.chat-scroll-tail {
 		height: 12px;
+	}
+
+	.chat-history-loader {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 38px;
+		margin-bottom: 2px;
+	}
+
+	.chat-history-loader button {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 5px;
+		min-width: 126px;
+		height: 30px;
+		padding: 0 12px;
+		border: 1px solid rgba(87, 110, 128, 0.2);
+		border-radius: 15px;
+		background: rgba(255, 255, 255, 0.82);
+		box-shadow: 0 1px 5px rgba(48, 67, 82, 0.08);
+		color: #4f687a;
+		font-size: 11px;
+		font-weight: 650;
+	}
+
+	.chat-history-icon {
+		transform: rotate(180deg);
+	}
+
+	.chat-history-loader button:disabled {
+		opacity: 0.6;
 	}
 
 	.date-divider {
@@ -3544,8 +4314,9 @@
 
 	.provider-logo {
 		display: block;
-		object-fit: contain;
+		overflow: hidden;
 		border-radius: 50%;
+		object-fit: cover;
 	}
 
 	.assistant-avatar,
@@ -3556,8 +4327,8 @@
 	}
 
 	.assistant-avatar {
-		padding: 3px;
-		background: rgba(255, 255, 255, 0.94);
+		padding: 0;
+		background: transparent;
 		box-shadow: 0 1px 5px rgba(35, 73, 92, 0.16);
 	}
 
@@ -3649,7 +4420,8 @@
 		box-shadow: 0 1px 3px rgba(12, 28, 38, 0.16);
 	}
 
-	.retry-action text {
+	.retry-action text,
+	.continue-action text {
 		font-size: 11px;
 	}
 
@@ -3744,12 +4516,31 @@
 		color: #8d6b68;
 	}
 
-	.retry-button {
+	.message-status-actions {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		flex: 0 0 auto;
+	}
+
+	.retry-button,
+	.continue-button {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 3px;
+		min-height: 28px;
 		padding: 5px 10px;
 		border: 1px solid #e7cfcc;
 		border-radius: 6px;
 		font-size: 11px;
 		background: #fff;
+	}
+
+	.continue-button {
+		border-color: rgba(31, 111, 203, 0.24);
+		color: #1f6fcb;
+		background: #f5f9ff;
 	}
 
 	.message-status {
@@ -3812,6 +4603,13 @@
 		min-width: 0;
 	}
 
+	.composer-leading-actions {
+		display: flex;
+		align-items: center;
+		height: 44px;
+		flex: 0 0 auto;
+	}
+
 	.composer-emoji,
 	.composer-attachment,
 	.composer-stop {
@@ -3833,6 +4631,89 @@
 		width: 44px;
 		min-width: 44px;
 		max-width: 44px;
+	}
+
+	.composer-mention {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 30px;
+		height: 38px;
+		padding: 0;
+		border-radius: 50%;
+		color: #667177;
+		flex: 0 0 auto;
+	}
+
+	.composer-mention text {
+		font-family: Arial, sans-serif;
+		font-size: 21px;
+		font-weight: 500;
+	}
+
+	.composer-leading-actions.has-mention .composer-emoji {
+		width: 38px;
+		min-width: 38px;
+		max-width: 38px;
+	}
+
+	.group-mention-popover {
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: calc(100% + 10px);
+		z-index: 3;
+		max-height: 248px;
+		overflow: hidden;
+		border: 1px solid rgba(80, 119, 145, 0.14);
+		border-radius: 8px;
+		background: rgba(255, 255, 255, 0.98);
+		box-shadow: 0 8px 24px rgba(31, 74, 93, 0.18);
+	}
+
+	.group-mention-popover button {
+		display: flex;
+		align-items: center;
+		box-sizing: border-box;
+		width: 100%;
+		min-height: 58px;
+		padding: 8px 13px;
+		text-align: left;
+	}
+
+	.group-mention-popover button + button {
+		border-top: 1px solid #edf0f2;
+	}
+
+	.group-mention-popover button:active {
+		background: #fff5fd;
+	}
+
+	.group-mention-avatar {
+		width: 40px;
+		height: 40px;
+		border-radius: 50%;
+		flex: 0 0 auto;
+	}
+
+	.group-mention-popover button > view {
+		display: flex;
+		min-width: 0;
+		margin-left: 11px;
+		flex: 1;
+		flex-direction: column;
+		gap: 3px;
+	}
+
+	.group-mention-popover button > view text:first-child {
+		font-size: 14px;
+		font-weight: 650;
+		color: #24272c;
+	}
+
+	.group-mention-popover button > view text:last-child {
+		font-size: 11px;
+		color: #8b9096;
 	}
 
 	.composer-smile-icon {
@@ -4307,18 +5188,18 @@
 		width: 52px;
 		height: 52px;
 		margin-right: 12px;
-		border: 1px solid #ececf0;
+		border: 0;
 		border-radius: 50%;
-		background: #fff;
+		background: transparent;
 		overflow: hidden;
 		flex: 0 0 auto;
 	}
 
 	.provider-avatar-preview-image {
 		display: block;
-		width: 52px;
-		height: 52px;
-		padding: 4px;
+		width: 100%;
+		height: 100%;
+		padding: 0;
 		border-radius: 50%;
 	}
 
@@ -4473,6 +5354,7 @@
 	.select-field {
 		display: flex;
 		align-items: center;
+		min-width: 0;
 		width: 100%;
 		height: 44px;
 		padding: 0 34px 0 0;
@@ -4483,6 +5365,14 @@
 		appearance: none;
 		-webkit-appearance: none;
 		color: var(--text);
+	}
+
+	.select-field text {
+		display: block;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.select-field-picker {
@@ -4501,6 +5391,52 @@
 		right: 12px;
 		color: #83858c;
 		pointer-events: none;
+	}
+
+	.provider-default-model {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+		min-width: 0;
+	}
+
+	.provider-default-model-current {
+		min-width: 0;
+		overflow: hidden;
+		flex: 1;
+		font-size: 12px;
+		font-weight: 500;
+		color: #83858c;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.provider-default-model-button {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 5px;
+		height: 34px;
+		padding: 0 12px;
+		border: 1px solid #e6b4df;
+		border-radius: 7px;
+		background: #fff;
+		font-size: 12px;
+		font-weight: 650;
+		color: var(--provider-accent);
+		flex: 0 0 auto;
+	}
+
+	.provider-default-model-button:active {
+		background: var(--provider-accent-soft);
+	}
+
+	.provider-default-model-button:disabled {
+		border-color: #e4e4e7;
+		background: #f5f5f6;
+		color: #a5a6ab;
+		opacity: 0.75;
 	}
 
 	.provider-form-actions {
@@ -4746,7 +5682,7 @@
 		height: 90px;
 		padding: 0;
 		border: 0;
-		background: #fff;
+		background: transparent;
 		box-shadow: 0 2px 8px rgba(31, 34, 40, 0.12);
 	}
 
@@ -5399,7 +6335,8 @@
 		border-radius: 29px;
 		background: #fff0fb;
 		box-shadow: 0 2px 8px rgba(212, 59, 194, 0.08);
-		transition: transform 280ms cubic-bezier(0.22, 1, 0.36, 1);
+		transition: transform 140ms ease-out;
+		will-change: transform;
 		pointer-events: none;
 	}
 
@@ -5439,6 +6376,84 @@
 
 	.character-import-backdrop {
 		z-index: 38;
+	}
+
+	.character-import-loading-layer {
+		position: absolute;
+		inset: 0;
+		z-index: 70;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 24px;
+		background: rgba(28, 25, 31, 0.32);
+		animation: character-import-loading-fade-in 140ms ease-out both;
+	}
+
+	.character-import-loading-panel {
+		display: flex;
+		align-items: center;
+		width: min(100%, 280px);
+		padding: 24px 22px 21px;
+		border: 1px solid rgba(226, 218, 226, 0.92);
+		border-radius: 8px;
+		background: rgba(255, 255, 255, 0.98);
+		box-shadow: 0 18px 48px rgba(20, 23, 28, 0.22);
+		flex-direction: column;
+		animation: character-import-loading-panel-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+	}
+
+	.character-import-loading-icon {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 58px;
+		height: 58px;
+		margin-bottom: 15px;
+		border-radius: 50%;
+		background: #fff0fb;
+		color: #d43bc2;
+	}
+
+	.character-import-loading-spinner {
+		animation: spin 0.9s linear infinite;
+	}
+
+	.character-import-loading-title {
+		font-size: 17px;
+		font-weight: 680;
+		line-height: 24px;
+		color: #242229;
+		text-align: center;
+	}
+
+	.character-import-loading-detail {
+		margin-top: 6px;
+		font-size: 12px;
+		line-height: 18px;
+		color: #85818a;
+		text-align: center;
+	}
+
+	.character-import-loading-progress {
+		position: relative;
+		width: 100%;
+		height: 4px;
+		margin-top: 19px;
+		overflow: hidden;
+		border-radius: 2px;
+		background: #eee9ef;
+	}
+
+	.character-import-loading-progress > view {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		left: 0;
+		width: 42%;
+		border-radius: 2px;
+		background: #d43bc2;
+		animation: character-import-loading-progress 1.15s ease-in-out infinite;
 	}
 
 	.character-import-modal {
@@ -5913,6 +6928,95 @@
 		color: #46555c;
 	}
 
+	.group-status-participants {
+		flex: 0 0 auto;
+		box-sizing: border-box;
+		width: auto;
+		margin: 8px 44px 0 14px;
+		white-space: nowrap;
+	}
+
+	.group-status-participant-list {
+		display: inline-flex;
+		align-items: center;
+		box-sizing: border-box;
+		padding: 1px 1px 3px;
+		gap: 8px;
+	}
+
+	.group-status-participant {
+		display: inline-flex;
+		align-items: center;
+		box-sizing: border-box;
+		width: 146px;
+		height: 48px;
+		padding: 4px 10px 4px 4px;
+		border: 1px solid #e0e5e8;
+		border-radius: 7px;
+		background: #f7f9fa;
+		color: #59666c;
+		flex: 0 0 146px;
+	}
+
+	.group-status-participant.active {
+		border-color: #86c5cd;
+		background: #eaf7f8;
+		color: #237f90;
+		box-shadow: inset 0 0 0 1px rgba(63, 155, 166, 0.08);
+	}
+
+	.group-status-participant-avatar-shell {
+		display: flex;
+		overflow: hidden;
+		width: 38px;
+		height: 38px;
+		border-radius: 50%;
+		background: #e1e6e8;
+		flex: 0 0 38px;
+	}
+
+	.group-status-participant-avatar {
+		display: block;
+		width: 38px;
+		height: 38px;
+		border-radius: 50%;
+		object-fit: cover;
+		flex: 0 0 38px;
+	}
+
+	.group-status-participant-copy {
+		display: flex;
+		min-width: 0;
+		margin-left: 8px;
+		text-align: left;
+		flex: 1;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.group-status-participant-copy text:first-child,
+	.group-status-participant-copy text:last-child {
+		display: block;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.group-status-participant-copy text:first-child {
+		font-size: 12px;
+		font-weight: 700;
+		color: #36464c;
+	}
+
+	.group-status-participant-copy text:last-child {
+		font-size: 10px;
+		color: #879197;
+	}
+
+	.group-status-participant.active .group-status-participant-copy text:first-child {
+		color: #237f90;
+	}
+
 	.assistant-status-hero {
 		display: grid;
 		grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -6158,10 +7262,10 @@
 		width: 44px;
 		height: 44px;
 		margin-right: 11px;
-		padding: 3px;
-		border: 1px solid #ececf0;
+		padding: 0;
+		border: 0;
 		border-radius: 50%;
-		background: #fff;
+		background: transparent;
 		flex: 0 0 auto;
 	}
 
@@ -6244,17 +7348,17 @@
 		position: relative;
 		width: 54px;
 		height: 54px;
-		border: 1px solid #efeff2;
+		border: 0;
 		border-radius: 50%;
-		background: #fff;
+		background: transparent;
 		overflow: visible;
 	}
 
 	.provider-avatar-preset-image {
 		display: block;
-		width: 54px;
-		height: 54px;
-		padding: 4px;
+		width: 100%;
+		height: 100%;
+		padding: 0;
 		border-radius: 50%;
 	}
 
@@ -6689,6 +7793,21 @@
 		to { transform: rotate(360deg); }
 	}
 
+	@keyframes character-import-loading-fade-in {
+		from { opacity: 0; }
+		to { opacity: 1; }
+	}
+
+	@keyframes character-import-loading-panel-in {
+		from { opacity: 0; transform: translateY(8px) scale(0.98); }
+		to { opacity: 1; transform: translateY(0) scale(1); }
+	}
+
+	@keyframes character-import-loading-progress {
+		0% { transform: translateX(-110%); }
+		55%, 100% { transform: translateX(245%); }
+	}
+
 	@keyframes dot-pulse {
 		0%, 70%, 100% { opacity: 0.35; transform: translateY(0); }
 		35% { opacity: 1; transform: translateY(-2px); }
@@ -6766,6 +7885,13 @@
 		.nav-item,
 		.nav-item .app-icon {
 			transition: none;
+		}
+
+		.character-import-loading-layer,
+		.character-import-loading-panel,
+		.character-import-loading-spinner,
+		.character-import-loading-progress > view {
+			animation: none;
 		}
 	}
 

@@ -20,7 +20,7 @@ test('creates versioned backup without encrypted or plaintext secrets', () => {
     }
   }, new Date('2026-07-13T00:00:00.000Z'))
 
-  assert.equal(backup.formatVersion, 3)
+  assert.equal(backup.formatVersion, 5)
   assert.deepEqual(backup.attachments, [])
   assert.deepEqual(backup.characters, [])
   assert.deepEqual(backup.worldBooks, [])
@@ -35,7 +35,7 @@ test('creates versioned backup without encrypted or plaintext secrets', () => {
 })
 
 test('rejects unsupported backup versions before preparing writes', () => {
-  assert.throws(() => prepareImport({ formatVersion: 4 }), /版本/)
+  assert.throws(() => prepareImport({ formatVersion: 6 }), /版本/)
 })
 
 test('remaps provider, conversation, and message identifiers on import', () => {
@@ -135,4 +135,104 @@ test('rejects broken character references before returning import records', () =
     characterAssets: [],
     settings: {}
   }), /角色/)
+})
+
+test('remaps group participants and message speaker snapshots in version 4 backups', () => {
+  let sequence = 0
+  const imported = prepareImport({
+    formatVersion: 4,
+    providers: [{ id: 'p1' }],
+    conversations: [{
+      id: 'group-1',
+      providerProfileId: 'p1',
+      conversationKind: 'group',
+      participants: [
+        { characterId: 'char-1', nameSnapshot: '苏墨', avatarAssetId: 'asset-1', enabled: true },
+        { characterId: 'char-2', nameSnapshot: '林夏', avatarAssetId: 'asset-2', enabled: true }
+      ]
+    }],
+    messages: [{
+      id: 'message-1',
+      conversationId: 'group-1',
+      role: 'assistant',
+      content: '群聊回复',
+      speakerCharacterId: 'char-2',
+      speakerNameSnapshot: '林夏',
+      speakerAvatarAssetId: 'asset-2'
+    }],
+    attachments: [],
+    characters: [
+      { id: 'char-1', avatarAssetId: 'asset-1', assetIds: ['asset-1'] },
+      { id: 'char-2', avatarAssetId: 'asset-2', assetIds: ['asset-2'] }
+    ],
+    worldBooks: [],
+    characterAssets: [
+      { id: 'asset-1', characterId: 'char-1', dataUrl: 'data:image/png;base64,AA==' },
+      { id: 'asset-2', characterId: 'char-2', dataUrl: 'data:image/png;base64,AA==' }
+    ],
+    settings: {}
+  }, () => `new-${++sequence}`)
+
+  const [firstCharacter, secondCharacter] = imported.characters
+  const [firstAsset, secondAsset] = imported.characterAssets
+  assert.deepEqual(imported.conversations[0].participants.map(participant => ({
+    characterId: participant.characterId,
+    avatarAssetId: participant.avatarAssetId
+  })), [
+    { characterId: firstCharacter.id, avatarAssetId: firstAsset.id },
+    { characterId: secondCharacter.id, avatarAssetId: secondAsset.id }
+  ])
+  assert.equal(imported.messages[0].speakerCharacterId, secondCharacter.id)
+  assert.equal(imported.messages[0].speakerAvatarAssetId, secondAsset.id)
+  assert.equal(imported.messages[0].speakerNameSnapshot, '林夏')
+})
+
+test('remaps provider group members and provider speaker references in version 5 backups', () => {
+  let sequence = 0
+  const imported = prepareImport({
+    formatVersion: 5,
+    providers: [
+      { id: 'p-common', name: '公共接口' },
+      { id: 'p-member', name: '独立接口', defaultModel: 'deepseek-chat' }
+    ],
+    conversations: [{
+      id: 'group-1',
+      providerProfileId: 'p-common',
+      conversationKind: 'group',
+      participants: [
+        { memberKind: 'character', characterId: 'char-1', nameSnapshot: '苏墨', enabled: true },
+        {
+          memberKind: 'provider',
+          providerProfileId: 'p-member',
+          modelName: 'deepseek-chat',
+          nameSnapshot: '独立接口',
+          avatarSource: '/static/providers/deepseek.png',
+          enabled: true
+        }
+      ]
+    }],
+    messages: [{
+      id: 'message-1',
+      conversationId: 'group-1',
+      role: 'assistant',
+      content: '接口回复',
+      speakerProviderProfileId: 'p-member',
+      speakerModelName: 'deepseek-chat',
+      speakerNameSnapshot: '独立接口',
+      speakerAvatarSource: '/static/providers/deepseek.png'
+    }],
+    attachments: [],
+    characters: [{ id: 'char-1', assetIds: [] }],
+    worldBooks: [],
+    characterAssets: [],
+    settings: {}
+  }, () => `new-${++sequence}`)
+
+  const providerMember = imported.conversations[0].participants[1]
+  assert.equal(imported.conversations[0].providerProfileId, imported.providers[0].id)
+  assert.equal(providerMember.providerProfileId, imported.providers[1].id)
+  assert.equal(providerMember.modelName, 'deepseek-chat')
+  assert.equal(imported.messages[0].speakerProviderProfileId, imported.providers[1].id)
+  assert.equal(imported.messages[0].speakerModelName, 'deepseek-chat')
+  assert.equal(imported.messages[0].speakerAvatarSource, '/static/providers/deepseek.png')
 })

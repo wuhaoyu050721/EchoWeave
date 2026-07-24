@@ -22,6 +22,7 @@ import {
 import { WorkspaceServiceManager } from '../workspace/workspace-service-manager.js'
 import { createChatInstructionResolver, createUserNameResolver } from './create-character-instructions.js'
 import { getRuntimeDiagnosticLogStore } from '../core/runtime-diagnostic-log.js'
+import { readStreamingEnabled } from '../core/streaming-setting.js'
 
 export function browserProxyPath(pathname = globalThis.location?.pathname) {
   return String(pathname ?? '').startsWith('/preview/') ? '/__ai_proxy' : null
@@ -110,6 +111,7 @@ export async function createBrowserServices({
     provider: providerRouter,
     getSystemPrompt,
     getUserName,
+    getStreamingEnabled: () => readStreamingEnabled(repository),
     replyNotificationService,
     diagnosticLogStore
   })

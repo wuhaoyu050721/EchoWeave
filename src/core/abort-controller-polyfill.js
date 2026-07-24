@@ -1,3 +1,5 @@
+import { runtimeGlobal } from './legacy-runtime-polyfill.js'
+
 export function createAbortError(message = '请求已停止') {
   const error = new Error(message)
   error.name = 'AbortError'
@@ -10,7 +12,7 @@ function callListener(listener, signal, event) {
     if (typeof listener === 'function') listener.call(signal, event)
     else listener?.handleEvent?.(event)
   } catch (error) {
-    globalThis.console?.error?.(error)
+    runtimeGlobal.console?.error?.(error)
   }
 }
 
@@ -61,15 +63,15 @@ export class AbortControllerPolyfill {
   }
 }
 
-export function installAbortControllerPolyfill(target = globalThis) {
+export function installAbortControllerPolyfill(target = runtimeGlobal) {
   if (typeof target.AbortSignal !== 'function') target.AbortSignal = AbortSignalPolyfill
   if (typeof target.AbortController !== 'function') target.AbortController = AbortControllerPolyfill
   return target
 }
 
 export function createAbortController() {
-  const Controller = typeof globalThis.AbortController === 'function'
-    ? globalThis.AbortController
+  const Controller = typeof runtimeGlobal.AbortController === 'function'
+    ? runtimeGlobal.AbortController
     : AbortControllerPolyfill
   return new Controller()
 }

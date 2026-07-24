@@ -2,7 +2,10 @@ import { DatabaseSync } from 'node:sqlite'
 
 export function createNodePlusSqlite({
   persistOnClose = false,
-  maxCursorCellCharacters = Number.POSITIVE_INFINITY
+  maxCursorCellCharacters = Number.POSITIVE_INFINITY,
+  maxCursorWindowCharacters = Number.POSITIVE_INFINITY,
+  maxCursorCellBytes = Number.POSITIVE_INFINITY,
+  maxCursorWindowBytes = Number.POSITIVE_INFINITY
 } = {}) {
   const databases = new Map()
   const openDatabases = new Set()
@@ -47,12 +50,28 @@ export function createNodePlusSqlite({
     selectSql({ name, sql, success, fail }) {
       run(() => {
         const rows = getDatabase(name).prepare(sql).all()
+        let cursorCharacters = 0
+        let cursorBytes = 0
         for (const row of rows) {
           for (const value of Object.values(row)) {
             if (typeof value === 'string' && value.length > maxCursorCellCharacters) {
               throw new Error('android.database.sqlite.SQLiteBlobTooBigException: Row too big to fit into CursorWindow')
             }
+            if (typeof value === 'string') {
+              const valueBytes = Buffer.byteLength(value, 'utf8')
+              if (valueBytes > maxCursorCellBytes) {
+                throw new Error('android.database.sqlite.SQLiteBlobTooBigException: Row too big to fit into CursorWindow')
+              }
+              cursorCharacters += value.length
+              cursorBytes += valueBytes
+            }
           }
+        }
+        if (cursorCharacters > maxCursorWindowCharacters) {
+          throw new Error('android.database.sqlite.SQLiteBlobTooBigException: CursorWindow capacity exceeded')
+        }
+        if (cursorBytes > maxCursorWindowBytes) {
+          throw new Error('android.database.sqlite.SQLiteBlobTooBigException: CursorWindow capacity exceeded')
         }
         return rows
       }, success, fail)

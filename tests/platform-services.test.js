@@ -148,6 +148,9 @@ test('App services persist through SQLite and encrypt provider keys through the 
   assert.equal(services.providerRouter.resolve({ protocolType: 'gemini' }), services.geminiProvider)
   assert.equal(services.providerRouter.resolve({}), services.openAIProvider)
   assert.equal(services.chatService.provider, services.providerRouter)
+  assert.equal(await services.chatService.getStreamingEnabled(), true)
+  await services.repository.setSetting('streamingEnabled', false)
+  assert.equal(await services.chatService.getStreamingEnabled(), false)
   assert.equal((await services.providerService.getRequestProfile(saved.id)).apiKey, 'secret-key')
   assert.deepEqual(services.platform, {
     runtime: 'app-android',
@@ -209,7 +212,63 @@ test('App chat streams through the registered native Android transport', async (
   assert.equal(result.status, 'completed')
   assert.equal(result.content, 'Android stream')
   assert.match(nativeRequest.url, /127\.0\.0\.1:4321\/v1\/chat\/completions$/)
+  assert.equal(nativeRequest.timeout, 300000)
   assert.equal(JSON.parse(nativeRequest.body).stream, true)
+  await services.repository.close()
+})
+
+test('App chat bypasses the native stream transport when streaming is disabled', async () => {
+  let nativeStreamCalls = 0
+  let uniRequest
+  const uniApi = {
+    request(options) {
+      uniRequest = options
+      queueMicrotask(() => options.success({
+        statusCode: 200,
+        header: { 'content-type': 'application/json' },
+        data: JSON.stringify({
+          choices: [{ message: { content: 'Android complete' }, finish_reason: 'stop' }]
+        })
+      }))
+      return { abort() {} }
+    },
+    aiChatKeystoreReady: () => true,
+    aiChatKeystoreEncrypt: value => JSON.stringify({
+      version: 1,
+      algorithm: 'AES-GCM',
+      iv: 'non-stream-iv',
+      ciphertext: Buffer.from(value).toString('base64')
+    }),
+    aiChatKeystoreDecrypt: recordJson => Buffer.from(JSON.parse(recordJson).ciphertext, 'base64').toString(),
+    onAiChatStreamEvent() {},
+    aiChatStreamCancel() { return true },
+    aiChatStreamRequest() { nativeStreamCalls += 1 }
+  }
+  const services = await createAppServices({
+    plusApi: { sqlite: createNodePlusSqlite() },
+    uniApi
+  })
+  await services.repository.setSetting('streamingEnabled', false)
+  const provider = await services.providerService.saveProvider({
+    name: 'Non-stream Mock',
+    baseUrl: 'http://127.0.0.1:4321/v1',
+    apiKey: '',
+    defaultModel: 'mock-complete'
+  })
+  const conversation = await services.chatService.createConversation({
+    providerProfileId: provider.id,
+    providerNameSnapshot: provider.name,
+    modelName: provider.defaultModel
+  })
+
+  const result = await services.chatService.send({ conversationId: conversation.id, content: 'test complete response' })
+
+  assert.equal(result.status, 'completed')
+  assert.equal(result.content, 'Android complete')
+  assert.equal(nativeStreamCalls, 0)
+  assert.equal(uniRequest.enableChunked, false)
+  assert.equal(uniRequest.responseType, 'text')
+  assert.equal(JSON.parse(uniRequest.data).stream, false)
   await services.repository.close()
 })
 

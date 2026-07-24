@@ -23,13 +23,17 @@ export function createReplyNotificationContent(message = {}, maximumLength = DEF
   return '回复已完成'
 }
 
-export function createReplyNotificationTitle(conversation = {}) {
-  return trimmedText(
+export function createReplyNotificationTitle(conversation = {}, message = {}) {
+  const title = trimmedText(
     conversation.characterNameSnapshot ||
     conversation.title ||
     conversation.providerNameSnapshot ||
     'AI 助手'
   )
+  const speaker = conversation.conversationKind === 'group'
+    ? trimmedText(message.speakerNameSnapshot)
+    : ''
+  return speaker ? `${title} · ${speaker}` : title
 }
 
 export function replyConversationIdFromEvent(event) {
@@ -128,7 +132,7 @@ export class ReplyNotificationService {
     if (visible && this.activeConversationId === conversationId) return false
 
     await this.adapter.showReplyNotification({
-      title: createReplyNotificationTitle(conversation),
+      title: createReplyNotificationTitle(conversation, message),
       content: createReplyNotificationContent(message),
       payload: {
         type: 'ai-reply',
