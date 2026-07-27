@@ -186,10 +186,40 @@ export function openConversationSettings(state) {
   state.settingsView = 'conversation'
 }
 
+export function openStreamingSettings(state) {
+  state.activeTab = 'settings'
+  state.screen = 'settings'
+  state.settingsView = 'streaming'
+}
+
+export function openCharacterStatusSettings(state) {
+  state.activeTab = 'settings'
+  state.screen = 'settings'
+  state.settingsView = 'character-status'
+}
+
 export function openNsfwSettings(state) {
   state.activeTab = 'settings'
   state.screen = 'settings'
   state.settingsView = 'nsfw'
+}
+
+export function openAppLockSettings(state) {
+  state.activeTab = 'settings'
+  state.screen = 'settings'
+  state.settingsView = 'app-lock'
+}
+
+export function openReplyNotificationSettings(state) {
+  state.activeTab = 'settings'
+  state.screen = 'settings'
+  state.settingsView = 'reply-notifications'
+}
+
+export function openAutoSyncSettings(state) {
+  state.activeTab = 'settings'
+  state.screen = 'settings'
+  state.settingsView = 'auto-sync'
 }
 
 export function closeSettingsDetails(state) {
@@ -214,10 +244,6 @@ export function resolveAppBackAction(state) {
   }
 
   return 'system'
-}
-
-export function toggleAppLock(state) {
-  state.appLockEnabled = !state.appLockEnabled
 }
 
 export function setGenerating(state, generating) {

@@ -1,3 +1,5 @@
+import { extractAssistantStatus } from './assistant-status.js'
+
 function isContextMessage(message) {
   if (!message || message.deletedAt || !['user', 'assistant'].includes(message.role)) {
     return false
@@ -9,6 +11,12 @@ function isContextMessage(message) {
     return Boolean(String(message.content ?? '').trim())
   }
   return message.status === 'interrupted' && Boolean(String(message.content ?? '').trim())
+}
+
+function contextMessageContent(message) {
+  const content = String(message?.content ?? '')
+  if (message?.role !== 'assistant') return content
+  return extractAssistantStatus(content, { hideIncomplete: true }).content
 }
 
 export function buildChatContext({
@@ -40,7 +48,7 @@ export function buildChatContext({
   let usedCharacters = prompt.length + trailingPrompt.length + turnPrompt.length
   for (let index = eligible.length - 1; index >= 0 && selected.length < countBudget; index -= 1) {
     const message = eligible[index]
-    const content = String(message.content ?? '')
+    const content = contextMessageContent(message)
     const attachmentCost = (messageAttachments.get(message.id) ?? []).reduce((total, attachment) => {
       if (attachment.kind === 'image') return total + 4000
       if (attachment.kind === 'text') return total + String(attachment.textContent ?? '').length
@@ -52,11 +60,11 @@ export function buildChatContext({
       break
     }
     if (exceedsBudget && selected.length === 0 && characterBudget > prompt.length) {
-      selected.push(message)
+      selected.push({ ...message, content })
       break
     }
     if (!exceedsBudget) {
-      selected.push(message)
+      selected.push({ ...message, content })
       usedCharacters += messageCost
     }
   }

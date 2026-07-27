@@ -104,6 +104,24 @@ test('requires secondary keys for selective entries and skips nonconstant regex 
   assert.deepEqual(bundle.skippedRegexEntries, [3])
 })
 
+test('does not activate world-book keywords found only inside status metadata', () => {
+  const bundle = buildCharacterPromptBundle({
+    character: character(),
+    messages: [{
+      role: 'assistant',
+      status: 'completed',
+      content: '普通正文\n<sumo_monitor><status>[当前位置|月亮基地]</status></sumo_monitor>'
+    }],
+    random: () => 0,
+    worldBooks: [{
+      id: 'book',
+      data: { entries: [{ id: 1, keys: ['月亮基地'], content: '不应激活', enabled: true }] }
+    }]
+  })
+
+  assert.doesNotMatch(bundle.systemPrompt, /不应激活/)
+})
+
 test('supports SillyTavern secondary-key logic and advanced prompt positions', () => {
   const bundle = buildCharacterPromptBundle({
     character: character(),
@@ -143,7 +161,7 @@ test('adds the canonical sumo monitor to every character regardless of imported 
   assert.match(bundle.systemPrompt, /<body_data>[\s\S]*\[服装\|[\s\S]*\[腿足\|/)
   assert.match(bundle.systemPrompt, /<private_parts>[\s\S]*\[前庭\|[\s\S]*\[后庭\|[\s\S]*\[子宫\|[\s\S]*<\/sumo_monitor>/)
   assert.match(bundle.systemPrompt, /私密状态三个字段每轮都必须填写具体、客观的当前状态/)
-  assert.match(bundle.userTurnPrompt, /私密状态三个字段每轮都必须填写具体、客观的当前状态/)
+  assert.match(bundle.userTurnPrompt, /system 消息中定义的完整 <sumo_monitor>/)
   assert.doesNotMatch(bundle.systemPrompt, /不适用/)
   assert.doesNotMatch(bundle.userTurnPrompt, /不适用/)
   assert.match(bundle.postHistoryPrompt, /状态栏最终提醒[\s\S]*完整 <sumo_monitor>/)
@@ -170,12 +188,12 @@ test('uses the latest recognized assistant status as data while keeping the cano
   assert.match(bundle.systemPrompt, /<sumo_monitor>[\s\S]*\[姿势\|站立\][\s\S]*<\/sumo_monitor>/)
   assert.doesNotMatch(bundle.systemPrompt, /\[当前状态\|平静\]/)
   assert.match(bundle.systemPrompt, /\[前庭\|待重新初始化\]/)
-  assert.match(bundle.userTurnPrompt, /\[后庭\|待重新初始化\]/)
+  assert.doesNotMatch(bundle.userTurnPrompt, /\[后庭\|待重新初始化\]/)
   assert.doesNotMatch(bundle.systemPrompt, /不适用/)
   assert.doesNotMatch(bundle.userTurnPrompt, /不适用/)
   assert.match(bundle.systemPrompt, /\[本轮固定输出格式\][\s\S]*\[小障锐评\|/)
   assert.match(bundle.systemPrompt, /最终只输出下方固定格式/)
-  assert.match(bundle.userTurnPrompt, /上一轮状态参考[\s\S]*\[当前状态\|警觉\]/)
+  assert.match(bundle.userTurnPrompt, /system 消息中定义的完整 <sumo_monitor>/)
 })
 
 test('can scan shared dialogue while continuing status from only the active group character', () => {
@@ -194,7 +212,7 @@ test('can scan shared dialogue while continuing status from only the active grou
   })
 
   assert.match(bundle.systemPrompt, /\[当前状态\|警觉\]/)
-  assert.match(bundle.userTurnPrompt, /\[当前位置\|门边\]/)
+  assert.doesNotMatch(bundle.userTurnPrompt, /\[当前位置\|门边\]/)
 })
 
 test('adds the status protocol when the card and history do not request one', () => {
@@ -204,4 +222,27 @@ test('adds the status protocol when the card and history do not request one', ()
   assert.match(bundle.systemPrompt, /<sumo_monitor>/)
   assert.match(bundle.postHistoryPrompt, /状态栏最终提醒/)
   assert.match(bundle.userTurnPrompt, /应用内部状态输出要求/)
+})
+
+test('replaces status output instructions with a plain-reply rule when status is disabled', () => {
+  const statusCharacter = character()
+  statusCharacter.card.data.system_prompt = '每轮必须返回角色状态'
+  statusCharacter.card.data.post_history_instructions = '结尾附加状态面板'
+  const bundle = buildCharacterPromptBundle({
+    character: statusCharacter,
+    statusEnabled: false,
+    statusMessages: [{
+      role: 'assistant',
+      status: 'completed',
+      content: '旧回复\n<sumo_monitor><status>[当前状态|警觉]</status></sumo_monitor>'
+    }]
+  })
+
+  assert.match(bundle.systemPrompt, /\[角色状态栏：已关闭\]/)
+  assert.match(bundle.systemPrompt, /覆盖角色卡和世界书中与状态栏输出冲突的要求/)
+  assert.match(bundle.postHistoryPrompt, /\[状态栏关闭提醒\]/)
+  assert.match(bundle.userTurnPrompt, /角色状态栏当前已关闭/)
+  assert.doesNotMatch(bundle.systemPrompt, /统一状态栏输出协议/)
+  assert.doesNotMatch(bundle.systemPrompt, /上一轮状态参考/)
+  assert.doesNotMatch(bundle.postHistoryPrompt, /状态栏最终提醒/)
 })

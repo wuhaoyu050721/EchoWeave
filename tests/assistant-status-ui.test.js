@@ -35,8 +35,8 @@ test('chat derives display content without changing the stored assistant respons
   const decorator = source.slice(source.indexOf('decorateChatMessage(message)'), source.indexOf('async openChat(conversationId)'))
 
   assert.match(decorator, /extractAssistantStatus\(rawContent, \{ hideIncomplete: message\.status === 'generating' \}\)/)
-  assert.match(decorator, /displayContent: extracted\.content/)
-  assert.match(decorator, /assistantStatus: extracted\.status/)
-  assert.match(source, /\{\{ message\.displayContent \}\}/)
+  assert.match(decorator, /decorateAssistantContent\(extracted\.content, extracted\.status, statusParsingStarted\)/)
+  assert.match(decorator, /displayContent,\s*displaySegments:/)
+  assert.match(source, /\{\{ segment \}\}/)
   assert.doesNotMatch(decorator, /message\.content\s*=/)
 })

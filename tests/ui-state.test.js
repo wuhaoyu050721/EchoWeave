@@ -14,18 +14,22 @@ import {
   closeSettingsDetails,
   closeCharacterDetails,
   openCharacterDetails,
+  openAppLockSettings,
+  openAutoSyncSettings,
+  openCharacterStatusSettings,
   openConversationSettings,
   openGroupEditor,
   openNsfwSettings,
+  openReplyNotificationSettings,
   openSettingsDetails,
+  openStreamingSettings,
   openConversation,
   resolveAppBackAction,
   selectTab,
   setGenerationMode,
   setGenerating,
   summarizeConversation,
-  isUserMessageRead,
-  toggleAppLock
+  isUserMessageRead
 } from '../src/ui-state.js'
 
 test('opens chat from a conversation without changing the selected bottom tab', () => {
@@ -60,14 +64,6 @@ test('selecting provider screen leaves chat and activates provider tab', () => {
 
   assert.equal(state.screen, 'providers')
   assert.equal(state.activeTab, 'providers')
-})
-
-test('app lock toggle changes the visible setting state', () => {
-  const state = createInitialUiState()
-
-  toggleAppLock(state)
-
-  assert.equal(state.appLockEnabled, true)
 })
 
 test('navigation exposes conversations contacts providers and settings', () => {
@@ -128,6 +124,34 @@ test('conversation settings opens as a second-level settings view', () => {
   assert.equal(state.settingsView, 'overview')
 })
 
+test('streaming settings opens as a second-level settings view', () => {
+  const state = createInitialUiState()
+
+  openStreamingSettings(state)
+
+  assert.equal(state.screen, 'settings')
+  assert.equal(state.activeTab, 'settings')
+  assert.equal(state.settingsView, 'streaming')
+  assert.equal(resolveAppBackAction(state), 'settings-overview')
+
+  closeSettingsDetails(state)
+  assert.equal(state.settingsView, 'overview')
+})
+
+test('character status settings opens as a second-level settings view', () => {
+  const state = createInitialUiState()
+
+  openCharacterStatusSettings(state)
+
+  assert.equal(state.screen, 'settings')
+  assert.equal(state.activeTab, 'settings')
+  assert.equal(state.settingsView, 'character-status')
+  assert.equal(resolveAppBackAction(state), 'settings-overview')
+
+  closeSettingsDetails(state)
+  assert.equal(state.settingsView, 'overview')
+})
+
 test('NSFW settings opens as a second-level settings view', () => {
   const state = createInitialUiState()
 
@@ -140,6 +164,21 @@ test('NSFW settings opens as a second-level settings view', () => {
 
   closeSettingsDetails(state)
   assert.equal(state.settingsView, 'overview')
+})
+
+test('security and cloud switches open dedicated second-level settings views', () => {
+  for (const [open, expected] of [
+    [openAppLockSettings, 'app-lock'],
+    [openReplyNotificationSettings, 'reply-notifications'],
+    [openAutoSyncSettings, 'auto-sync']
+  ]) {
+    const state = createInitialUiState()
+    open(state)
+    assert.equal(state.screen, 'settings')
+    assert.equal(state.activeTab, 'settings')
+    assert.equal(state.settingsView, expected)
+    assert.equal(resolveAppBackAction(state), 'settings-overview')
+  }
 })
 
 test('re-entering settings always starts at overview', () => {

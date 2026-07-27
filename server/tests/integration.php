@@ -256,4 +256,38 @@ expect($status === 204, 'backup deletion should return 204');
 [$status] = callApi($app, 'GET', '/api/v1/backup', [], $registered['access_token']);
 expect($status === 404, 'deleted backup should be absent');
 
+$ratePdo = new PDO('sqlite::memory:');
+$ratePdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+CloudBackupApp::install($ratePdo);
+$rateClock = 1_900_000_000;
+$rateApp = new CloudBackupApp(
+    $ratePdo,
+    function () use (&$rateClock): int { return $rateClock; },
+    maxAuthAttempts: 2,
+    authRateLimitWindow: 60
+);
+[$status] = callApi($rateApp, 'POST', '/api/v1/auth/register', [
+    'email' => 'limited@example.com',
+    'password' => 'correct horse battery staple',
+]);
+expect($status === 201, 'rate-limit test account registration should succeed');
+for ($attempt = 0; $attempt < 2; $attempt++) {
+    [$status] = $rateApp->handle('POST', '/api/v1/auth/login', ['x-client-ip' => '203.0.113.8'], [
+        'email' => 'limited@example.com',
+        'password' => 'incorrect password value',
+    ]);
+    expect($status === 401, 'authentication attempts inside the limit should reach credential validation');
+}
+[$status, $limitedLogin] = $rateApp->handle('POST', '/api/v1/auth/login', ['x-client-ip' => '203.0.113.8'], [
+    'email' => 'limited@example.com',
+    'password' => 'incorrect password value',
+]);
+expect($status === 429 && ($limitedLogin['error']['code'] ?? '') === 'auth_rate_limited', 'excessive login attempts should be rate limited');
+$rateClock += 61;
+[$status] = $rateApp->handle('POST', '/api/v1/auth/login', ['x-client-ip' => '203.0.113.8'], [
+    'email' => 'limited@example.com',
+    'password' => 'correct horse battery staple',
+]);
+expect($status === 200, 'authentication should resume after the configured rate-limit window');
+
 echo "PHP cloud backup integration tests passed\n";

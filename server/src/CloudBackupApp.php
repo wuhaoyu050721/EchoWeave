@@ -35,7 +35,10 @@ final class CloudBackupApp
         private int $maxSyncEnvelopeBytes = 41943040,
         private int $maxSyncMutations = 100,
         private int $maxSyncPullLimit = 500,
-        private int $maxSyncPullBytes = 50331648
+        private int $maxSyncPullBytes = 50331648,
+        private int $maxAuthAttempts = 10,
+        private int $authRateLimitWindow = 900,
+        private int $syncMutationRetention = 15552000
     )
     {
         $this->clock ??= static fn (): int => time();
@@ -64,6 +67,12 @@ final class CloudBackupApp
             created_at INTEGER NOT NULL
         )');
         $pdo->exec('CREATE INDEX idx_auth_tokens_user_type ON auth_tokens (user_id, token_type)');
+        $pdo->exec('CREATE TABLE auth_rate_limits (
+            scope_key CHAR(64) PRIMARY KEY,
+            attempts INTEGER NOT NULL,
+            window_started INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        )');
         $pdo->exec('CREATE TABLE backups (
             user_id INTEGER PRIMARY KEY,
             device_id VARCHAR(128) NOT NULL,
@@ -129,6 +138,7 @@ final class CloudBackupApp
             device_id VARCHAR(128) NOT NULL,
             PRIMARY KEY (user_id, revision)
         )');
+        $pdo->exec('CREATE INDEX idx_sync_mutations_user_created ON sync_mutations (user_id, created_at)');
         $pdo->exec('CREATE INDEX idx_sync_changes_user_entity ON sync_changes (user_id, entity_type, entity_id)');
     }
 
@@ -141,8 +151,8 @@ final class CloudBackupApp
             }
 
             return match ($method . ' ' . $path) {
-                'POST /api/v1/auth/register' => $this->register($body),
-                'POST /api/v1/auth/login' => $this->login($body),
+                'POST /api/v1/auth/register' => $this->register($headers, $body),
+                'POST /api/v1/auth/login' => $this->login($headers, $body),
                 'POST /api/v1/auth/refresh' => $this->refresh($body),
                 'POST /api/v1/auth/logout' => $this->logout($headers, $body),
                 'PUT /api/v1/profile' => $this->updateProfile($headers, $body),
@@ -164,9 +174,10 @@ final class CloudBackupApp
         }
     }
 
-    private function register(array $body): array
+    private function register(array $headers, array $body): array
     {
         [$email, $password] = $this->credentials($body);
+        $rateLimitKey = $this->consumeAuthAttempt('register', $email, $headers);
         $username = $this->username($body['username'] ?? null, $email);
         $existing = $this->fetchOne('SELECT id FROM users WHERE email = ?', [$email]);
         if ($existing) return [409, ['error' => ['code' => 'email_exists', 'message' => 'Email already registered']]];
@@ -174,16 +185,19 @@ final class CloudBackupApp
         $now = $this->now();
         $statement = $this->pdo->prepare('INSERT INTO users (email, username, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?)');
         $statement->execute([$email, $username, password_hash($password, PASSWORD_DEFAULT), $now, $now]);
+        $this->clearAuthRateLimit($rateLimitKey);
         return [201, $this->issueSession((int) $this->pdo->lastInsertId(), $email, $username)];
     }
 
-    private function login(array $body): array
+    private function login(array $headers, array $body): array
     {
         [$email, $password] = $this->credentials($body);
+        $rateLimitKey = $this->consumeAuthAttempt('login', $email, $headers);
         $user = $this->fetchOne('SELECT id, email, username, password_hash FROM users WHERE email = ?', [$email]);
         if (!$user || !password_verify($password, $user['password_hash'])) {
             return [401, ['error' => ['code' => 'invalid_credentials', 'message' => 'Invalid email or password']]];
         }
+        $this->clearAuthRateLimit($rateLimitKey);
         return [200, $this->issueSession((int) $user['id'], $user['email'], $user['username'])];
     }
 
@@ -324,6 +338,7 @@ final class CloudBackupApp
         $this->pdo->beginTransaction();
         try {
             $this->ensureSyncState($userId);
+            $this->pruneSyncMutationReceipts($userId);
             $results = [];
             foreach ($normalized as $mutation) {
                 $receipt = $this->fetchOne(
@@ -800,6 +815,17 @@ final class CloudBackupApp
             $mutation['envelope_json'], $mutation['checksum'], $mutation['envelope_bytes'],
             $mutation['updated_at_ms'], $mutation['device_id'],
         ]);
+        $statement = $this->pdo->prepare(
+            'DELETE FROM sync_changes WHERE user_id = ? AND entity_type = ? AND entity_id = ? AND revision < ?'
+        );
+        $statement->execute([$userId, $mutation['entity_type'], $mutation['entity_id'], $revision]);
+    }
+
+    private function pruneSyncMutationReceipts(int $userId): void
+    {
+        if ($this->syncMutationRetention <= 0) return;
+        $statement = $this->pdo->prepare('DELETE FROM sync_mutations WHERE user_id = ? AND created_at < ?');
+        $statement->execute([$userId, $this->now() - $this->syncMutationRetention]);
     }
 
     private function syncRecordView(array $record): array
@@ -825,6 +851,56 @@ final class CloudBackupApp
         if (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 255) throw new InvalidArgumentException('email is invalid');
         if (strlen($password) < 12 || strlen($password) > 1024) throw new InvalidArgumentException('password must contain 12 to 1024 characters');
         return [$email, $password];
+    }
+
+    private function consumeAuthAttempt(string $scope, string $email, array $headers): string
+    {
+        if ($this->maxAuthAttempts <= 0 || $this->authRateLimitWindow <= 0) return '';
+        $client = $this->clientAddress($headers);
+        $key = hash('sha256', $scope . '|' . $client . '|' . strtolower($email));
+        $now = $this->now();
+        $record = $this->fetchOne(
+            'SELECT attempts, window_started FROM auth_rate_limits WHERE scope_key = ?',
+            [$key]
+        );
+        if (!$record) {
+            $statement = $this->pdo->prepare(
+                'INSERT INTO auth_rate_limits (scope_key, attempts, window_started, updated_at) VALUES (?, 1, ?, ?)'
+            );
+            $statement->execute([$key, $now, $now]);
+            return $key;
+        }
+
+        $windowStarted = (int) $record['window_started'];
+        if ($windowStarted + $this->authRateLimitWindow <= $now) {
+            $statement = $this->pdo->prepare(
+                'UPDATE auth_rate_limits SET attempts = 1, window_started = ?, updated_at = ? WHERE scope_key = ?'
+            );
+            $statement->execute([$now, $now, $key]);
+            return $key;
+        }
+        if ((int) $record['attempts'] >= $this->maxAuthAttempts) {
+            throw new CloudSyncHttpException(429, 'auth_rate_limited', 'Too many authentication attempts; try again later');
+        }
+        $statement = $this->pdo->prepare(
+            'UPDATE auth_rate_limits SET attempts = attempts + 1, updated_at = ? WHERE scope_key = ?'
+        );
+        $statement->execute([$now, $key]);
+        return $key;
+    }
+
+    private function clearAuthRateLimit(string $key): void
+    {
+        if ($key === '') return;
+        $statement = $this->pdo->prepare('DELETE FROM auth_rate_limits WHERE scope_key = ?');
+        $statement->execute([$key]);
+    }
+
+    private function clientAddress(array $headers): string
+    {
+        $normalized = array_change_key_case($headers, CASE_LOWER);
+        $candidate = trim((string) ($normalized['x-client-ip'] ?? ''));
+        return filter_var($candidate, FILTER_VALIDATE_IP) ? $candidate : 'unknown';
     }
 
     private function username(mixed $value, string $fallbackEmail = ''): string

@@ -62,7 +62,8 @@ test('persists a complete response when streaming is disabled', async () => {
     handlers.onDelta('complete response')
     return { finishReason: 'stop' }
   }, {}, {}, {
-    getStreamingEnabled: async () => false
+    getStreamingEnabled: async () => false,
+    getStreamingSegmentedDisplayEnabled: async () => true
   })
 
   const result = await service.send({ conversationId: 'conversation-1', content: 'Wait for it' })
@@ -73,6 +74,35 @@ test('persists a complete response when streaming is disabled', async () => {
   assert.equal(result.content, 'complete response')
   assert.equal(assistant.content, 'complete response')
   assert.equal(assistant.finishReason, 'stop')
+  assert.equal(assistant.responseDisplayMode, 'continuous')
+})
+
+test('marks streamed replies for queued segmented presentation when enabled', async () => {
+  const updates = []
+  const { repository, service } = await setup(async (profile, request, handlers) => {
+    assert.equal(request.stream, true)
+    handlers.onDelta('第一段。\n\n')
+    handlers.onDelta('第二段。')
+    return { finishReason: 'stop' }
+  }, {}, {}, {
+    getStreamingEnabled: async () => true,
+    getStreamingSegmentedDisplayEnabled: async () => true
+  })
+
+  const result = await service.send({
+    conversationId: 'conversation-1',
+    content: '分段回答',
+    onMessage: message => updates.push(message)
+  })
+  const assistant = (await repository.listMessages('conversation-1'))
+    .find(message => message.role === 'assistant')
+
+  assert.equal(result.responseDisplayMode, 'segmented')
+  assert.equal(assistant.responseDisplayMode, 'segmented')
+  assert.equal(assistant.content, '第一段。\n\n第二段。')
+  assert.ok(updates.some(message => message.role === 'assistant' &&
+    message.status === 'generating' &&
+    message.responseDisplayMode === 'segmented'))
 })
 
 test('large conversations use bounded context pages and only load referenced attachments', async () => {

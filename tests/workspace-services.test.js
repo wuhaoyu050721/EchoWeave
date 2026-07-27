@@ -22,6 +22,9 @@ test('browser services resolve the persisted streaming preference with an enable
   })
 
   assert.equal(await services.chatService.getStreamingEnabled(), true)
+  assert.equal(await services.chatService.getStreamingSegmentedDisplayEnabled(), false)
+  await services.repository.setSetting('streamingSegmentedDisplay', true)
+  assert.equal(await services.chatService.getStreamingSegmentedDisplayEnabled(), true)
   await services.repository.setSetting('streamingEnabled', false)
   assert.equal(await services.chatService.getStreamingEnabled(), false)
   await services.dispose()

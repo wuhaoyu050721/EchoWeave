@@ -112,7 +112,11 @@
 				<view v-if="messageHistoryHasMore || (messageHistoryLoading && messageItems.length)" class="chat-history-loader">
 					<button :disabled="messageHistoryLoading || ui.generating" @click="loadEarlierMessages"><ChevronDown class="chat-history-icon" :size="15" /><text>{{ messageHistoryLoading ? '加载中…' : '加载更早消息' }}</text></button>
 				</view>
-				<view class="date-divider"><text>今天</text></view>
+				<view v-if="messageHistoryLoading && !messageItems.length" class="chat-loading-state" aria-label="正在加载对话">
+					<view class="chat-loading-avatar" />
+					<view class="chat-loading-lines"><view /><view /><view /></view>
+				</view>
+				<view v-if="messageItems.length" class="date-divider"><text>今天</text></view>
 				<view v-if="!messageItems.length && !messageHistoryLoading" class="empty-chat"><MessageCircle :size="40" /><text>开始新对话</text></view>
 				<template v-for="message in messageItems" :key="message.id">
 					<view v-if="message.role === 'user'" :id="messageAnchorId(message)" class="message message-user">
@@ -135,12 +139,23 @@
 					<view v-else :id="messageAnchorId(message)" class="message message-assistant">
 						<ProviderLogo class="assistant-avatar provider-logo" :src="messageAssistantAvatar(message)" mode="aspectFill" />
 						<view class="assistant-message-stack" :class="{ 'message-pop': animatedMessageIds.includes(message.id) }" @animationend="finishMessageAnimation(message.id)">
-							<view v-if="message.displayContent || message.status !== 'completed'" class="assistant-body" :class="{ 'generating-message': message.status === 'generating' }">
+							<template v-if="assistantVisibleSegments(message).length">
+								<view v-for="(segment, segmentIndex) in assistantVisibleSegments(message)" :key="`${message.id}-segment-${segmentIndex}`" class="assistant-body" :class="{ 'generating-message': message.responseDisplayMode !== 'segmented' && isLastAssistantSegment(message, segmentIndex) && message.status === 'generating', 'assistant-segment-bubble': message.responseDisplayMode === 'segmented' }">
+									<text v-if="segmentIndex === 0" class="assistant-name">{{ messageAssistantName(message) }}</text>
+									<text class="message-content" selectable user-select>{{ segment }}</text>
+									<view v-if="isLastAssistantSegment(message, segmentIndex) && message.responseDisplayMode !== 'segmented' && message.status === 'generating'" class="generation-status"><view class="generation-dots"><i /><i /><i /></view><button class="stop-inline" @click="stopGeneration"><Square :size="12" fill="currentColor" /><text>停止生成</text></button></view>
+									<view v-else-if="isLastAssistantSegment(message, segmentIndex) && message.status !== 'completed' && !assistantShowsTyping(message)" class="message-status"><view class="message-status-copy"><text>{{ statusLabel(message.status) }}</text><text v-if="message.errorMessage" class="message-status-detail">{{ message.errorMessage }}</text></view><view class="message-status-actions"><button v-if="canContinueMessage(message)" class="continue-button" data-testid="continue-interrupted" aria-label="从中断处续写" @click="continueMessage(message.id)"><PlayOutline :size="13" /><text>续写</text></button><button class="retry-button" @click="retryMessage(message.id)">重试</button></view></view>
+									<view v-else-if="isLastAssistantSegment(message, segmentIndex) && message.status === 'completed' && !assistantHasPendingSegments(message)" class="assistant-footer"><view class="message-actions"><button aria-label="复制" @click="copyMessage(message.displayContent)"><Copy :size="16" /></button><button class="feedback-positive" :class="{ active: message.feedback === 'positive' }" :aria-pressed="message.feedback === 'positive'" aria-label="赞同" @click="setMessageFeedback(message, 'positive')"><ThumbsUp :size="16" /></button><button class="feedback-negative" :class="{ active: message.feedback === 'negative' }" :aria-pressed="message.feedback === 'negative'" aria-label="不赞同" @click="setMessageFeedback(message, 'negative')"><ThumbsDown :size="16" /></button><button v-if="!message.isGreeting" class="retry-action" @click="retryMessage(message.id)"><RotateCcw :size="14" /><text>重试</text></button><button v-if="canContinueMessage(message)" class="continue-action" data-testid="continue-writing" aria-label="继续续写" @click="continueMessage(message.id)"><PlayOutline :size="14" /><text>续写</text></button></view><text class="assistant-time">{{ formatMessageTime(message.updatedAt) }}</text></view>
+								</view>
+							</template>
+							<view v-if="assistantShowsTyping(message)" class="assistant-body generating-message assistant-typing-bubble" aria-label="对方正在输入">
+								<text v-if="!assistantVisibleSegments(message).length" class="assistant-name">{{ messageAssistantName(message) }}</text>
+								<view class="generation-status"><view class="generation-dots"><i /><i /><i /></view><button v-if="message.status === 'generating'" class="stop-inline" @click="stopGeneration"><Square :size="12" fill="currentColor" /><text>停止生成</text></button></view>
+							</view>
+							<view v-else-if="!assistantVisibleSegments(message).length && message.status !== 'completed'" class="assistant-body" :class="{ 'generating-message': message.status === 'generating' }">
 								<text class="assistant-name">{{ messageAssistantName(message) }}</text>
-								<text v-if="message.displayContent" class="message-content" selectable user-select>{{ message.displayContent }}</text>
 								<view v-if="message.status === 'generating'" class="generation-status"><view class="generation-dots"><i /><i /><i /></view><button class="stop-inline" @click="stopGeneration"><Square :size="12" fill="currentColor" /><text>停止生成</text></button></view>
-								<view v-else-if="message.status !== 'completed'" class="message-status"><view class="message-status-copy"><text>{{ statusLabel(message.status) }}</text><text v-if="message.errorMessage" class="message-status-detail">{{ message.errorMessage }}</text></view><view class="message-status-actions"><button v-if="canContinueMessage(message)" class="continue-button" data-testid="continue-interrupted" aria-label="从中断处续写" @click="continueMessage(message.id)"><PlayOutline :size="13" /><text>续写</text></button><button class="retry-button" @click="retryMessage(message.id)">重试</button></view></view>
-								<view v-else class="assistant-footer"><view class="message-actions"><button v-if="message.displayContent" aria-label="复制" @click="copyMessage(message.displayContent)"><Copy :size="16" /></button><button aria-label="赞同"><ThumbsUp :size="16" /></button><button aria-label="不赞同"><ThumbsDown :size="16" /></button><button v-if="!message.isGreeting" class="retry-action" @click="retryMessage(message.id)"><RotateCcw :size="14" /><text>重试</text></button><button v-if="canContinueMessage(message)" class="continue-action" data-testid="continue-writing" aria-label="继续续写" @click="continueMessage(message.id)"><PlayOutline :size="14" /><text>续写</text></button></view><text class="assistant-time">{{ formatMessageTime(message.updatedAt) }}</text></view>
+								<view v-else class="message-status"><view class="message-status-copy"><text>{{ statusLabel(message.status) }}</text><text v-if="message.errorMessage" class="message-status-detail">{{ message.errorMessage }}</text></view><view class="message-status-actions"><button v-if="canContinueMessage(message)" class="continue-button" data-testid="continue-interrupted" aria-label="从中断处续写" @click="continueMessage(message.id)"><PlayOutline :size="13" /><text>续写</text></button><button class="retry-button" @click="retryMessage(message.id)">重试</button></view></view>
 							</view>
 							<view v-if="message.imageAttachments.length" class="media-message assistant-image-surface">
 								<view class="sent-image-grid assistant-image-grid" :class="{ single: message.imageAttachments.length === 1 }">
@@ -152,6 +167,9 @@
 						</view>
 					</view>
 				</template>
+				<view v-if="messageHistoryTrimmed" class="chat-latest-loader">
+					<button :disabled="messageHistoryLoading || ui.generating" @click="reloadLatestMessages"><ChevronDown :size="15" /><text>返回最新消息</text></button>
+				</view>
 				<view :id="`chat-bottom-${chatScrollRevision}`" class="chat-scroll-tail" />
 			</scroll-view>
 			<view v-if="attachmentMenuOpen || emojiMenuOpen" class="attachment-backdrop" @click="closeComposerMenus" />
@@ -250,19 +268,53 @@
 
 					<view v-if="settingsSearchHasResults" class="settings-card settings-primary-card settings-menu-card">
 						<button v-if="matchesSettingsSearch('对话设置 系统提示词 全局提示词')" class="settings-row" data-testid="conversation-settings-entry" @click="openConversationSettings(ui)"><view class="settings-icon settings-icon-orange"><FileCog :size="22" /></view><view class="settings-copy"><text>对话设置</text><text>{{ systemPromptSettingLabel }}</text></view><ChevronRight :size="18" /></button>
-						<button v-if="matchesSettingsSearch('流式传输 实时回答 完整回答 非流式')" class="settings-row" data-testid="streaming-toggle" role="switch" :aria-checked="streamingEnabled" :disabled="streamingSaving" @click="toggleStreaming"><view class="settings-icon settings-icon-teal"><Activity :size="22" /></view><view class="settings-copy"><text>流式传输</text><text>{{ streamingSettingLabel }}</text></view><view class="toggle" :class="{ enabled: streamingEnabled }"><view class="toggle-thumb" /></view></button>
+						<button v-if="matchesSettingsSearch('流式传输 实时回答 完整回答 非流式')" class="settings-row" data-testid="streaming-settings-entry" @click="openStreamingSettings(ui)"><view class="settings-icon settings-icon-teal"><Activity :size="22" /></view><view class="settings-copy"><text>流式传输</text><text>{{ streamingSettingLabel }}</text></view><ChevronRight :size="18" /></button>
+						<button v-if="matchesSettingsSearch('角色状态栏 返回状态 状态协议 开关')" class="settings-row" data-testid="character-status-settings-entry" @click="openCharacterStatusSettings(ui)"><view class="settings-icon settings-icon-purple"><FileText :size="22" /></view><view class="settings-copy"><text>角色状态栏</text><text>{{ characterStatusSettingLabel }}</text></view><ChevronRight :size="18" /></button>
 						<button v-if="matchesSettingsSearch('账号与云端 登录 自动备份 同步')" class="settings-row" @click="openCloudModal"><view class="settings-icon settings-icon-blue"><Cloud :size="22" /></view><view class="settings-copy"><text>账号与云端</text><text>{{ cloudConnected ? settingsProfileName : '本地模式，不会自动上传' }}</text></view></button>
 						<button v-if="matchesSettingsSearch('隐私与安全 API 密钥 应用锁 加密 通知 回复提醒')" class="settings-row" @click="openSettingsDetails(ui)"><view class="settings-icon settings-icon-green"><KeyRound :size="22" /></view><view class="settings-copy"><text>隐私与安全</text><text>API 密钥、应用锁与回复通知</text></view></button>
 						<button v-if="matchesSettingsSearch('NSFW 设置 成人 私密状态 状态栏')" class="settings-row" data-testid="nsfw-settings-entry" @click="openNsfwSettings(ui)"><view class="settings-icon settings-icon-red"><EyeOff :size="22" /></view><view class="settings-copy"><text>NSFW 设置</text><text>{{ nsfwSettingLabel }}</text></view><ChevronRight :size="18" /></button>
 						<button v-if="matchesSettingsSearch('数据与存储 本地数据库 SQLite IndexedDB')" class="settings-row" @click="showLocalDataInfo"><view class="settings-icon settings-icon-indigo"><Database :size="22" /></view><view class="settings-copy"><text>数据与存储</text><text>{{ storageLabel }} 本地优先存储</text></view></button>
 						<button v-if="matchesSettingsSearch('导入与导出 JSON 备份 恢复')" class="settings-row" @click="openBackupMenu"><view class="settings-icon settings-icon-cyan"><Import :size="22" /></view><view class="settings-copy"><text>导入与导出</text><text>本地文件与云端链接</text></view></button>
 						<button v-if="matchesSettingsSearch('设备与诊断 Android 流式 日志')" class="settings-row" @click="openAndroidDiagnostics"><view class="settings-icon settings-icon-teal"><Activity :size="22" /></view><view class="settings-copy"><text>设备与诊断</text><text>流式传输与运行日志</text></view><ChevronRight :size="18" /></button>
-						<button v-if="matchesSettingsSearch('关于应用 版本 信息')" class="settings-row" @click="showAboutApp"><view class="settings-icon settings-icon-red"><Info :size="22" /></view><view class="settings-copy"><text>关于应用</text><text>版本 1.0.1 · {{ aboutLabel }}</text></view></button>
-						<button v-if="matchesSettingsSearch('检查更新 最新版本')" class="settings-row" @click="showToast('当前已是最新开发版本')"><view class="settings-icon settings-icon-amber"><RefreshCw :size="22" /></view><view class="settings-copy"><text>检查更新</text><text>获取最新功能与修复</text></view></button>
-						<button v-if="matchesSettingsSearch('帮助与反馈 使用问题 问题反馈')" class="settings-row" @click="showToast('反馈功能将在服务端版本接入')"><view class="settings-icon settings-icon-purple"><CircleHelp :size="22" /></view><view class="settings-copy"><text>帮助与反馈</text><text>使用问题与问题反馈</text></view></button>
+						<button v-if="matchesSettingsSearch('关于应用 版本 信息')" class="settings-row" @click="showAboutApp"><view class="settings-icon settings-icon-red"><Info :size="22" /></view><view class="settings-copy"><text>关于应用</text><text>版本 {{ appVersion }} · {{ aboutLabel }}</text></view></button>
+						<button v-if="matchesSettingsSearch('检查更新 最新版本')" class="settings-row" @click="openReleasePage"><view class="settings-icon settings-icon-amber"><RefreshCw :size="22" /></view><view class="settings-copy"><text>检查更新</text><text>查看 GitHub 最新发布版本</text></view><ChevronRight :size="18" /></button>
+						<button v-if="matchesSettingsSearch('帮助与反馈 使用问题 问题反馈')" class="settings-row" @click="openFeedbackPage"><view class="settings-icon settings-icon-purple"><CircleHelp :size="22" /></view><view class="settings-copy"><text>帮助与反馈</text><text>提交问题与改进建议</text></view><ChevronRight :size="18" /></button>
 					</view>
 					<view v-else class="settings-search-empty"><Search :size="24" /><text>未找到相关设置</text></view>
 
+					<view class="navigation-scroll-tail" />
+				</scroll-view>
+			</view>
+
+			<view v-else-if="ui.settingsView === 'streaming'" class="screen-view settings-details themed-settings-details streaming-settings-details" data-testid="streaming-settings-page">
+				<view class="screen-header settings-detail-header themed-settings-header"><button class="icon-button header-back" aria-label="返回设置概览" @click="closeSettingsDetails(ui)"><ArrowLeft :size="22" /></button><text class="screen-title">流式传输</text><view class="settings-detail-header-space" /></view>
+				<scroll-view class="settings-screen reference-scroll themed-settings-scroll" scroll-y>
+					<view class="settings-detail-summary streaming-settings-summary">
+						<view class="settings-detail-summary-icon"><Activity :size="23" /></view>
+						<view class="settings-detail-summary-copy"><text>回答显示方式</text><text>{{ streamingSettingLabel }}</text></view>
+						<view class="settings-detail-state" :class="{ enabled: streamingEnabled }"><view /><text>{{ !streamingEnabled ? '完整' : (streamingSegmentedDisplay ? '分段' : '实时') }}</text></view>
+					</view>
+					<text class="settings-section-label">传输方式</text>
+					<view class="settings-card themed-settings-card">
+						<button class="settings-row themed-settings-row" data-testid="streaming-toggle" role="switch" :aria-checked="streamingEnabled" :disabled="streamingSaving" @click="toggleStreaming"><view class="settings-detail-row-icon streaming-row-icon"><Activity :size="19" /></view><view class="settings-copy"><text>实时显示回答</text><text>{{ streamingEnabled ? '模型返回内容时逐步显示' : '等待模型完成后一次显示' }}</text></view><view class="toggle streaming-toggle" :class="{ enabled: streamingEnabled }"><view class="toggle-thumb" /></view></button>
+						<button v-if="streamingEnabled" class="settings-row themed-settings-row" data-testid="streaming-segmented-toggle" role="switch" :aria-checked="streamingSegmentedDisplay" :disabled="streamingSegmentedSaving" @click="toggleStreamingSegmentedDisplay"><view class="settings-detail-row-icon streaming-segmented-row-icon"><MessageCircle :size="19" /></view><view class="settings-copy"><text>分段显示</text><text>完整段落逐条弹出，段落之间显示输入动画</text></view><view class="toggle streaming-toggle" :class="{ enabled: streamingSegmentedDisplay }"><view class="toggle-thumb" /></view></button>
+					</view>
+					<view class="navigation-scroll-tail" />
+				</scroll-view>
+			</view>
+
+			<view v-else-if="ui.settingsView === 'character-status'" class="screen-view settings-details themed-settings-details character-status-settings-details" data-testid="character-status-settings-page">
+				<view class="screen-header settings-detail-header themed-settings-header"><button class="icon-button header-back" aria-label="返回设置概览" @click="closeSettingsDetails(ui)"><ArrowLeft :size="22" /></button><text class="screen-title">角色状态栏</text><view class="settings-detail-header-space" /></view>
+				<scroll-view class="settings-screen reference-scroll themed-settings-scroll" scroll-y>
+					<view class="settings-detail-summary character-status-settings-summary">
+						<view class="settings-detail-summary-icon"><FileText :size="23" /></view>
+						<view class="settings-detail-summary-copy"><text>角色状态</text><text>{{ characterStatusSettingLabel }}</text></view>
+						<view class="settings-detail-state" :class="{ enabled: characterStatusEnabled }"><view /><text>{{ characterStatusEnabled ? '开启' : '关闭' }}</text></view>
+					</view>
+					<text class="settings-section-label">状态栏</text>
+					<view class="settings-card themed-settings-card">
+						<button class="settings-row themed-settings-row" data-testid="character-status-toggle" role="switch" :aria-checked="characterStatusEnabled" :disabled="characterStatusSaving" @click="toggleCharacterStatus"><view class="settings-detail-row-icon character-status-row-icon"><FileText :size="19" /></view><view class="settings-copy"><text>返回角色状态</text><text>{{ characterStatusEnabled ? '每轮请求更新并显示状态栏' : '仅请求对话正文并隐藏状态栏' }}</text></view><view class="toggle character-status-toggle" :class="{ enabled: characterStatusEnabled }"><view class="toggle-thumb" /></view></button>
+					</view>
 					<view class="navigation-scroll-tail" />
 				</scroll-view>
 			</view>
@@ -306,24 +358,80 @@
 				</scroll-view>
 			</view>
 
+			<view v-else-if="ui.settingsView === 'app-lock'" class="screen-view settings-details themed-settings-details app-lock-settings-details" data-testid="app-lock-settings-page">
+				<view class="screen-header settings-detail-header themed-settings-header"><button class="icon-button header-back" aria-label="返回设置概览" @click="closeSettingsDetails(ui)"><ArrowLeft :size="22" /></button><text class="screen-title">应用锁</text><view class="settings-detail-header-space" /></view>
+				<scroll-view class="settings-screen reference-scroll themed-settings-scroll" scroll-y>
+					<view class="settings-detail-summary app-lock-settings-summary">
+						<view class="settings-detail-summary-icon"><LockKeyhole :size="23" /></view>
+						<view class="settings-detail-summary-copy"><text>PIN 保护</text><text>{{ appLockSettingLabel }}</text></view>
+						<view class="settings-detail-state" :class="{ enabled: ui.appLockEnabled }"><view /><text>{{ ui.appLockEnabled ? '开启' : '关闭' }}</text></view>
+					</view>
+					<text class="settings-section-label">{{ ui.appLockEnabled ? '验证当前 PIN' : '设置 PIN' }}</text>
+					<view class="settings-card themed-settings-card security-pin-card">
+						<label class="security-pin-field"><text>{{ ui.appLockEnabled ? '当前 PIN' : '新 PIN' }}</text><input v-model="appLockPin" :disabled="appLockBusy" type="password" inputmode="numeric" maxlength="8" placeholder="4-8 位数字" /></label>
+						<label v-if="!ui.appLockEnabled" class="security-pin-field"><text>确认 PIN</text><input v-model="appLockPinConfirmation" :disabled="appLockBusy" type="password" inputmode="numeric" maxlength="8" placeholder="再次输入 PIN" /></label>
+						<text v-if="appLockError" class="security-pin-error">{{ appLockError }}</text>
+					</view>
+					<text class="settings-section-label">状态</text>
+					<view class="settings-card themed-settings-card">
+						<button class="settings-row themed-settings-row" data-testid="app-lock-toggle" role="switch" :aria-checked="ui.appLockEnabled" :disabled="appLockBusy" @click="toggleLock"><view class="settings-detail-row-icon app-lock-row-icon"><LockKeyhole :size="19" /></view><view class="settings-copy"><text>启用应用锁</text><text>{{ ui.appLockEnabled ? '验证当前 PIN 后关闭' : '离开应用后再次进入需要 PIN' }}</text></view><view class="toggle app-lock-toggle" :class="{ enabled: ui.appLockEnabled }"><view class="toggle-thumb" /></view></button>
+					</view>
+					<button v-if="ui.appLockEnabled" class="settings-secondary-command" :disabled="appLockBusy" @click="lockAppNow"><LockKeyhole :size="17" /><text>立即锁定</text></button>
+					<view class="navigation-scroll-tail" />
+				</scroll-view>
+			</view>
+
+			<view v-else-if="ui.settingsView === 'reply-notifications'" class="screen-view settings-details themed-settings-details reply-notification-settings-details" data-testid="reply-notifications-settings-page">
+				<view class="screen-header settings-detail-header themed-settings-header"><button class="icon-button header-back" aria-label="返回设置概览" @click="closeSettingsDetails(ui)"><ArrowLeft :size="22" /></button><text class="screen-title">回复通知</text><view class="settings-detail-header-space" /></view>
+				<scroll-view class="settings-screen reference-scroll themed-settings-scroll" scroll-y>
+					<view class="settings-detail-summary reply-notification-settings-summary">
+						<view class="settings-detail-summary-icon"><MessageCircle :size="23" /></view>
+						<view class="settings-detail-summary-copy"><text>后台提醒</text><text>{{ replyNotificationLabel }}</text></view>
+						<view class="settings-detail-state" :class="{ enabled: replyNotificationSupported && replyNotificationsEnabled }"><view /><text>{{ replyNotificationsEnabled ? '开启' : '关闭' }}</text></view>
+					</view>
+					<text class="settings-section-label">通知</text>
+					<view class="settings-card themed-settings-card">
+						<button class="settings-row themed-settings-row" data-testid="reply-notifications-toggle" role="switch" :aria-checked="replyNotificationsEnabled" :disabled="!replyNotificationSupported" @click="toggleReplyNotifications"><view class="settings-detail-row-icon reply-notification-row-icon"><MessageCircle :size="19" /></view><view class="settings-copy"><text>回复完成时提醒</text><text>{{ replyNotificationSupported ? '离开当前会话或应用进入后台时发送通知' : '仅 Android App 安装包可用' }}</text></view><view class="toggle reply-notification-toggle" :class="{ enabled: replyNotificationSupported && replyNotificationsEnabled }"><view class="toggle-thumb" /></view></button>
+					</view>
+					<button v-if="replyNotificationSupported && replyNotificationsEnabled && !replyNotificationAuthorized" class="settings-secondary-command" @click="openReplyNotificationSystemSettings"><Settings :size="17" /><text>打开系统通知设置</text></button>
+					<view class="navigation-scroll-tail" />
+				</scroll-view>
+			</view>
+
+			<view v-else-if="ui.settingsView === 'auto-sync'" class="screen-view settings-details themed-settings-details auto-sync-settings-details" data-testid="auto-sync-settings-page">
+				<view class="screen-header settings-detail-header themed-settings-header"><button class="icon-button header-back" aria-label="返回设置概览" @click="closeSettingsDetails(ui)"><ArrowLeft :size="22" /></button><text class="screen-title">自动同步</text><view class="settings-detail-header-space" /></view>
+				<scroll-view class="settings-screen reference-scroll themed-settings-scroll" scroll-y>
+					<view class="settings-detail-summary auto-sync-settings-summary">
+						<view class="settings-detail-summary-icon"><Cloud :size="23" /></view>
+						<view class="settings-detail-summary-copy"><text>云端增量同步</text><text>{{ cloudConnected ? (cloudBackupStatus || (autoBackupEnabled ? '前台每 3 分钟同步' : '当前已关闭')) : '请先登录云端账号' }}</text></view>
+						<view class="settings-detail-state" :class="{ enabled: cloudConnected && autoBackupEnabled }"><view /><text>{{ autoBackupEnabled ? '开启' : '关闭' }}</text></view>
+					</view>
+					<text class="settings-section-label">同步</text>
+					<view class="settings-card themed-settings-card">
+						<button class="settings-row themed-settings-row" data-testid="auto-sync-toggle" role="switch" :aria-checked="autoBackupEnabled" :disabled="cloudBusy || !cloudConnected" @click="toggleAutoBackup"><view class="settings-detail-row-icon auto-sync-row-icon"><Cloud :size="19" /></view><view class="settings-copy"><text>自动同步</text><text>{{ cloudConnected ? '应用在前台时定期同步新增和修改的数据' : '登录后可启用' }}</text></view><view class="toggle auto-sync-toggle" :class="{ enabled: cloudConnected && autoBackupEnabled }"><view class="toggle-thumb" /></view></button>
+					</view>
+					<view class="navigation-scroll-tail" />
+				</scroll-view>
+			</view>
+
 			<view v-else class="screen-view settings-details">
 				<view class="screen-header reference-header settings-detail-header"><button class="icon-button header-back" aria-label="返回设置概览" @click="closeSettingsDetails(ui)"><ArrowLeft :size="21" /></button><text class="screen-title">设置</text></view>
 				<scroll-view class="settings-screen reference-scroll" scroll-y>
 					<text class="settings-section-label">安全</text>
 					<view class="settings-card">
 						<button class="settings-row" @click="goToTab('providers')"><view class="settings-icon"><KeyRound :size="19" /></view><view class="settings-copy"><text>API 密钥管理</text><text>使用 {{ encryptionLabel }} 加密后保存</text></view><ChevronRight :size="18" /></button>
-						<button class="settings-row" data-testid="app-lock" @click="toggleLock"><view class="settings-icon"><LockKeyhole :size="19" /></view><view class="settings-copy"><text>应用锁</text><text>当前版本保存开关状态</text></view><view class="toggle" :class="{ enabled: ui.appLockEnabled }"><view class="toggle-thumb" /></view></button>
+						<button class="settings-row" data-testid="app-lock-entry" @click="openAppLockSettings(ui)"><view class="settings-icon"><LockKeyhole :size="19" /></view><view class="settings-copy"><text>应用锁</text><text>{{ appLockSettingLabel }}</text></view><ChevronRight :size="18" /></button>
 					</view>
 					<text class="settings-section-label">提醒</text>
 					<view class="settings-card">
-						<button class="settings-row" data-testid="reply-notifications" @click="toggleReplyNotifications"><view class="settings-icon"><MessageCircle :size="19" /></view><view class="settings-copy"><text>回复通知</text><text>{{ replyNotificationLabel }}</text></view><view class="toggle" :class="{ enabled: replyNotificationSupported && replyNotificationsEnabled }"><view class="toggle-thumb" /></view></button>
+						<button class="settings-row" data-testid="reply-notifications-entry" @click="openReplyNotificationSettings(ui)"><view class="settings-icon"><MessageCircle :size="19" /></view><view class="settings-copy"><text>回复通知</text><text>{{ replyNotificationLabel }}</text></view><ChevronRight :size="18" /></button>
 					</view>
 					<text class="settings-section-label">应用信息</text>
 					<view class="settings-card">
 						<button class="settings-row" @click="openAndroidDiagnostics"><view class="settings-icon"><Activity :size="19" /></view><view class="settings-copy"><text>Android 流式诊断</text><text>验证流式分块、停止和生命周期</text></view><ChevronRight :size="18" /></button>
-						<button class="settings-row" @click="showAboutApp"><view class="settings-icon"><Info :size="19" /></view><view class="settings-copy"><text>关于应用</text><text>版本 1.0.1 · {{ aboutLabel }}</text></view><ChevronRight :size="18" /></button>
-						<button class="settings-row" @click="showToast('当前已是最新开发版本')"><view class="settings-icon"><RefreshCw :size="19" /></view><view class="settings-copy"><text>检查更新</text><text>当前已是最新版本</text></view><ChevronRight :size="18" /></button>
-						<button class="settings-row" @click="showToast('反馈功能将在服务端版本接入')"><view class="settings-icon"><CircleHelp :size="19" /></view><view class="settings-copy"><text>帮助与反馈</text><text>使用问题与问题反馈</text></view><ChevronRight :size="18" /></button>
+						<button class="settings-row" @click="showAboutApp"><view class="settings-icon"><Info :size="19" /></view><view class="settings-copy"><text>关于应用</text><text>版本 {{ appVersion }} · {{ aboutLabel }}</text></view><ChevronRight :size="18" /></button>
+						<button class="settings-row" @click="openReleasePage"><view class="settings-icon"><RefreshCw :size="19" /></view><view class="settings-copy"><text>检查更新</text><text>查看 GitHub 最新发布版本</text></view><ChevronRight :size="18" /></button>
+						<button class="settings-row" @click="openFeedbackPage"><view class="settings-icon"><CircleHelp :size="19" /></view><view class="settings-copy"><text>帮助与反馈</text><text>提交问题与改进建议</text></view><ChevronRight :size="18" /></button>
 					</view>
 					<view class="navigation-scroll-tail" />
 				</scroll-view>
@@ -456,7 +564,7 @@
 				<label class="cloud-field"><text>邮箱</text><input v-model="cloudForm.email" :disabled="cloudBusy || cloudConnected" placeholder="name@example.com" /></label>
 				<label v-if="!cloudConnected" class="cloud-field"><text>登录密码</text><input v-model="cloudForm.password" :disabled="cloudBusy" type="password" placeholder="至少 12 个字符" /></label>
 				<label v-else class="cloud-field"><text>同步密码</text><view class="password-field"><input v-model="cloudForm.syncPassword" :disabled="cloudBusy" type="password" placeholder="用于加密云端备份" /><EyeOff :size="16" /></view></label>
-				<view v-if="cloudConnected" class="cloud-auto-row"><view><text>自动同步</text><text>{{ cloudBackupStatus || '前台每 3 分钟增量同步' }}</text></view><button class="toggle" :class="{ enabled: autoBackupEnabled }" :disabled="cloudBusy" @click="toggleAutoBackup"><view class="toggle-thumb" /></button></view>
+				<button v-if="cloudConnected" class="cloud-auto-row" data-testid="auto-sync-settings-entry" :disabled="cloudBusy" @click="openAutoSyncSettingsPage"><view><text>自动同步</text><text>{{ cloudBackupStatus || (autoBackupEnabled ? '已开启，前台每 3 分钟增量同步' : '已关闭') }}</text></view><ChevronRight :size="18" /></button>
 				<view v-if="!cloudConnected" class="cloud-actions"><button class="secondary-button" :disabled="cloudBusy" @click="registerCloud">注册</button><button class="primary-button" :disabled="cloudBusy" @click="loginCloud">登录</button></view>
 				<view v-else class="cloud-actions cloud-actions-wrap"><button class="primary-button" :disabled="cloudBusy" @click="syncCloudNow">立即同步</button><button class="secondary-button" :disabled="cloudBusy" @click="uploadCloudBackup">完整备份</button><button class="secondary-button" :disabled="cloudBusy" @click="restoreCloudBackup">从云端恢复</button><button class="danger-button" :disabled="cloudBusy" @click="deleteCloudBackup">删除完整备份</button><button class="logout-button" :disabled="cloudBusy" @click="logoutCloud">退出登录</button></view>
 			</scroll-view>
@@ -538,6 +646,22 @@
 				</scroll-view>
 			</view>
 		</view>
+		<view v-if="appLockGate !== 'unlocked'" class="app-lock-gate" data-testid="app-lock-gate" @touchmove.stop.prevent>
+			<view class="app-lock-gate-content">
+				<AppImage class="app-lock-gate-logo" src="/static/zhiyu-logo.png" alt="织语" mode="aspectFill" />
+				<text class="app-lock-gate-title">织语</text>
+				<template v-if="appLockGate === 'checking'">
+					<RefreshCw class="spinning app-lock-gate-spinner" :size="22" />
+					<text class="app-lock-gate-copy">正在检查应用锁</text>
+				</template>
+				<template v-else>
+					<text class="app-lock-gate-copy">输入 PIN 继续</text>
+					<input v-model="appLockUnlockPin" :disabled="appLockBusy" :focus="true" type="password" inputmode="numeric" maxlength="8" placeholder="4-8 位数字" confirm-type="done" aria-label="应用锁 PIN" @confirm="unlockApp" />
+					<text v-if="appLockError" class="app-lock-gate-error">{{ appLockError }}</text>
+					<button class="app-lock-gate-submit" :disabled="appLockBusy || appLockUnlockPin.length < 4" @click="unlockApp"><LockKeyhole :size="17" /><text>{{ appLockBusy ? '验证中...' : '解锁' }}</text></button>
+				</template>
+			</view>
+		</view>
 		<AppDialogLayer
 			:action-sheet="conversationActionSheet"
 			:dialog="appDialog"
@@ -570,9 +694,13 @@
 	import ProviderLogo from '../../src/components/provider-logo.js'
 	import WorldBookManager from '../../src/components/world-book-manager.vue'
 	import { createCloudServices } from '../../src/app/create-cloud-services.js'
+	import { loadChatMessageResources, mergeEarlierMessageWindow, splitAssistantReplySegments } from '../../src/app/chat-presentation.js'
 	import { saveLocalProfileName, syncProfileNameFromCloudSession } from '../../src/app/create-character-instructions.js'
 	import { createPlatformServices, createPlatformWorkspaceManager } from '../../src/app/create-platform-services.js'
 	import { assistantStatusProgressColor, assistantStatusSectionsForDisplay, createAssistantStatusOverview, extractAssistantStatus } from '../../src/core/assistant-status.js'
+	import { createAppLockRecord, normalizeAppLockSetting, verifyAppLockPin } from '../../src/core/app-lock.js'
+	import { APP_VERSION, FEEDBACK_URL, RELEASES_URL } from '../../src/core/app-metadata.js'
+	import { CHARACTER_STATUS_SETTING_KEY, readCharacterStatusEnabled } from '../../src/core/character-status-setting.js'
 	import { DEFAULT_CLOUD_BASE_URL, normalizeCloudBaseUrl, resolveCloudRequestBaseUrl } from '../../src/core/cloud-base-url.js'
 	import {
 		groupMentionQuery, groupMessageSpeakerKey, groupParticipantKey, groupParticipantKind, insertGroupMention,
@@ -580,7 +708,10 @@
 	} from '../../src/core/group-chat.js'
 	import { imageAttachmentSource } from '../../src/core/image-output.js'
 	import { PROFILE_AVATAR_SETTING_KEY, createProfileAvatar, normalizeProfileAvatar } from '../../src/core/profile-avatar.js'
-	import { STREAMING_SETTING_KEY, readStreamingEnabled } from '../../src/core/streaming-setting.js'
+	import {
+		STREAMING_SEGMENTED_DISPLAY_SETTING_KEY, STREAMING_SETTING_KEY,
+		readStreamingEnabled, readStreamingSegmentedDisplayEnabled
+	} from '../../src/core/streaming-setting.js'
 	import {
 		PROVIDER_AVATAR_PRESETS, createAutomaticProviderAvatar, createProviderCustomAvatar, createProviderPresetAvatar,
 		describeProviderAvatar, detectProviderAvatarPreset, resolveProviderAvatarSource
@@ -598,8 +729,8 @@
 	import {
 		applyFetchedModels, applyProviderModelSelection, applyProviderProtocolSelection, attachmentActions, canSendMessage, closeCharacterDetails as closeCharacterDetailsState,
 		closeGroupEditor as closeGroupEditorState, closeSettingsDetails, createInitialUiState, createProviderForm, isUserMessageRead, navigationItems,
-		openCharacterDetails as openCharacterDetailsState, openConversation, openConversationSettings, openGroupEditor, openNsfwSettings, openSettingsDetails, selectTab, setGenerating,
-		resolveAppBackAction, setGenerationMode, summarizeConversation, toggleAppLock
+		openAppLockSettings, openAutoSyncSettings, openCharacterDetails as openCharacterDetailsState, openCharacterStatusSettings, openConversation, openConversationSettings, openGroupEditor, openNsfwSettings, openReplyNotificationSettings, openSettingsDetails, openStreamingSettings, selectTab, setGenerating,
+		resolveAppBackAction, setGenerationMode, summarizeConversation
 	} from '../../src/ui-state.js'
 
 	const iconMap = markRaw({ MessageCircle, Contact, Server, Settings, Image, Camera, FileText })
@@ -607,13 +738,17 @@
 	const COMPOSER_MAX_HEIGHT = 132
 	const COMPOSER_LINE_HEIGHT = 22
 	const CHAT_MESSAGE_PAGE_SIZE = 60
+	const MAX_RENDERED_CHAT_MESSAGES = 240
+	const MAX_AVATAR_CACHE_ITEMS = 32
 	const STREAMING_RENDER_INTERVAL = 40
+	const SEGMENT_REVEAL_MIN_DELAY = 320
+	const SEGMENT_REVEAL_MAX_DELAY = 760
 	const PRIMARY_LIST_BATCH_SIZE = 16
 	const CHARACTER_MAKER_URL = 'https://www.surtr.cn:8019/'
 	const SAVED_API_KEY_MASK = '••••••••••••'
 	const NSFW_SETTING_KEY = 'nsfwEnabled'
 	const SETTINGS_SEARCH_ITEMS = [
-		'对话设置 系统提示词 全局提示词', '流式传输 实时回答 完整回答 非流式', '账号与云端 登录 自动备份 同步', '隐私与安全 API 密钥 应用锁 加密 通知 回复提醒',
+		'对话设置 系统提示词 全局提示词', '流式传输 实时回答 完整回答 非流式', '角色状态栏 返回状态 状态协议 开关', '账号与云端 登录 自动备份 同步', '隐私与安全 API 密钥 应用锁 加密 通知 回复提醒',
 		'NSFW 设置 成人 私密状态 状态栏',
 		'数据与存储 本地数据库 SQLite IndexedDB', '导入与导出 JSON 备份 恢复', '设备与诊断 Android 流式 日志',
 		'关于应用 版本 信息', '检查更新 最新版本', '帮助与反馈 使用问题 问题反馈'
@@ -625,17 +760,17 @@
 		components: {
 			Activity, AlertCircle, ArrowLeft, Camera, Check, CheckCheck, ChevronDown, ChevronRight, CircleHelp, Cloud, Copy, Database,
 			Contact, Download, EyeOff, FileCog, FileText, Image, Import, Info, KeyRound, LockKeyhole, MessageCircle, Mic,
-			MoreVertical, Paperclip, PlayOutline, Plus, AppDialogLayer, AppImage, CharacterContacts, CharacterDetail, GroupAvatar, GroupChatEditor, ProviderLogo, WorldBookManager, RefreshCw, RotateCcw, Search, Send, Square,
+			MoreVertical, Paperclip, PlayOutline, Plus, AppDialogLayer, AppImage, CharacterContacts, CharacterDetail, GroupAvatar, GroupChatEditor, ProviderLogo, WorldBookManager, RefreshCw, RotateCcw, Search, Send, Settings, Square,
 			ThumbsDown, ThumbsUp, Trash2, Upload, X
 		},
 		data() {
 			return {
-				ui: createInitialUiState(), iconMap, navigationItems, attachmentActions, services: null, workspaceManager: null, ready: false, initializing: false, initializationError: '',
+				ui: createInitialUiState(), iconMap, navigationItems, attachmentActions, appVersion: APP_VERSION, services: null, workspaceManager: null, ready: false, initializing: false, initializationError: '',
 				conversationItems: [], characterItems: [], worldBookItems: [], providerItems: [], messageItems: [], animatedMessageIds: [], assistantStatusOpen: false, groupStatusSpeakerKey: '',
 				conversationRenderLimit: PRIMARY_LIST_BATCH_SIZE, characterRenderLimit: PRIMARY_LIST_BATCH_SIZE,
 				conversationLoadPromise: null, characterLoadPromise: null, worldBookLoadPromise: null, dataLoadRevision: 0,
 				characterAvatarSources: markRaw(new Map()), characterAvatarLoadPromises: markRaw(new Map()),
-				messageHistoryLoading: false, messageHistoryHasMore: false, chatLoadRevision: 0, pendingStreamingMessage: null, streamingRenderTimer: null,
+				messageHistoryLoading: false, messageHistoryHasMore: false, messageHistoryTrimmed: false, chatLoadRevision: 0, pendingStreamingMessage: null, streamingRenderTimer: null, segmentedReplyTimers: markRaw(new Map()),
 				chatScrollIntoView: '', chatScrollRevision: 0, chatScrollTimer: null, searchQuery: '', searchOpen: false, homeMenuOpen: false, draftMessage: '', composerInputHeight: COMPOSER_MIN_HEIGHT,
 				groupEditorSaving: false, groupEditorReturnScreen: 'conversations',
 				conversationActionSheet: null, conversationActionResolver: null, appDialog: null, appDialogValue: '', appDialogResolver: null,
@@ -651,12 +786,13 @@
 				providerTesting: false, providerLoadingModels: false, connectionStatus: 'untested', showApiKey: false,
 				providerApiKeyBusy: false, providerApiKeyDirty: false, providerApiKeyLoadedValue: '', providerApiKeyRequestId: 0,
 				providerAvatarPresets: PROVIDER_AVATAR_PRESETS, providerProtocols: PROVIDER_PROTOCOLS, providerAvatarMenuOpen: false, providerAvatarBusy: false,
-				systemPromptEnabled: false, systemPrompt: '', systemPromptSaving: false, streamingEnabled: true, streamingSaving: false, nsfwEnabled: false, nsfwSaving: false, backupMenuOpen: false, backupBusy: false,
+				systemPromptEnabled: false, systemPrompt: '', systemPromptSaving: false, streamingEnabled: true, streamingSaving: false, streamingSegmentedDisplay: false, streamingSegmentedSaving: false, characterStatusEnabled: true, characterStatusSaving: false, nsfwEnabled: false, nsfwSaving: false, backupMenuOpen: false, backupBusy: false,
 				cloudExportUrl: '', cloudImportUrl: '',
 				settingsSearchOpen: false, settingsSearchQuery: '', profileName: '', profileAvatar: null, profileAvatarMenuOpen: false, profileAvatarBusy: false,
 				cloudOpen: false, cloudBusy: false, cloudServices: null, cloudSession: null, networkSyncHandler: null,
 				autoBackupEnabled: false, cloudBackupStatus: '',
 				replyNotificationsEnabled: true, replyNotificationAuthorized: false,
+				appLockRecord: null, appLockGate: 'checking', appLockPin: '', appLockPinConfirmation: '', appLockUnlockPin: '', appLockBusy: false, appLockError: '', lockOnNextShow: false,
 				cloudForm: { baseUrl: DEFAULT_CLOUD_BASE_URL, username: '', email: '', password: '', syncPassword: '' },
 				toastMessage: '', toastTimer: null, errorMessage: ''
 			}
@@ -672,6 +808,7 @@
 				if (!this.replyNotificationsEnabled) return '已关闭'
 				return this.replyNotificationAuthorized ? '离开当前会话或进入后台时提醒' : '系统通知权限未开启，点击去设置'
 			},
+			appLockSettingLabel() { return this.ui.appLockEnabled ? '已开启，离开应用后需要 PIN' : '已关闭' },
 			cloudConnected() { return Boolean(this.cloudSession?.access_token) },
 			settingsProfileName() {
 				const email = this.cloudSession?.user?.email || this.cloudForm.email
@@ -685,6 +822,7 @@
 			},
 			settingsProfileAvatarSource() { return this.profileAvatar?.dataUrl || this.activeProviderLogo },
 			latestAssistantStatus() {
+				if (!this.characterStatusEnabled) return null
 				const selectedSpeakerId = this.activeGroupConversation ? this.selectedGroupStatusCharacterId : ''
 				for (let index = this.messageItems.length - 1; index >= 0; index -= 1) {
 					const message = this.messageItems[index]
@@ -723,7 +861,11 @@
 				return length ? `已启用 · ${length} 字` : '已启用 · 内容为空'
 			},
 			nsfwSettingLabel() { return this.nsfwEnabled ? '已开启，显示私密状态' : '已关闭，隐藏私密状态' },
-			streamingSettingLabel() { return this.streamingEnabled ? '回答内容实时显示' : '等待完整回答后显示' },
+			streamingSettingLabel() {
+				if (!this.streamingEnabled) return '等待完整回答后显示'
+				return this.streamingSegmentedDisplay ? '完整段落逐条显示' : '回答内容实时显示'
+			},
+			characterStatusSettingLabel() { return this.characterStatusEnabled ? '每轮返回并更新角色状态' : '已关闭，仅返回对话正文' },
 			characterImportLoadingTitle() {
 				if (this.characterImportStage === 'saving') return '正在导入角色卡'
 				if (this.characterImportStage === 'selecting') return '正在读取角色卡'
@@ -913,9 +1055,11 @@
 		watch: {
 			searchQuery() {
 				this.conversationRenderLimit = PRIMARY_LIST_BATCH_SIZE
+				this.$nextTick(() => this.hydrateVisibleConversationAvatars())
 			},
 			contactSearchQuery() {
 				this.characterRenderLimit = PRIMARY_LIST_BATCH_SIZE
+				this.$nextTick(() => this.hydrateVisibleCharacterAvatars())
 			},
 			draftMessage(value) {
 				if (!value) {
@@ -931,6 +1075,12 @@
 		},
 		onShow() {
 			this.services?.replyNotificationService?.setAppVisible(true)
+			if (this.lockOnNextShow && this.ui.appLockEnabled && this.appLockRecord) {
+				this.appLockGate = 'locked'
+				this.appLockUnlockPin = ''
+				this.appLockError = ''
+				this.lockOnNextShow = false
+			}
 			this.services?.replyNotificationService?.refreshPermission?.().then(authorized => {
 				this.replyNotificationAuthorized = Boolean(authorized)
 			}).catch(() => {})
@@ -940,12 +1090,18 @@
 				this.cloudServices?.syncCoordinator?.startForeground().catch(() => {})
 			}
 		},
-		onHide() { this.services?.replyNotificationService?.setAppVisible(false); this.cloudServices?.syncCoordinator?.stopForeground(); this.cloudServices?.scheduler?.stop() },
+		onHide() {
+			this.services?.replyNotificationService?.setAppVisible(false)
+			this.cloudServices?.syncCoordinator?.stopForeground()
+			this.cloudServices?.scheduler?.stop()
+			if (this.ui.appLockEnabled && this.appLockGate === 'unlocked') this.lockOnNextShow = true
+		},
 		onBackPress() { return this.handleAppBack() },
 		beforeUnmount() {
 			clearTimeout(this.toastTimer)
 			clearTimeout(this.chatScrollTimer)
 			clearTimeout(this.streamingRenderTimer)
+			this.clearSegmentedReplyTimers()
 			this.unbindNetworkSyncListener()
 			const closeWorkspace = async () => {
 				await this.stopCloudActivityAndWait()
@@ -958,11 +1114,17 @@
 			closeSettingsDetails,
 			formatAttachmentSize,
 			isUserMessageRead,
+			openCharacterStatusSettings,
 			openConversationSettings,
+			openAppLockSettings,
+			openAutoSyncSettings,
 			openNsfwSettings,
+			openReplyNotificationSettings,
 			openSettingsDetails,
+			openStreamingSettings,
 			setGenerationMode,
 			handleAppBack() {
+				if (this.appLockGate !== 'unlocked') return true
 				if (this.appDialog) {
 					this.cancelAppDialog()
 					return true
@@ -1127,18 +1289,21 @@
 			toggleContactSort() {
 				this.contactSortMode = this.contactSortMode === 'name' ? 'recent' : 'name'
 				this.characterRenderLimit = PRIMARY_LIST_BATCH_SIZE
+				this.$nextTick(() => this.hydrateVisibleCharacterAvatars())
 			},
-			showMoreConversations() {
+			async showMoreConversations() {
 				this.conversationRenderLimit = Math.min(
 					this.filteredConversations.length,
 					this.conversationRenderLimit + PRIMARY_LIST_BATCH_SIZE
 				)
+				await this.hydrateVisibleConversationAvatars()
 			},
-			showMoreCharacters() {
+			async showMoreCharacters() {
 				this.characterRenderLimit = Math.min(
 					this.filteredCharacters.length,
 					this.characterRenderLimit + PRIMARY_LIST_BATCH_SIZE
 				)
+				await this.hydrateVisibleCharacterAvatars()
 			},
 			openCharacterMaker() {
 				const plusApi = typeof plus !== 'undefined' ? plus : null
@@ -1166,6 +1331,7 @@
 				this.customCharacterAvatar = null
 				this.characterDetailEditing = false
 				openCharacterDetailsState(this.ui, character.id)
+				this.hydrateCharacterAvatars([character]).catch(() => {})
 			},
 			openCustomCharacterEditor() {
 				if (this.characterImportBusy || this.characterSaveBusy) return
@@ -1359,7 +1525,10 @@
 				const id = String(assetId || '').trim()
 				if (!id) return Promise.resolve('')
 				if (this.characterAvatarSources.has(id)) {
-					return Promise.resolve(this.characterAvatarSources.get(id) || '')
+					const source = this.characterAvatarSources.get(id) || ''
+					this.characterAvatarSources.delete(id)
+					this.characterAvatarSources.set(id, source)
+					return Promise.resolve(source)
 				}
 				if (this.characterAvatarLoadPromises.has(id)) {
 					return this.characterAvatarLoadPromises.get(id)
@@ -1368,7 +1537,7 @@
 				const promise = Promise.resolve(repository?.getCharacterAsset?.(id))
 					.then(asset => {
 						const source = asset?.dataUrl || asset?.sourceUrl || ''
-						if (this.services?.repository === repository) this.characterAvatarSources.set(id, source)
+						if (this.services?.repository === repository) this.rememberCharacterAvatarSource(id, source)
 						return source
 					})
 					.finally(() => {
@@ -1379,21 +1548,87 @@
 				this.characterAvatarLoadPromises.set(id, promise)
 				return promise
 			},
+			rememberCharacterAvatarSource(assetId, source) {
+				const id = String(assetId || '').trim()
+				if (!id) return
+				this.characterAvatarSources.delete(id)
+				this.characterAvatarSources.set(id, String(source || ''))
+				while (this.characterAvatarSources.size > MAX_AVATAR_CACHE_ITEMS) {
+					this.characterAvatarSources.delete(this.characterAvatarSources.keys().next().value)
+				}
+			},
+			async loadCharacterAvatarSourceMap(assetIds) {
+				const ids = [...new Set(assetIds.map(value => String(value || '').trim()).filter(Boolean))]
+				const missingIds = ids.filter(id => !this.characterAvatarSources.has(id))
+				const repository = this.services?.repository
+				if (missingIds.length) {
+					const assets = typeof repository?.getCharacterAssets === 'function'
+						? await repository.getCharacterAssets(missingIds)
+						: await Promise.all(missingIds.map(id => repository?.getCharacterAsset?.(id)))
+					for (const asset of assets.filter(Boolean)) {
+						this.rememberCharacterAvatarSource(asset.id, asset.dataUrl || asset.sourceUrl || '')
+					}
+					for (const id of missingIds) {
+						if (!this.characterAvatarSources.has(id)) this.rememberCharacterAvatarSource(id, '')
+					}
+				}
+				return new Map(ids.map(id => [id, this.characterAvatarSources.get(id) || '']))
+			},
+			async hydrateCharacterAvatars(characters) {
+				const targets = Array.isArray(characters) ? characters : []
+				const sources = await this.loadCharacterAvatarSourceMap(targets.map(character => character?.avatarAssetId))
+				if (!sources.size) return
+				this.characterItems = this.characterItems.map(character => {
+					if (!sources.has(character.avatarAssetId)) return character
+					return markRaw({ ...character, avatarDataUrl: sources.get(character.avatarAssetId) || '' })
+				})
+			},
+			hydrateVisibleCharacterAvatars() {
+				return this.hydrateCharacterAvatars(this.renderedCharacters)
+			},
+			async hydrateVisibleConversationAvatars() {
+				const visibleIds = new Set(this.renderedConversations.map(conversation => conversation.id))
+				const targets = this.conversationItems.filter(conversation => visibleIds.has(conversation.id))
+				const assetIds = targets.flatMap(conversation => [
+					conversation.characterAvatarAssetId,
+					...(Array.isArray(conversation.participants)
+						? conversation.participants.map(participant => participant.avatarAssetId)
+						: [])
+				])
+				const sources = await this.loadCharacterAvatarSourceMap(assetIds)
+				if (!sources.size) return
+				this.conversationItems = this.conversationItems.map(conversation => {
+					if (!visibleIds.has(conversation.id)) return conversation
+					const participants = Array.isArray(conversation.participants)
+						? conversation.participants.map(participant => ({
+							...participant,
+							avatarDataUrl: participant.avatarAssetId
+								? (sources.get(participant.avatarAssetId) || participant.avatarDataUrl || '')
+								: participant.avatarDataUrl
+						}))
+						: conversation.participants
+					return markRaw({
+						...conversation,
+						participants,
+						characterAvatarDataUrl: sources.get(conversation.characterAvatarAssetId) || conversation.characterAvatarDataUrl || ''
+					})
+				})
+			},
 			async loadCharacters() {
 				if (this.characterLoadPromise) return this.characterLoadPromise
 				const repository = this.services?.repository
 				if (!repository?.listCharacters) return []
 				const revision = this.dataLoadRevision
-				this.characterAvatarSources.clear()
 				const promise = (async () => {
 					const characters = await repository.listCharacters()
-					const items = await Promise.all(characters.map(async character => markRaw({
+					const items = characters.map(character => markRaw({
 						...character,
-						avatarDataUrl: await this.loadCharacterAvatarSource(character.avatarAssetId)
-					})))
+						avatarDataUrl: this.characterAvatarSources.get(character.avatarAssetId) || ''
+					}))
 					if (this.services?.repository === repository && this.dataLoadRevision === revision) {
 						this.characterItems = items
 						this.characterRenderLimit = PRIMARY_LIST_BATCH_SIZE
+						await this.hydrateVisibleCharacterAvatars()
 					}
 					return items
 				})()
@@ -1827,6 +2062,7 @@
 					if (this.cloudSession && this.autoBackupEnabled) this.cloudServices?.syncCoordinator?.startForeground().catch(() => {})
 				} catch (error) {
 					this.initializationError = error?.message || '未知初始化错误'
+					if (this.appLockGate === 'checking') this.appLockGate = 'unlocked'
 					this.handleError(error, '初始化失败')
 				} finally {
 					this.initializing = false
@@ -1835,9 +2071,18 @@
 			async loadWorkspaceSettings() {
 				await this.loadProfileAvatar()
 				const app = await this.services.repository.getSetting('app', { appLockEnabled: false })
-				this.ui.appLockEnabled = Boolean(app.appLockEnabled)
+				const appLock = normalizeAppLockSetting(app)
+				this.ui.appLockEnabled = appLock.enabled
+				this.appLockRecord = appLock.record
+				this.appLockGate = appLock.enabled ? 'locked' : 'unlocked'
+				this.appLockPin = ''
+				this.appLockPinConfirmation = ''
+				this.appLockUnlockPin = ''
+				this.appLockError = ''
 				this.replyNotificationsEnabled = Boolean(await this.services.repository.getSetting(REPLY_NOTIFICATION_SETTING_KEY, true))
 				this.streamingEnabled = await readStreamingEnabled(this.services.repository)
+				this.streamingSegmentedDisplay = await readStreamingSegmentedDisplayEnabled(this.services.repository)
+				this.characterStatusEnabled = await readCharacterStatusEnabled(this.services.repository)
 				this.nsfwEnabled = Boolean(await this.services.repository.getSetting(NSFW_SETTING_KEY, false))
 				const prompt = await this.services.repository.getSetting('systemPrompt', { enabled: false, encryptedValue: null })
 				this.systemPromptEnabled = Boolean(prompt.enabled)
@@ -1885,6 +2130,7 @@
 				clearTimeout(this.streamingRenderTimer)
 				this.streamingRenderTimer = null
 				this.pendingStreamingMessage = null
+				this.clearSegmentedReplyTimers()
 				this.ui.activeConversationId = null
 				this.ui.groupEditorConversationId = null
 				this.ui.activeCharacterId = null
@@ -1892,6 +2138,7 @@
 				this.messageItems = []
 				this.messageHistoryLoading = false
 				this.messageHistoryHasMore = false
+				this.messageHistoryTrimmed = false
 				this.conversationItems = []
 				this.characterItems = []
 				this.worldBookItems = []
@@ -1961,9 +2208,9 @@
 					const latestByConversation = new Map(
 						latestMessages.map(message => [message.conversationId, message])
 					)
-					const items = await Promise.all(conversations.map(async conversation => {
+					const items = conversations.map(conversation => {
 						const groupParticipants = isGroupConversation(conversation)
-							? await Promise.all(normalizeGroupParticipants(conversation.participants).map(async participant => {
+							? normalizeGroupParticipants(conversation.participants).map(participant => {
 								if (groupParticipantKind(participant) === 'provider') {
 									const provider = this.providerItems.find(item => item.id === participant.providerProfileId)
 									return {
@@ -1975,19 +2222,20 @@
 								}
 								return {
 									...participant,
-									avatarDataUrl: await this.loadCharacterAvatarSource(participant.avatarAssetId)
+									avatarDataUrl: this.characterAvatarSources.get(participant.avatarAssetId) || ''
 								}
-							}))
+							})
 							: []
 						return markRaw({
 							...summarizeConversation(conversation, latestByConversation.get(conversation.id)),
 							participants: groupParticipants.length ? groupParticipants : conversation.participants,
-							characterAvatarDataUrl: await this.loadCharacterAvatarSource(conversation.characterAvatarAssetId)
+							characterAvatarDataUrl: this.characterAvatarSources.get(conversation.characterAvatarAssetId) || ''
 						})
-					}))
+					})
 					if (this.services?.repository === repository && this.dataLoadRevision === revision) {
 						this.conversationItems = items
 						this.conversationRenderLimit = PRIMARY_LIST_BATCH_SIZE
+						await this.hydrateVisibleConversationAvatars()
 					}
 					return items
 				})()
@@ -2018,20 +2266,7 @@
 			},
 			async hydrateChatMessages(messages) {
 				const repository = this.services?.repository
-				const attachmentIds = [...new Set(messages.flatMap(message => (
-					Array.isArray(message?.attachmentIds) ? message.attachmentIds : []
-				)))]
-				const avatarIds = [...new Set(messages.map(message => message?.speakerAvatarAssetId).filter(Boolean))]
-				const [attachments, avatars] = await Promise.all([
-					Promise.all(attachmentIds.map(id => repository?.getAttachment?.(id))),
-					Promise.all(avatarIds.map(id => repository?.getCharacterAsset?.(id)))
-				])
-				const attachmentsById = new Map(
-					attachments.filter(attachment => attachment && !attachment.deletedAt).map(attachment => [attachment.id, attachment])
-				)
-				const avatarsById = new Map(
-					avatars.map((avatar, index) => avatar ? [avatarIds[index], avatar] : null).filter(Boolean)
-				)
+				const { attachmentsById, avatarsById } = await loadChatMessageResources(repository, messages)
 				return messages.map(message => {
 					const speakerAvatar = avatarsById.get(message.speakerAvatarAssetId)
 					return this.decorateChatMessage({
@@ -2053,24 +2288,29 @@
 				if (message?.role !== 'assistant') {
 					return { ...presentation, displayContent: rawContent, assistantStatus: null, statusParsingStarted: false }
 				}
+				const decorateAssistantContent = (displayContent, assistantStatus, statusParsingStarted) => ({
+					...presentation,
+					displayContent,
+					displaySegments: message.responseDisplayMode === 'segmented'
+						? splitAssistantReplySegments(displayContent, { includeTrailing: message.status !== 'generating' })
+						: (displayContent ? [displayContent] : []),
+					assistantStatus,
+					statusParsingStarted
+				})
 				const statusParsingStarted = Boolean(message.statusParsingStarted) ||
 					/<\s*sumo_monitor\b/i.test(rawContent.slice(-4096))
 				if (message.status === 'generating' && !statusParsingStarted) {
-					return { ...presentation, displayContent: rawContent, assistantStatus: null, statusParsingStarted: false }
+					return decorateAssistantContent(rawContent, null, false)
 				}
 				const extracted = extractAssistantStatus(rawContent, { hideIncomplete: message.status === 'generating' })
-				return {
-					...presentation,
-					displayContent: extracted.content,
-					assistantStatus: extracted.status,
-					statusParsingStarted
-				}
+				return decorateAssistantContent(extracted.content, extracted.status, statusParsingStarted)
 			},
 			async openChat(conversationId) {
 				this.homeMenuOpen = false
 				clearTimeout(this.streamingRenderTimer)
 				this.streamingRenderTimer = null
 				this.pendingStreamingMessage = null
+				this.clearSegmentedReplyTimers()
 				openConversation(this.ui, conversationId)
 				if (isGroupConversation(this.activeConversation)) setGenerationMode(this.ui, 'chat')
 				this.services?.replyNotificationService?.setActiveConversationId(conversationId)
@@ -2078,6 +2318,7 @@
 				this.assistantStatusOpen = false
 				this.messageItems = []
 				this.messageHistoryHasMore = false
+				this.messageHistoryTrimmed = false
 				this.messageHistoryLoading = true
 				const loadRevision = ++this.chatLoadRevision
 				try {
@@ -2117,11 +2358,9 @@
 					const page = await this.readChatMessagePage(conversationId, Number(firstMessage.sequence) || 0)
 					const earlier = await this.hydrateChatMessages(page.messages)
 					if (this.ui.activeConversationId !== conversationId) return
-					const existingIds = new Set(this.messageItems.map(message => message.id))
-					this.messageItems = [
-						...earlier.filter(message => !existingIds.has(message.id)),
-						...this.messageItems
-					]
+					const merged = mergeEarlierMessageWindow(this.messageItems, earlier, MAX_RENDERED_CHAT_MESSAGES)
+					this.messageItems = merged.messages
+					this.messageHistoryTrimmed = this.messageHistoryTrimmed || merged.trimmedNewer
 					this.messageHistoryHasMore = page.hasMore
 					this.chatScrollRevision += 1
 					this.chatScrollIntoView = ''
@@ -2135,6 +2374,10 @@
 					if (this.ui.activeConversationId === conversationId) this.messageHistoryLoading = false
 				}
 			},
+			reloadLatestMessages() {
+				const conversationId = this.ui.activeConversationId
+				return conversationId ? this.openChat(conversationId) : Promise.resolve()
+			},
 			messageAnchorId(message) {
 				const sequence = Number(message?.sequence) || 0
 				const id = String(message?.id || '').replace(/[^A-Za-z0-9_-]/g, '-').slice(-32)
@@ -2145,6 +2388,7 @@
 				clearTimeout(this.streamingRenderTimer)
 				this.streamingRenderTimer = null
 				this.pendingStreamingMessage = null
+				this.clearSegmentedReplyTimers()
 				this.messageHistoryLoading = false
 				this.closeComposerMenus()
 				this.assistantStatusOpen = false
@@ -2243,7 +2487,31 @@
 			closeCloudModal() {
 				this.cloudOpen = false
 			},
-			showAboutApp() { this.showToast(`织语 · 版本 1.0.1 · ${this.aboutLabel}`) },
+			openAutoSyncSettingsPage() {
+				this.closeCloudModal()
+				this.openAutoSyncSettings(this.ui)
+			},
+			showAboutApp() { this.showToast(`织语 · 版本 ${APP_VERSION} · ${this.aboutLabel}`) },
+			openExternalUrl(url, errorLabel = '页面') {
+				const plusApi = typeof plus !== 'undefined' ? plus : null
+				if (typeof plusApi?.runtime?.openURL === 'function') {
+					try {
+						plusApi.runtime.openURL(url, () => this.showToast(`无法打开${errorLabel}`))
+					} catch (error) {
+						this.handleError(error, `${errorLabel}打开失败`)
+					}
+					return
+				}
+				const browserWindow = getBrowserWindow()
+				if (typeof browserWindow?.open === 'function') {
+					const opened = browserWindow.open(url, '_blank', 'noopener,noreferrer')
+					if (!opened && browserWindow.location) browserWindow.location.href = url
+					return
+				}
+				this.showToast(`当前环境无法打开${errorLabel}`)
+			},
+			openReleasePage() { this.openExternalUrl(RELEASES_URL, '发布页面') },
+			openFeedbackPage() { this.openExternalUrl(FEEDBACK_URL, '反馈页面') },
 			openAndroidDiagnostics() {
 				if (typeof uni === 'undefined' || typeof uni.navigateTo !== 'function') {
 					if (typeof window !== 'undefined') {
@@ -2369,6 +2637,61 @@
 				}
 				this.settleAppDialog(true)
 			},
+			clearSegmentedReplyTimers() {
+				for (const timer of this.segmentedReplyTimers.values()) clearTimeout(timer)
+				this.segmentedReplyTimers.clear()
+			},
+			assistantVisibleSegments(message) {
+				const segments = Array.isArray(message?.displaySegments) ? message.displaySegments : []
+				if (message?.responseDisplayMode !== 'segmented') return segments
+				const visibleCount = Number(message.visibleSegmentCount)
+				if (!Number.isFinite(visibleCount)) return segments
+				return segments.slice(0, Math.max(0, Math.min(segments.length, visibleCount)))
+			},
+			assistantHasPendingSegments(message) {
+				if (message?.responseDisplayMode !== 'segmented') return false
+				return this.assistantVisibleSegments(message).length <
+					(Array.isArray(message.displaySegments) ? message.displaySegments.length : 0)
+			},
+			assistantShowsTyping(message) {
+				return message?.responseDisplayMode === 'segmented' &&
+					(message.status === 'generating' || this.assistantHasPendingSegments(message))
+			},
+			isLastAssistantSegment(message, segmentIndex) {
+				return segmentIndex === this.assistantVisibleSegments(message).length - 1
+			},
+			scheduleSegmentedReplyReveal(messageId) {
+				if (!messageId || this.segmentedReplyTimers.has(messageId)) return
+				const message = this.messageItems.find(item => item.id === messageId)
+				if (!message || message.responseDisplayMode !== 'segmented') return
+				const segments = Array.isArray(message.displaySegments) ? message.displaySegments : []
+				const visibleCount = Number.isFinite(Number(message.visibleSegmentCount))
+					? Math.max(0, Number(message.visibleSegmentCount))
+					: segments.length
+				if (visibleCount >= segments.length) return
+				const previousSegment = segments[Math.max(0, visibleCount - 1)] || ''
+				const delay = visibleCount === 0
+					? SEGMENT_REVEAL_MIN_DELAY
+					: Math.min(SEGMENT_REVEAL_MAX_DELAY, Math.max(SEGMENT_REVEAL_MIN_DELAY, previousSegment.length * 8))
+				const timer = setTimeout(() => {
+					this.segmentedReplyTimers.delete(messageId)
+					const index = this.messageItems.findIndex(item => item.id === messageId)
+					if (index < 0) return
+					const current = this.messageItems[index]
+					const currentSegments = Array.isArray(current.displaySegments) ? current.displaySegments : []
+					const currentVisibleCount = Number.isFinite(Number(current.visibleSegmentCount))
+						? Math.max(0, Number(current.visibleSegmentCount))
+						: currentSegments.length
+					if (currentVisibleCount >= currentSegments.length) return
+					this.messageItems.splice(index, 1, {
+						...current,
+						visibleSegmentCount: currentVisibleCount + 1
+					})
+					this.scrollChatToBottom()
+					this.scheduleSegmentedReplyReveal(messageId)
+				}, delay)
+				this.segmentedReplyTimers.set(messageId, timer)
+			},
 			async manageConversation(conversation) {
 				if (!conversation) return
 				try {
@@ -2398,7 +2721,21 @@
 				if (message?.conversationId && message.conversationId !== this.ui.activeConversationId) return
 				const index = this.messageItems.findIndex((item) => item.id === message.id)
 				const current = index === -1 ? null : this.messageItems[index]
-				const next = this.decorateChatMessage({ ...current, ...message, attachments: message.attachments ?? current?.attachments ?? [] })
+				let next = this.decorateChatMessage({ ...current, ...message, attachments: message.attachments ?? current?.attachments ?? [] })
+				const queueSegmentedReply = next.responseDisplayMode === 'segmented' && (
+					next.status === 'generating' ||
+					current?.status === 'generating' ||
+					Number.isFinite(Number(current?.visibleSegmentCount))
+				)
+				if (queueSegmentedReply) {
+					const currentVisibleCount = Number.isFinite(Number(current?.visibleSegmentCount))
+						? Number(current.visibleSegmentCount)
+						: 0
+					next = {
+						...next,
+						visibleSegmentCount: Math.max(0, Math.min(next.displaySegments.length, currentVisibleCount))
+					}
+				}
 				if (index === -1) {
 					this.animatedMessageIds.push(next.id)
 					const lastSequence = Number(this.messageItems[this.messageItems.length - 1]?.sequence) || 0
@@ -2411,9 +2748,14 @@
 				} else {
 					this.messageItems.splice(index, 1, next)
 				}
+				if (this.messageItems.length > MAX_RENDERED_CHAT_MESSAGES) {
+					this.messageItems = this.messageItems.slice(-MAX_RENDERED_CHAT_MESSAGES)
+					this.messageHistoryHasMore = true
+				}
 				if (next.status === 'completed' && next.assistantStatus && next.speakerCharacterId) {
 					this.groupStatusSpeakerKey = groupMessageSpeakerKey(next)
 				}
+				if (queueSegmentedReply) this.scheduleSegmentedReplyReveal(next.id)
 				this.scrollChatToBottom()
 			},
 			upsertMessage(message) {
@@ -2443,6 +2785,7 @@
 			},
 			async sendMessage() {
 				if (!this.canSend) return
+				if (this.messageHistoryTrimmed) await this.reloadLatestMessages()
 				this.closeComposerMenus()
 				const content = this.draftMessage
 				const pendingAttachments = this.pendingAttachments
@@ -2516,6 +2859,32 @@
 				}
 			},
 			async copyMessage(content) { try { await this.writeClipboard(content); this.showToast('已复制') } catch { this.showToast('复制失败') } },
+			async setMessageFeedback(message, feedback) {
+				if (!message?.id || !['positive', 'negative'].includes(feedback)) return
+				try {
+					const stored = await this.services?.repository?.getMessage?.(message.id)
+					if (!stored) throw new Error('消息不存在')
+					const nextFeedback = stored.feedback === feedback ? null : feedback
+					const timestamp = new Date().toISOString()
+					const saved = {
+						...stored,
+						feedback: nextFeedback,
+						feedbackUpdatedAt: timestamp,
+						updatedAt: timestamp
+					}
+					await this.services.repository.saveMessage(saved)
+					const index = this.messageItems.findIndex(item => item.id === message.id)
+					if (index >= 0) {
+						this.messageItems.splice(index, 1, this.decorateChatMessage({
+							...this.messageItems[index],
+							...saved
+						}))
+					}
+					this.showToast(nextFeedback ? '反馈已记录' : '反馈已取消')
+				} catch (error) {
+					this.handleError(error, '反馈保存失败')
+				}
+			},
 			openProviderAvatarMenu() {
 				if (!this.ready || this.providerAvatarBusy) return
 				this.providerAvatarMenuOpen = true
@@ -2722,7 +3091,68 @@
 				} catch (error) { this.handleError(error, '系统提示词保存失败') }
 				finally { this.systemPromptSaving = false }
 			},
-			async toggleLock() { toggleAppLock(this.ui); await this.services.repository.setSetting('app', { appLockEnabled: this.ui.appLockEnabled }) },
+			async toggleLock() {
+				if (this.appLockBusy || !this.services?.repository) return
+				this.appLockError = ''
+				this.appLockBusy = true
+				try {
+					const currentApp = await this.services.repository.getSetting('app', {})
+					if (!this.ui.appLockEnabled) {
+						if (this.appLockPin !== this.appLockPinConfirmation) throw new Error('两次输入的 PIN 不一致')
+						const record = await createAppLockRecord(this.appLockPin)
+						await this.services.repository.setSetting('app', {
+							...currentApp,
+							appLockEnabled: true,
+							appLock: record
+						})
+						this.appLockRecord = record
+						this.ui.appLockEnabled = true
+						this.appLockPin = ''
+						this.appLockPinConfirmation = ''
+						this.showToast('应用锁已开启')
+						return
+					}
+					if (!await verifyAppLockPin(this.appLockPin, this.appLockRecord)) throw new Error('当前 PIN 不正确')
+					await this.services.repository.setSetting('app', {
+						...currentApp,
+						appLockEnabled: false,
+						appLock: null
+					})
+					this.appLockRecord = null
+					this.ui.appLockEnabled = false
+					this.appLockPin = ''
+					this.lockOnNextShow = false
+					this.showToast('应用锁已关闭')
+				} catch (error) {
+					this.appLockError = error?.message || '应用锁设置失败'
+				} finally {
+					this.appLockBusy = false
+				}
+			},
+			lockAppNow() {
+				if (!this.ui.appLockEnabled || !this.appLockRecord) return
+				this.appLockUnlockPin = ''
+				this.appLockError = ''
+				this.appLockGate = 'locked'
+			},
+			async unlockApp() {
+				if (this.appLockBusy || this.appLockGate !== 'locked') return
+				this.appLockBusy = true
+				this.appLockError = ''
+				try {
+					if (!await verifyAppLockPin(this.appLockUnlockPin, this.appLockRecord)) {
+						throw new Error('PIN 不正确')
+					}
+					this.appLockUnlockPin = ''
+					this.appLockGate = 'unlocked'
+					this.lockOnNextShow = false
+				} catch (error) {
+					this.appLockError = error?.message || '解锁失败'
+					this.appLockUnlockPin = ''
+				} finally {
+					this.appLockBusy = false
+				}
+			},
 			async toggleStreaming() {
 				if (this.streamingSaving || !this.services?.repository) return
 				const previous = this.streamingEnabled
@@ -2736,6 +3166,40 @@
 					this.handleError(error, '流式传输设置保存失败')
 				} finally {
 					this.streamingSaving = false
+				}
+			},
+			async toggleStreamingSegmentedDisplay() {
+				if (!this.streamingEnabled || this.streamingSegmentedSaving || !this.services?.repository) return
+				const previous = this.streamingSegmentedDisplay
+				this.streamingSegmentedDisplay = !previous
+				this.streamingSegmentedSaving = true
+				try {
+					await this.services.repository.setSetting(
+						STREAMING_SEGMENTED_DISPLAY_SETTING_KEY,
+						this.streamingSegmentedDisplay
+					)
+					this.showToast(this.streamingSegmentedDisplay ? '分段显示已开启' : '分段显示已关闭')
+				} catch (error) {
+					this.streamingSegmentedDisplay = previous
+					this.handleError(error, '分段显示设置保存失败')
+				} finally {
+					this.streamingSegmentedSaving = false
+				}
+			},
+			async toggleCharacterStatus() {
+				if (this.characterStatusSaving || !this.services?.repository) return
+				const previous = this.characterStatusEnabled
+				this.characterStatusEnabled = !previous
+				this.characterStatusSaving = true
+				if (!this.characterStatusEnabled) this.assistantStatusOpen = false
+				try {
+					await this.services.repository.setSetting(CHARACTER_STATUS_SETTING_KEY, this.characterStatusEnabled)
+					this.showToast(this.characterStatusEnabled ? '角色状态栏已开启' : '角色状态栏已关闭')
+				} catch (error) {
+					this.characterStatusEnabled = previous
+					this.handleError(error, '角色状态栏设置保存失败')
+				} finally {
+					this.characterStatusSaving = false
 				}
 			},
 			async toggleNsfw() {
@@ -2783,14 +3247,20 @@
 					this.showToast('请在 Android App 安装包中使用回复通知')
 					return
 				}
-				if (this.replyNotificationsEnabled && !this.replyNotificationAuthorized) {
-					await notificationService.openSettings()
-					return
-				}
 				this.replyNotificationsEnabled = !this.replyNotificationsEnabled
 				this.replyNotificationAuthorized = Boolean(await notificationService.setEnabled(this.replyNotificationsEnabled))
 				await this.services.repository.setSetting(REPLY_NOTIFICATION_SETTING_KEY, this.replyNotificationsEnabled)
 				if (this.replyNotificationsEnabled && !this.replyNotificationAuthorized) this.showToast('请在系统设置中允许通知')
+			},
+			async openReplyNotificationSystemSettings() {
+				try {
+					await this.services?.replyNotificationService?.openSettings?.()
+					this.replyNotificationAuthorized = Boolean(
+						await this.services?.replyNotificationService?.refreshPermission?.()
+					)
+				} catch (error) {
+					this.handleError(error, '打开通知设置失败')
+				}
 			},
 			showLocalDataInfo() { this.showToast(`${this.conversationItems.length} 个会话，${this.providerItems.length} 个接口`) },
 			openBackupMenu() {
@@ -3081,8 +3551,7 @@
 				this.backupBusy = true
 				this.errorMessage = ''
 				try {
-					const data = await this.services.backupService.exportData()
-					const content = JSON.stringify(data, null, 2)
+					const { content } = await this.services.backupService.exportText()
 					const fileName = createJsonExportFileName()
 					const plusApi = typeof plus !== 'undefined' ? plus : null
 					if (plusApi?.io?.requestFileSystem) {
@@ -3115,7 +3584,7 @@
 				try {
 					const cloud = await this.prepareCloudServices()
 					if (!this.cloudSession?.access_token) throw new Error('请先在“账号与云端”登录')
-					const data = await this.services.backupService.exportData()
+					const { data } = await this.services.backupService.exportText()
 					const uploaded = await cloud.apiClient.uploadJsonExport(data)
 					this.cloudExportUrl = uploaded.download_url
 					this.showToast('云端 JSON 已保存')
@@ -4035,6 +4504,66 @@
 		opacity: 0.6;
 	}
 
+	.chat-loading-state {
+		display: flex;
+		align-items: flex-start;
+		gap: 10px;
+		width: min(78%, 340px);
+		padding: 18px 4px;
+	}
+
+	.chat-loading-avatar {
+		width: 38px;
+		height: 38px;
+		border-radius: 50%;
+		background: rgba(255, 255, 255, 0.66);
+		flex: 0 0 auto;
+		animation: chat-loading-pulse 1.2s ease-in-out infinite;
+	}
+
+	.chat-loading-lines {
+		display: flex;
+		width: 100%;
+		padding-top: 4px;
+		flex-direction: column;
+		gap: 7px;
+	}
+
+	.chat-loading-lines view {
+		height: 9px;
+		border-radius: 4px;
+		background: rgba(255, 255, 255, 0.68);
+		animation: chat-loading-pulse 1.2s ease-in-out infinite;
+	}
+
+	.chat-loading-lines view:nth-child(2) { width: 82%; }
+	.chat-loading-lines view:nth-child(3) { width: 58%; }
+
+	.chat-latest-loader {
+		display: flex;
+		justify-content: center;
+		padding: 10px 0 4px;
+	}
+
+	.chat-latest-loader button {
+		display: flex;
+		align-items: center;
+		gap: 5px;
+		height: 32px;
+		padding: 0 13px;
+		border: 1px solid rgba(43, 122, 142, 0.22);
+		border-radius: 16px;
+		background: rgba(245, 253, 252, 0.9);
+		color: #277c7b;
+		font-size: 11px;
+		font-weight: 680;
+	}
+
+	@keyframes chat-loading-pulse {
+		0%, 100% { opacity: 0.48; }
+		50% { opacity: 0.92; }
+	}
+
 	.date-divider {
 		display: flex;
 		align-items: center;
@@ -4362,6 +4891,21 @@
 		line-height: 1.52;
 	}
 
+	.assistant-segment-bubble {
+		animation: assistant-segment-pop-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+	}
+
+	.assistant-typing-bubble {
+		min-width: 126px;
+		padding-top: 9px;
+		padding-bottom: 9px;
+	}
+
+	.assistant-typing-bubble .generation-status {
+		min-height: 24px;
+		margin-top: 0;
+	}
+
 	.assistant-name {
 		display: block;
 		max-width: 100%;
@@ -4399,6 +4943,14 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 4px;
+	}
+
+	.message-actions .feedback-positive.active {
+		color: #278c72;
+	}
+
+	.message-actions .feedback-negative.active {
+		color: #cf4859;
 	}
 
 	.assistant-image-footer {
@@ -6103,8 +6655,109 @@
 		--settings-detail-accent-soft: #fff0f2;
 	}
 
+	.streaming-settings-details {
+		--settings-detail-accent: #16a7b1;
+		--settings-detail-accent-soft: #eafafb;
+	}
+
+	.streaming-toggle.enabled {
+		background: #16a7b1;
+	}
+
+	.character-status-settings-details {
+		--settings-detail-accent: #af45cf;
+		--settings-detail-accent-soft: #faefff;
+	}
+
+	.character-status-toggle.enabled {
+		background: #af45cf;
+	}
+
 	.nsfw-toggle.enabled {
 		background: #df4657;
+	}
+
+	.app-lock-settings-details {
+		--settings-detail-accent: #2f8d73;
+		--settings-detail-accent-soft: #eaf8f2;
+	}
+
+	.reply-notification-settings-details {
+		--settings-detail-accent: #397bc6;
+		--settings-detail-accent-soft: #edf5ff;
+	}
+
+	.auto-sync-settings-details {
+		--settings-detail-accent: #228c9c;
+		--settings-detail-accent-soft: #e9f8fa;
+	}
+
+	.app-lock-toggle.enabled { background: #2f8d73; }
+	.reply-notification-toggle.enabled { background: #397bc6; }
+	.auto-sync-toggle.enabled { background: #228c9c; }
+
+	.security-pin-card {
+		display: flex;
+		padding: 12px;
+		flex-direction: column;
+		gap: 11px;
+	}
+
+	.security-pin-field {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+
+	.security-pin-field > text {
+		font-size: 12px;
+		font-weight: 650;
+		color: #5e6269;
+	}
+
+	.security-pin-field input {
+		box-sizing: border-box;
+		width: 100%;
+		height: 44px;
+		padding: 0 12px;
+		border: 1px solid #d6d9dd;
+		border-radius: 7px;
+		background: #f8f9fa;
+		font-size: 16px;
+		color: #26282d;
+		letter-spacing: 0;
+	}
+
+	.security-pin-field input:focus {
+		border-color: #2f8d73;
+		background: #fff;
+	}
+
+	.security-pin-error,
+	.app-lock-gate-error {
+		font-size: 12px;
+		line-height: 18px;
+		color: #c33e4e;
+	}
+
+	.settings-secondary-command {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 7px;
+		width: 100%;
+		height: 46px;
+		margin-top: 14px;
+		border: 1px solid #d9dcdf;
+		border-radius: 8px;
+		background: #fff;
+		font-size: 13px;
+		font-weight: 680;
+		color: #4a515a;
+	}
+
+	.settings-secondary-command:disabled {
+		opacity: 0.5;
 	}
 
 	.cloud-modal-backdrop {
@@ -6246,9 +6899,11 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 12px;
+		width: 100%;
 		margin-top: 8px;
 		padding-top: 10px;
 		border-top: 1px solid var(--border);
+		text-align: left;
 	}
 
 	.cloud-auto-row > view {
@@ -6263,6 +6918,96 @@
 		font-size: 10px;
 		font-weight: 400;
 		color: var(--muted);
+	}
+
+	.cloud-auto-row > .app-icon {
+		color: #8b96a5;
+		flex: 0 0 auto;
+	}
+
+	.app-lock-gate {
+		position: absolute;
+		inset: 0;
+		z-index: 200;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
+		background: #f4f6f7;
+	}
+
+	.app-lock-gate-content {
+		display: flex;
+		align-items: center;
+		width: min(320px, 100%);
+		flex-direction: column;
+	}
+
+	.app-lock-gate-logo {
+		display: block;
+		width: 78px;
+		height: 78px;
+		overflow: hidden;
+		border-radius: 18px;
+		box-shadow: 0 12px 28px rgba(29, 38, 47, 0.16);
+	}
+
+	.app-lock-gate-title {
+		margin-top: 17px;
+		font-size: 22px;
+		font-weight: 750;
+		line-height: 29px;
+		color: #20252b;
+	}
+
+	.app-lock-gate-copy {
+		margin-top: 5px;
+		font-size: 13px;
+		line-height: 20px;
+		color: #7b858f;
+	}
+
+	.app-lock-gate-spinner {
+		margin-top: 20px;
+		color: #2f8d73;
+	}
+
+	.app-lock-gate-content > input {
+		box-sizing: border-box;
+		width: 100%;
+		height: 48px;
+		margin-top: 20px;
+		padding: 0 14px;
+		border: 1px solid #ccd3d8;
+		border-radius: 8px;
+		background: #fff;
+		font-size: 17px;
+		color: #20252b;
+		text-align: center;
+		letter-spacing: 0;
+	}
+
+	.app-lock-gate-error {
+		margin-top: 8px;
+	}
+
+	.app-lock-gate-submit {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 7px;
+		width: 100%;
+		height: 47px;
+		margin-top: 13px;
+		border-radius: 8px;
+		background: #2f8d73;
+		font-size: 14px;
+		font-weight: 700;
+		color: #fff;
+	}
+
+	.app-lock-gate-submit:disabled {
+		opacity: 0.48;
 	}
 
 	.danger-button {
@@ -7835,6 +8580,11 @@
 		100% { opacity: 1; transform: translate(0, 0) scale(1); }
 	}
 
+	@keyframes assistant-segment-pop-in {
+		from { opacity: 0; transform: translateY(6px) scale(0.98); }
+		to { opacity: 1; transform: translateY(0) scale(1); }
+	}
+
 	@keyframes assistant-status-backdrop-in {
 		from { background-color: rgba(20, 23, 28, 0); }
 		to { background-color: rgba(20, 23, 28, 0.18); }
@@ -7876,6 +8626,7 @@
 		.composer,
 		.bottom-nav,
 		.message-pop,
+		.assistant-segment-bubble,
 		.assistant-status-backdrop,
 		.assistant-status-modal {
 			animation: none;

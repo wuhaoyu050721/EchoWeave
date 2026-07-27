@@ -30,7 +30,7 @@ import {
 import { WorkspaceServiceManager } from '../workspace/workspace-service-manager.js'
 import { createChatInstructionResolver, createUserNameResolver } from './create-character-instructions.js'
 import { getRuntimeDiagnosticLogStore } from '../core/runtime-diagnostic-log.js'
-import { readStreamingEnabled } from '../core/streaming-setting.js'
+import { readStreamingEnabled, readStreamingSegmentedDisplayEnabled } from '../core/streaming-setting.js'
 
 function registeredNativeApis() {
   return globalThis.__aiChatNativeApis || null
@@ -227,6 +227,7 @@ export async function createAppServices({
     getSystemPrompt,
     getUserName,
     getStreamingEnabled: () => readStreamingEnabled(repository),
+    getStreamingSegmentedDisplayEnabled: () => readStreamingSegmentedDisplayEnabled(repository),
     replyNotificationService,
     diagnosticLogStore
   })

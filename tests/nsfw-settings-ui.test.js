@@ -21,6 +21,6 @@ test('settings exposes a persistent NSFW second-level toggle that defaults off',
 test('chat display filters private status through the NSFW setting only', () => {
   assert.match(source, /assistantStatusSectionsForDisplay\(this\.latestAssistantStatus, \{ showPrivate: this\.nsfwEnabled \}\)/)
   assert.match(source, /v-for="section in assistantStatusSections"/)
-  assert.match(source, /displayContent: extracted\.content/)
-  assert.match(source, /assistantStatus: extracted\.status/)
+  assert.match(source, /decorateAssistantContent\(extracted\.content, extracted\.status, statusParsingStarted\)/)
+  assert.match(source, /displayContent,\s*displaySegments:/)
 })

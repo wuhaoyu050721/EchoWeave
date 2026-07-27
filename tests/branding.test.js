@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
+import { APP_VERSION } from '../src/core/app-metadata.js'
 
 function pngDimensions(buffer) {
   assert.deepEqual([...buffer.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10])
@@ -11,19 +12,23 @@ function pngDimensions(buffer) {
 }
 
 test('织语 branding is wired to the package, pages, and fallback avatars', async () => {
-  const [manifest, pages, preview, mainPage, contacts] = await Promise.all([
+  const [manifest, pages, preview, mainPage, contacts, packageSource] = await Promise.all([
     readFile(new URL('../manifest.json', import.meta.url), 'utf8'),
     readFile(new URL('../pages.json', import.meta.url), 'utf8'),
     readFile(new URL('../preview/index.html', import.meta.url), 'utf8'),
     readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8'),
-    readFile(new URL('../src/components/character-contacts.vue', import.meta.url), 'utf8')
+    readFile(new URL('../src/components/character-contacts.vue', import.meta.url), 'utf8'),
+    readFile(new URL('../package.json', import.meta.url), 'utf8')
   ])
 
   assert.match(manifest, /"name"\s*:\s*"织语"/)
   assert.match(pages, /"navigationBarTitleText"\s*:\s*"织语"/)
   assert.match(preview, /<title>织语<\/title>/)
   assert.match(mainPage, /class="screen-title">织语<\/text>/)
-  assert.match(mainPage, /织语 · 版本 1\.0\.1/)
+  assert.equal(APP_VERSION, JSON.parse(packageSource).version)
+  assert.match(mainPage, /版本 \{\{ appVersion \}\}/)
+  assert.match(mainPage, /版本 \$\{APP_VERSION\}/)
+  assert.doesNotMatch(mainPage, /版本 1\.0\.1/)
   for (const source of [mainPage, contacts]) {
     assert.match(source, /\/static\/zhiyu-logo\.png/)
     assert.doesNotMatch(source, /\/static\/logo\.png/)
@@ -33,7 +38,8 @@ test('织语 branding is wired to the package, pages, and fallback avatars', asy
 test('织语 logo and every Android density icon have the declared PNG dimensions', async () => {
   const manifest = await readFile(new URL('../manifest.json', import.meta.url), 'utf8')
   const logo = await readFile(new URL('../static/zhiyu-logo.png', import.meta.url))
-  assert.deepEqual(pngDimensions(logo), { width: 1024, height: 1024 })
+  assert.deepEqual(pngDimensions(logo), { width: 512, height: 512 })
+  assert.ok(logo.byteLength < 300 * 1024)
 
   const icons = {
     ldpi: 36,

@@ -1,4 +1,5 @@
 import { buildCharacterPromptBundle, mergePromptBundles } from '../core/character-prompt.js'
+import { readCharacterStatusEnabled } from '../core/character-status-setting.js'
 import {
   GROUP_REPLY_CHAIN_LIMIT,
   groupParticipantKind,
@@ -145,7 +146,10 @@ export function createChatInstructionResolver({ repository, vault, getUserName =
       ? await repository.listWorldBooks({ characterId: character.id, includeGlobal: true })
       : []
     const worldBooks = availableBooks.filter(book => worldBookAppliesToCharacter(book, String(character.id)))
-    const userName = await getUserName()
+    const [userName, statusEnabled] = await Promise.all([
+      getUserName(),
+      readCharacterStatusEnabled(repository)
+    ])
     const characters = groupConversation
       ? await loadGroupCharacters(repository, participants)
       : new Map()
@@ -161,6 +165,7 @@ export function createChatInstructionResolver({ repository, vault, getUserName =
       worldBooks,
       messages: dialogueMessages,
       statusMessages,
+      statusEnabled,
       userName
     })
     const groupPrompt = groupConversation

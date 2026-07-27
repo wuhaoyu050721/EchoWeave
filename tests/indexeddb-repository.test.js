@@ -222,3 +222,29 @@ test('conditionally imports a sync record only while its local snapshot is uncha
   assert.equal(currentApply, true)
   assert.equal((await repository.getProvider(baseline.id)).name, 'Remote edit')
 })
+
+test('bulk resource reads preserve requested order and omit missing duplicates', async () => {
+  const repository = await createRepository()
+  await repository.saveAttachments([
+    { id: 'attachment-1', kind: 'text', name: 'one.txt', textContent: 'one' },
+    { id: 'attachment-2', kind: 'text', name: 'two.txt', textContent: 'two' }
+  ])
+  await repository.importCharacterBundle({
+    character: { id: 'character-1', name: 'Character', assetIds: ['avatar-1', 'avatar-2'] },
+    characterAssets: [
+      { id: 'avatar-1', characterId: 'character-1', type: 'icon', dataUrl: 'data:image/png;base64,AA==' },
+      { id: 'avatar-2', characterId: 'character-1', type: 'icon', dataUrl: 'data:image/png;base64,AQ==' }
+    ]
+  })
+
+  assert.deepEqual(
+    (await repository.getAttachments(['attachment-2', 'missing', 'attachment-1', 'attachment-2']))
+      .map(value => value.id),
+    ['attachment-2', 'attachment-1']
+  )
+  assert.deepEqual(
+    (await repository.getCharacterAssets(['avatar-2', 'missing', 'avatar-1', 'avatar-2']))
+      .map(value => value.id),
+    ['avatar-2', 'avatar-1']
+  )
+})

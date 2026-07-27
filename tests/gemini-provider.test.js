@@ -118,6 +118,44 @@ test('streams Gemini SSE text and inline images across split byte chunks', async
   assert.equal(result.images[0].dataUrl, 'data:image/png;base64,AA==')
 })
 
+test('caps images accumulated across separate Gemini stream events', async () => {
+  const callbackImages = []
+  const provider = new GeminiProvider({
+    transport: {
+      async request(options) {
+        const events = Array.from({ length: 8 }, (_, index) => (
+          `data: ${JSON.stringify({
+            candidates: [{
+              content: {
+                parts: [{
+                  inlineData: {
+                    mimeType: 'image/png',
+                    data: Buffer.from([index]).toString('base64')
+                  }
+                }]
+              }
+            }]
+          })}\n\n`
+        )).join('')
+        options.onChunk(encoder.encode(events))
+        return { text: '' }
+      }
+    }
+  })
+
+  const result = await provider.streamChat({
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta'
+  }, {
+    model: 'gemini-test',
+    messages: [{ role: 'user', content: 'Create images' }]
+  }, {
+    onImage: image => callbackImages.push(image)
+  })
+
+  assert.equal(result.images.length, 6)
+  assert.equal(callbackImages.length, 6)
+})
+
 test('uses Gemini generateContent when streaming is disabled', async () => {
   let request
   const deltas = []

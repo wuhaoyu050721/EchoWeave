@@ -58,6 +58,33 @@ test('streams Chat Completions deltas and sends expected payload', async () => {
   })
 })
 
+test('caps images accumulated across separate OpenAI stream events', async () => {
+  const callbackImages = []
+  const provider = new OpenAIProvider({
+    transport: {
+      async request(options) {
+        const events = Array.from({ length: 8 }, (_, index) => (
+          `data: ${JSON.stringify({
+            choices: [{ delta: { images: [{ b64_json: Buffer.from([index]).toString('base64') }] } }]
+          })}\n\n`
+        )).join('')
+        options.onChunk(new TextEncoder().encode(`${events}data: [DONE]\n\n`))
+        return { text: '' }
+      }
+    }
+  })
+
+  const result = await provider.streamChat({ baseUrl: 'https://example.com/v1' }, {
+    model: 'test-model',
+    messages: [{ role: 'user', content: 'Create images' }]
+  }, {
+    onImage: image => callbackImages.push(image)
+  })
+
+  assert.equal(result.images.length, 6)
+  assert.equal(callbackImages.length, 6)
+})
+
 test('uses a non-streaming Chat Completions request and emits the complete response once', async () => {
   let request
   const deltas = []

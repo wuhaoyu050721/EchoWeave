@@ -29,3 +29,34 @@ test('does not write anything when validation fails', async () => {
   await assert.rejects(service.importData({ formatVersion: 99 }), /版本/)
   assert.equal((await repository.listProviders()).length, 0)
 })
+
+test('exports compact portable JSON and rejects files above the mobile import limit', async () => {
+  const repository = {
+    readBackupData: async () => ({
+      providers: [],
+      conversations: [],
+      messages: [],
+      attachments: [],
+      characters: [],
+      worldBooks: [],
+      characterAssets: [],
+      settings: { note: '中文' }
+    })
+  }
+  const service = new BackupService({
+    repository,
+    now: () => new Date('2026-07-25T00:00:00.000Z')
+  })
+
+  const exported = await service.exportText(4096)
+  assert.equal(exported.content, JSON.stringify(exported.data))
+  assert.equal(exported.content.includes('\n'), false)
+  assert.equal(exported.byteSize, Buffer.byteLength(exported.content))
+
+  await assert.rejects(
+    service.exportText(exported.byteSize - 1),
+    error => error.name === 'BackupSizeError' &&
+      error.code === 'backup_too_large' &&
+      error.byteSize === exported.byteSize
+  )
+})

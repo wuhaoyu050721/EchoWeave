@@ -75,7 +75,44 @@ test('rebuilds the character status protocol from current history on every reque
   assert.match(secondRequest.systemPrompt, /上一轮状态参考：仅用于延续状态值/)
   assert.match(secondRequest.systemPrompt, /\[当前状态\|开心\]/)
   assert.match(secondRequest.systemPrompt, /本轮固定输出格式/)
-  assert.match(secondRequest.userTurnPrompt, /上一轮状态参考[\s\S]*\[当前位置\|客厅\]/)
+  assert.match(secondRequest.userTurnPrompt, /system 消息中定义的完整 <sumo_monitor>/)
+  assert.doesNotMatch(secondRequest.userTurnPrompt, /\[当前位置\|客厅\]/)
+})
+
+test('stops requesting character status when the persisted setting is disabled', async () => {
+  const character = {
+    id: 'char-1',
+    name: '苏墨',
+    card: { data: { system_prompt: '每次回答需要带上状态' } }
+  }
+  const repository = {
+    getSetting: async (key, fallback) => key === 'characterStatusEnabled' ? false : fallback,
+    getCharacter: async () => character,
+    listWorldBooks: async () => []
+  }
+  const resolveInstructions = createChatInstructionResolver({
+    repository,
+    vault: { decryptString: async value => value },
+    getUserName: async () => '小明'
+  })
+
+  const instructions = await resolveInstructions(
+    { characterId: character.id, systemPromptMode: 'inherit' },
+    {
+      messages: [{
+        role: 'assistant',
+        status: 'completed',
+        content: '旧回复\n<sumo_monitor><status>[当前状态|警觉]</status></sumo_monitor>'
+      }]
+    }
+  )
+
+  assert.match(instructions.systemPrompt, /\[角色状态栏：已关闭\]/)
+  assert.match(instructions.postHistoryPrompt, /\[状态栏关闭提醒\]/)
+  assert.match(instructions.userTurnPrompt, /只输出正常回复正文/)
+  assert.doesNotMatch(instructions.systemPrompt, /统一状态栏输出协议/)
+  assert.doesNotMatch(instructions.systemPrompt, /上一轮状态参考/)
+  assert.doesNotMatch(instructions.postHistoryPrompt, /状态栏最终提醒/)
 })
 
 test('builds an isolated group prompt for the requested speaker', async () => {

@@ -197,6 +197,14 @@ export class IndexedDbRepository {
     return requestToPromise(transaction.objectStore(storeName).getAll())
   }
 
+  async #getMany(storeName, keys) {
+    const normalized = [...new Set((Array.isArray(keys) ? keys : []).filter(Boolean))]
+    if (!normalized.length) return []
+    const transaction = this.#transaction(storeName)
+    const store = transaction.objectStore(storeName)
+    return Promise.all(normalized.map(key => requestToPromise(store.get(key))))
+  }
+
   async #put(storeName, value) {
     const transaction = this.#transaction(storeName, 'readwrite')
     transaction.objectStore(storeName).put(cloneForStorage(value))
@@ -385,6 +393,10 @@ export class IndexedDbRepository {
     return this.#get('attachments', id)
   }
 
+  async getAttachments(ids) {
+    return (await this.#getMany('attachments', ids)).filter(Boolean)
+  }
+
   async listMessageAttachments(messageId) {
     return (await this.listAllAttachments()).filter(attachment => attachment.messageId === messageId)
   }
@@ -490,6 +502,10 @@ export class IndexedDbRepository {
 
   getCharacterAsset(id) {
     return this.#get('characterAssets', id)
+  }
+
+  async getCharacterAssets(ids) {
+    return (await this.#getMany('characterAssets', ids)).filter(Boolean)
   }
 
   async listCharacterAssets(characterId) {

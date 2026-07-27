@@ -70,13 +70,13 @@ async function deriveKey(password, salt) {
   })
 }
 
-export async function encryptCloudBackup(payload, password) {
+export async function encryptCloudBackup(payload, password, { serializedPayload = '' } = {}) {
   const normalizedPassword = validatePassword(password)
   const salt = secureRandomBytes(16)
   const iv = secureRandomBytes(12)
   const key = await deriveKey(normalizedPassword, salt)
   try {
-    const plaintext = encodeUtf8(JSON.stringify(payload))
+    const plaintext = encodeUtf8(serializedPayload || JSON.stringify(payload))
     const ciphertext = gcm(key, iv, AAD).encrypt(plaintext)
     return {
       version: 1,

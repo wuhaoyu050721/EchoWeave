@@ -1,6 +1,8 @@
 # Dependencies and generated output
 node_modules/
 dist-preview/
+playwright-report/
+test-results/
 unpackage/*
 !unpackage/res/
 !unpackage/res/**
@@ -15,6 +17,7 @@ unpackage/*
 .env
 .env.*
 !.env.example
+server/config.php
 *.jks
 *.keystore
 *.p12

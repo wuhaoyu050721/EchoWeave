@@ -25,9 +25,13 @@ $app = new CloudBackupApp(
     maxSyncEnvelopeBytes: (int) ($config['max_sync_envelope_bytes'] ?? 41943040),
     maxSyncMutations: (int) ($config['max_sync_mutations'] ?? 100),
     maxSyncPullLimit: (int) ($config['max_sync_pull_limit'] ?? 500),
-    maxSyncPullBytes: (int) ($config['max_sync_pull_bytes'] ?? 50331648)
+    maxSyncPullBytes: (int) ($config['max_sync_pull_bytes'] ?? 50331648),
+    maxAuthAttempts: (int) ($config['max_auth_attempts'] ?? 10),
+    authRateLimitWindow: (int) ($config['auth_rate_limit_window'] ?? 900),
+    syncMutationRetention: (int) ($config['sync_mutation_retention'] ?? 15552000)
 );
 $headers = function_exists('getallheaders') ? getallheaders() : [];
+$headers['x-client-ip'] = $_SERVER['REMOTE_ADDR'] ?? '';
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $isSyncPush = $path === '/api/v1/sync/push';
 $maxRequestBytes = $isSyncPush

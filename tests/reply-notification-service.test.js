@@ -151,11 +151,13 @@ test('requests POST_NOTIFICATIONS on Android 13 and newer', async () => {
   assert.deepEqual(requested, ['android.permission.POST_NOTIFICATIONS'])
 })
 
-test('settings UI exposes a persistent Android reply notification switch', async () => {
+test('settings UI exposes Android reply notifications on a dedicated settings page', async () => {
   const source = await import('node:fs/promises').then(fs => fs.readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8'))
   const manifest = await import('node:fs/promises').then(fs => fs.readFile(new URL('../manifest.json', import.meta.url), 'utf8'))
 
-  assert.match(source, /data-testid="reply-notifications"/)
+  assert.match(source, /data-testid="reply-notifications-entry"/)
+  assert.match(source, /data-testid="reply-notifications-settings-page"/)
+  assert.match(source, /data-testid="reply-notifications-toggle"[^>]+role="switch"/)
   assert.match(source, /REPLY_NOTIFICATION_SETTING_KEY/)
   assert.match(source, /toggleReplyNotifications/)
   assert.match(source, /openReplyNotificationConversation/)

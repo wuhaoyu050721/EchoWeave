@@ -1,5 +1,5 @@
 import { GeminiSseParser } from '../core/gemini-sse-parser.js'
-import { extractImageOutputs } from '../core/image-output.js'
+import { MAX_GENERATED_IMAGE_OUTPUTS, extractImageOutputs } from '../core/image-output.js'
 import { resolveChatRequestTimeout } from '../core/model-request-timeout.js'
 import { buildGeminiEndpoint, buildGeminiModelEndpoint } from '../core/provider-url.js'
 
@@ -185,7 +185,7 @@ export class GeminiProvider {
     const imageSources = new Set()
     const addImage = (image) => {
       const source = image?.dataUrl || image?.sourceUrl
-      if (!source || imageSources.has(source)) return
+      if (!source || imageSources.has(source) || images.length >= MAX_GENERATED_IMAGE_OUTPUTS) return
       imageSources.add(source)
       images.push(image)
       handlers.onImage?.(image)

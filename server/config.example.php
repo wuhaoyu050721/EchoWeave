@@ -11,4 +11,7 @@ return [
     'max_sync_mutations' => 100,
     'max_sync_pull_limit' => 500,
     'max_sync_pull_bytes' => 50331648,
+    'max_auth_attempts' => 10,
+    'auth_rate_limit_window' => 900,
+    'sync_mutation_retention' => 15552000,
 ];

@@ -159,8 +159,12 @@ do {
     $cursor = $page['next_cursor'];
 } while ($page['has_more']);
 syncExpect($cursor === 8, 'final pull cursor should reach the user watermark');
-syncExpect($revisions === [1, 2, 3, 6, 7, 8], 'pull should paginate accepted changes while safely crossing revision gaps');
+syncExpect($revisions === [3, 6, 7, 8], 'pull should return the latest state per entity while safely crossing compacted revision gaps');
 syncExpect(in_array($injectionId, $ids, true), 'pull should preserve an SQL-looking entity id exactly');
+syncExpect(
+    (int) $pdo->query("SELECT COUNT(*) FROM sync_changes WHERE user_id = 1 AND entity_type = 'providers'")->fetchColumn() === 1,
+    'sync changes should retain only the latest accepted change for each entity'
+);
 
 $byteLimited = new CloudBackupApp($pdo, fn (): int => $clock, maxSyncPullBytes: 900);
 [$status, $bytePage] = syncPull($byteLimited, $token, 0, 100);
@@ -194,8 +198,18 @@ $largeRecord = syncMutation('mutation-large', 'settings', 'large', 'upsert', $up
 [$status, $recordLimited] = syncPush($limited, $token, 'device-a', [$largeRecord]);
 syncExpect($status === 413 && $recordLimited['error']['code'] === 'sync_record_too_large', 'per-record encrypted size limit should be enforced');
 
-$pdo->exec("UPDATE sync_changes SET envelope_json = '{}' WHERE user_id = 1 AND revision = 1");
+$pdo->exec("UPDATE sync_changes SET envelope_json = '{}' WHERE user_id = 1 AND revision = 3");
 [$status, $corrupt] = syncPull($app, $token, 0, 1);
 syncExpect($status === 500 && $corrupt['error']['code'] === 'sync_record_corrupt', 'pull should reject corrupted stored ciphertext');
+
+$pdo->exec('UPDATE sync_mutations SET created_at = ' . ($clock - 10) . ' WHERE user_id = 1');
+$pruningApp = new CloudBackupApp($pdo, fn (): int => $clock, syncMutationRetention: 5);
+$retentionMutation = syncMutation('mutation-retained', 'settings', 'retention-check', 'upsert', $updatedAt + 5, 'retained');
+[$status] = syncPush($pruningApp, $token, 'device-a', [$retentionMutation]);
+syncExpect($status === 200, 'sync should continue while pruning expired mutation receipts');
+syncExpect(
+    (int) $pdo->query('SELECT COUNT(*) FROM sync_mutations WHERE user_id = 1')->fetchColumn() === 1,
+    'expired mutation receipts should be removed after the configured retention window'
+);
 
 echo "PHP incremental sync integration tests passed\n";

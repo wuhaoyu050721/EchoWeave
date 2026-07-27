@@ -34,8 +34,8 @@ function textChunk(keyword, value, { raw = false } = {}) {
   return chunk('tEXt', new TextEncoder().encode(`${keyword}\0${encoded}`))
 }
 
-function cardPng(metadata = [], extraChunks = []) {
-  const header = join([uint32(1), uint32(1), Uint8Array.from([8, 6, 0, 0, 0])])
+function cardPng(metadata = [], extraChunks = [], { width = 1, height = 1 } = {}) {
+  const header = join([uint32(width), uint32(height), Uint8Array.from([8, 6, 0, 0, 0])])
   const pixels = deflateSync(Uint8Array.from([0, 0, 0, 0, 255]))
   return join([
     SIGNATURE,
@@ -151,6 +151,25 @@ test('rejects corrupt PNG boundaries CRC and text metadata', async () => {
   await assert.rejects(
     inspectCharacterCard(input(cardPng([textChunk('chara', encodeBase64(new TextEncoder().encode('{')), { raw: true })]))),
     error => error.code === 'invalid_character_json'
+  )
+})
+
+test('rejects PNG cards with unsafe dimensions before decoding image pixels', async () => {
+  await assert.rejects(
+    inspectCharacterCard(input(cardPng(
+      [textChunk('ccv3', v3('Too wide'))],
+      [],
+      { width: 8193, height: 1 }
+    ))),
+    error => error.code === 'png_dimensions_too_large'
+  )
+  await assert.rejects(
+    inspectCharacterCard(input(cardPng(
+      [textChunk('ccv3', v3('Too many pixels'))],
+      [],
+      { width: 5000, height: 5000 }
+    ))),
+    error => error.code === 'png_dimensions_too_large'
   )
 })
 

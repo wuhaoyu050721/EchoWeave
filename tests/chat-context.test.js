@@ -79,6 +79,24 @@ test('adds a request-only turn instruction to the latest user message', () => {
   assert.equal(messages[2].content, '本轮问题')
 })
 
+test('removes assistant status blocks from historical model context', () => {
+  const result = buildChatContext({
+    messages: [
+      {
+        id: 'a1',
+        role: 'assistant',
+        status: 'completed',
+        sequence: 1,
+        content: '可见正文\n<sumo_monitor><status>[当前位置|门口]</status></sumo_monitor>'
+      },
+      { id: 'u1', role: 'user', status: 'completed', sequence: 2, content: '继续' }
+    ]
+  })
+
+  assert.equal(result[0].content, '可见正文')
+  assert.doesNotMatch(JSON.stringify(result), /sumo_monitor|当前位置/)
+})
+
 test('keeps attachment-only user messages with ordered attachment records', () => {
   const result = buildChatContext({
     messages: [{ id: 'm1', role: 'user', content: '', status: 'completed', sequence: 1, attachmentIds: ['a2', 'a1'] }],

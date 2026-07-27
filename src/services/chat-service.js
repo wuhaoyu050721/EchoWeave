@@ -161,6 +161,7 @@ export class ChatService {
     getSystemPrompt = async () => '',
     getUserName = async () => '用户',
     getStreamingEnabled = async () => true,
+    getStreamingSegmentedDisplayEnabled = async () => false,
     replyNotificationService = null,
     diagnosticLogStore = null,
     idFactory = createRuntimeId,
@@ -174,6 +175,7 @@ export class ChatService {
     this.getSystemPrompt = getSystemPrompt
     this.getUserName = getUserName
     this.getStreamingEnabled = getStreamingEnabled
+    this.getStreamingSegmentedDisplayEnabled = getStreamingSegmentedDisplayEnabled
     this.replyNotificationService = replyNotificationService
     this.diagnosticLogStore = diagnosticLogStore
     this.idFactory = idFactory
@@ -827,6 +829,9 @@ export class ChatService {
             })
           }
           const streamingEnabled = await this.getStreamingEnabled()
+          const segmentedDisplayEnabled = streamingEnabled !== false &&
+            await this.getStreamingSegmentedDisplayEnabled()
+          assistantMessage.responseDisplayMode = segmentedDisplayEnabled ? 'segmented' : 'continuous'
           result = await this.provider.streamChat(profile, {
             model: requestModel,
             messages: requestMessages,

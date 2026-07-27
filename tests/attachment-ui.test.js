@@ -62,7 +62,7 @@ test('sent attachments render image and text preview entry points', async () => 
   assert.match(source, /attachmentPreviewImageStyle/)
   assert.match(source, /class="attachment-preview-image"[^>]+:style="attachmentPreviewImageStyle/)
   assert.match(source, /attachment-preview-modal/)
-  assert.match(source, /attachmentIds\.map\(id => repository\?\.getAttachment\?\.\(id\)\)/)
+  assert.match(source, /loadChatMessageResources\(repository,\s*messages\)/)
   assert.match(source, /attachments:\s*pendingAttachments/)
 })
 

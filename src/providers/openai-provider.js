@@ -1,5 +1,10 @@
 import { buildOpenAIEndpoint } from '../core/provider-url.js'
-import { bytesToDataUrl, extractImageOutputs } from '../core/image-output.js'
+import {
+  MAX_GENERATED_IMAGE_OUTPUTS,
+  assertGeneratedImageLimits,
+  bytesToDataUrl,
+  extractImageOutputs
+} from '../core/image-output.js'
 import { resolveChatRequestTimeout } from '../core/model-request-timeout.js'
 import { OpenAISseParser } from '../core/sse-parser.js'
 
@@ -193,7 +198,9 @@ export class OpenAIProvider {
         parseError = error
         handlers.onError?.(error)
       },
-      onImage: (image) => rawImages.push(image)
+      onImage: (image) => {
+        if (rawImages.length < MAX_GENERATED_IMAGE_OUTPUTS) rawImages.push(image)
+      }
     })
 
     await this.transport.request({
@@ -235,7 +242,13 @@ export class OpenAIProvider {
     const binaryMimeType = declaredMimeType.startsWith('image/') ? declaredMimeType : sniffImageMimeType(bytes)
     let rawImages
     if (binaryMimeType && bytes.length) {
-      rawImages = [{ dataUrl: bytesToDataUrl(bytes, binaryMimeType), mimeType: binaryMimeType, byteSize: bytes.byteLength }]
+      const dimensions = assertGeneratedImageLimits(bytes)
+      rawImages = [{
+        dataUrl: bytesToDataUrl(bytes, binaryMimeType),
+        mimeType: binaryMimeType,
+        byteSize: bytes.byteLength,
+        ...dimensions
+      }]
     } else {
       let payload
       try {
@@ -253,7 +266,7 @@ export class OpenAIProvider {
 
   async resolveImageOutputs(images, signal) {
     const resolved = []
-    for (const image of images) {
+    for (const image of images.slice(0, MAX_GENERATED_IMAGE_OUTPUTS)) {
       if (!image?.sourceUrl || image.dataUrl) {
         resolved.push(image)
         continue
@@ -269,21 +282,23 @@ export class OpenAIProvider {
         })
         const bytes = response?.data instanceof Uint8Array
           ? response.data
-          : response?.data instanceof ArrayBuffer
-            ? new Uint8Array(response.data)
-            : new Uint8Array()
+            : response?.data instanceof ArrayBuffer
+              ? new Uint8Array(response.data)
+              : new Uint8Array()
         if (bytes.length) {
+          const dimensions = assertGeneratedImageLimits(bytes)
           const mimeType = headerValue(response.headers, 'content-type') || image.mimeType
           resolved.push({
             ...image,
             mimeType: String(mimeType).split(';')[0].toLowerCase() || image.mimeType,
             byteSize: bytes.byteLength,
-            dataUrl: bytesToDataUrl(bytes, mimeType)
+            dataUrl: bytesToDataUrl(bytes, mimeType),
+            ...dimensions
           })
           continue
         }
       } catch (error) {
-        if (signal?.aborted) throw error
+        if (signal?.aborted || error?.name === 'GeneratedImageLimitError') throw error
       }
       resolved.push(image)
     }

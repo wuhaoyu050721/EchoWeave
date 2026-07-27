@@ -525,6 +525,21 @@ export class PlusSqliteRepository {
     return rows[0] ? this.#decodeStoredPayload(table, key, rows[0].payload) : undefined
   }
 
+  async #getMany(table, keyColumn, keys) {
+    const normalized = [...new Set((Array.isArray(keys) ? keys : []).map(String).filter(Boolean))]
+    if (!normalized.length) return []
+    const valuesById = new Map()
+    for (let offset = 0; offset < normalized.length; offset += 32) {
+      const batch = normalized.slice(offset, offset + 32)
+      const rows = await this.#select(
+        `SELECT ${keyColumn}, payload FROM ${table} WHERE ${keyColumn} IN (${batch.map(sqlText).join(', ')})`
+      )
+      const values = await this.#decodePayloadRows(table, rows, keyColumn)
+      rows.forEach((row, index) => valuesById.set(String(row[keyColumn]), values[index]))
+    }
+    return normalized.map(key => valuesById.get(key)).filter(Boolean)
+  }
+
   async getAppliedMigrations() {
     const rows = await this.#select('SELECT version FROM schema_migrations ORDER BY version ASC')
     return rows.map((row) => Number(row.version))
@@ -648,6 +663,7 @@ export class PlusSqliteRepository {
   }
 
   getAttachment(id) { return this.#get('attachments', 'id', id) }
+  getAttachments(ids) { return this.#getMany('attachments', 'id', ids) }
 
   async listMessageAttachments(messageId) {
     const rows = await this.#select(`SELECT id, payload FROM attachments WHERE message_id = ${sqlText(messageId)} ORDER BY COALESCE(created_at, '') ASC`)
@@ -725,6 +741,22 @@ export class PlusSqliteRepository {
   }
 
   getCharacterAsset(id) { return this.#get('character_assets', 'id', id) }
+  getCharacterAssets(ids) { return this.#getMany('character_assets', 'id', ids) }
+
+  async estimateBackupBytes() {
+    const tables = ['providers', 'conversations', 'messages', 'attachments', 'characters', 'world_books', 'character_assets', 'settings']
+    let total = 1024
+    for (const table of tables) {
+      const rows = await this.#select(
+        `SELECT COALESCE(SUM(CASE WHEN payload = ${sqlText(PAYLOAD_CHUNK_MARKER)} THEN ` +
+        `(SELECT COALESCE(SUM(length(payload_chunk)), 0) FROM payload_chunks ` +
+        `WHERE entity_table = ${sqlText(table)} AND entity_id = ${table}.${table === 'settings' ? 'key' : 'id'}) ` +
+        'ELSE length(payload) END), 0) AS payload_bytes FROM ' + table
+      )
+      total += Number(rows[0]?.payload_bytes) || 0
+    }
+    return total
+  }
 
   async listCharacterAssets(characterId) {
     const rows = await this.#select(`SELECT id, payload FROM character_assets WHERE character_id = ${sqlText(characterId)} ORDER BY COALESCE(created_at, '') ASC`)

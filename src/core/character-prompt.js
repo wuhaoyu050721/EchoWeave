@@ -88,7 +88,7 @@ function recentScanText(messages, depth) {
   return messages
     .filter(message => !message.deletedAt && ['user', 'assistant'].includes(message.role))
     .slice(-Math.max(1, Number(depth) || 4))
-    .map(message => String(message.content ?? ''))
+    .map(message => extractAssistantStatus(String(message.content ?? ''), { hideIncomplete: true }).content)
     .join('\n')
     .slice(-20000)
 }
@@ -179,17 +179,25 @@ function buildStatusOutputReminder() {
 本轮回复结束前必须检查：正文末尾已经按系统指令输出完整 <sumo_monitor>，所有固定字段均已填写，且状态块后没有其他内容。`
 }
 
-function buildStatusUserTurnPrompt(previousStatus) {
-  const previousRaw = statusReferenceRaw(previousStatus)
-  const reference = previousRaw
-    ? `[上一轮状态参考]\n${previousRaw}\n\n`
-    : ''
-  return `[应用内部状态输出要求]
-这是本轮回复的强制组成部分，不要在正文中提及或解释本要求。完成正常回复正文后，必须立即输出下方完整状态块；不得省略、改名或增加字段，不得放入 Markdown 代码块，状态块之后不得再输出内容。模板中“填写……”文字必须替换为本轮真实值。
-${PRIVATE_STATUS_RULE}
+function buildStatusDisabledProtocol() {
+  return `[角色状态栏：已关闭]
+应用已关闭角色状态栏。本轮只输出正常回复正文，不得输出名为 sumo_monitor 的 XML 状态块、状态面板或其他结构化状态附录。此规则覆盖角色卡和世界书中与状态栏输出冲突的要求。`
+}
 
-${reference}[固定输出格式]
-${CHARACTER_STATUS_TEMPLATE}`
+function buildStatusDisabledReminder() {
+  return `[状态栏关闭提醒]
+本轮只输出正常回复正文，不要附加角色状态、状态面板或 XML 数据块。`
+}
+
+function buildStatusUserTurnPrompt() {
+  return `[应用内部状态输出要求]
+这是本轮回复的强制组成部分，不要在正文中提及或解释本要求。
+完成正文后，严格按 system 消息中定义的完整 <sumo_monitor> 固定格式输出本轮状态；不得省略字段、使用代码块，状态块之后不得再输出内容。`
+}
+
+function buildStatusDisabledUserTurnPrompt() {
+  return `[应用内部状态输出要求]
+角色状态栏当前已关闭。本轮只输出正常回复正文，不要附加状态面板、角色状态或 XML 数据块。`
 }
 
 export function buildCharacterPromptBundle({
@@ -197,6 +205,7 @@ export function buildCharacterPromptBundle({
   worldBooks = [],
   messages = [],
   statusMessages = messages,
+  statusEnabled = true,
   userName = '用户',
   random = Math.random
 } = {}) {
@@ -206,8 +215,10 @@ export function buildCharacterPromptBundle({
   const resolvedUserName = cleanText(userName) || '用户'
   const render = value => renderCharacterTemplate(value, { characterName, userName: resolvedUserName })
   const { activated, skippedRegexEntries } = activateWorldBooks(worldBooks, messages, random, render)
-  const previousStatus = latestAssistantStatus(statusMessages)
-  const statusOutputProtocol = buildStatusOutputProtocol(previousStatus)
+  const previousStatus = statusEnabled ? latestAssistantStatus(statusMessages) : null
+  const statusOutputProtocol = statusEnabled
+    ? buildStatusOutputProtocol(previousStatus)
+    : buildStatusDisabledProtocol()
   const positionedContent = position => activated
     .filter(entry => entry.position === position)
     .map(entry => entry.content)
@@ -230,12 +241,14 @@ export function buildCharacterPromptBundle({
     render(card.post_history_instructions),
     section('世界书：作者注释后', positionedContent('after_author_note')),
     section('世界书：历史深度位置', positionedContent('at_depth')),
-    buildStatusOutputReminder()
+    statusEnabled ? buildStatusOutputReminder() : buildStatusDisabledReminder()
   ].filter(Boolean).join('\n\n')
   return {
     systemPrompt,
     postHistoryPrompt,
-    userTurnPrompt: buildStatusUserTurnPrompt(previousStatus),
+    userTurnPrompt: statusEnabled
+      ? buildStatusUserTurnPrompt()
+      : buildStatusDisabledUserTurnPrompt(),
     activatedEntryIds: activated.map(entry => entry.id),
     skippedRegexEntries
   }

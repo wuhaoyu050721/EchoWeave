@@ -187,3 +187,77 @@ test('rejects an encrypted envelope above the server limit before uploading', as
   ))
   assert.equal(uploads, 0)
 })
+
+test('rejects an oversized SQLite estimate before reading or encrypting the backup', async () => {
+  let reads = 0
+  let encryptions = 0
+  let uploads = 0
+  const repository = {
+    estimateBackupBytes: async () => 1024,
+    readBackupData: async () => {
+      reads += 1
+      return {}
+    },
+    importRecords: async () => {}
+  }
+  const vault = {
+    encryptString: async value => value,
+    decryptString: async value => value
+  }
+  const service = new CloudBackupService({
+    repository,
+    vault,
+    apiClient: {
+      uploadBackup: async () => { uploads += 1 },
+      downloadBackup: async () => ({})
+    },
+    encrypt: async value => {
+      encryptions += 1
+      return value
+    },
+    decrypt: async value => value,
+    maxUploadBytes: 1024
+  })
+
+  await assert.rejects(
+    service.upload({ deviceId: 'device-a', syncPassword: 'sync password' }),
+    error => error.code === 'backup_too_large' && error.status === 413
+  )
+  assert.equal(reads, 0)
+  assert.equal(encryptions, 0)
+  assert.equal(uploads, 0)
+})
+
+test('checks the serialized encrypted size estimate before PBKDF2 work', async () => {
+  let encryptions = 0
+  let uploads = 0
+  const service = new CloudBackupService({
+    backupService: {
+      exportData: async () => ({
+        formatVersion: 1,
+        providers: [],
+        conversations: [],
+        messages: [],
+        settings: { large: 'x'.repeat(2048) }
+      }),
+      importData: async () => ({})
+    },
+    apiClient: {
+      uploadBackup: async () => { uploads += 1 },
+      downloadBackup: async () => ({})
+    },
+    encrypt: async value => {
+      encryptions += 1
+      return value
+    },
+    decrypt: async value => value,
+    maxUploadBytes: 2048
+  })
+
+  await assert.rejects(
+    service.upload({ deviceId: 'device-a', syncPassword: 'sync password' }),
+    error => error.code === 'backup_too_large' && error.byteSize > error.maxBytes
+  )
+  assert.equal(encryptions, 0)
+  assert.equal(uploads, 0)
+})

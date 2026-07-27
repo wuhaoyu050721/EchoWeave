@@ -5,7 +5,9 @@ export const CHARACTER_IMPORT_LIMITS = Object.freeze({
   maxTotalAssetBytes: 100 * 1024 * 1024,
   maxAssets: 500,
   maxChunks: 2048,
-  maxTextFieldCharacters: 2 * 1024 * 1024
+  maxTextFieldCharacters: 2 * 1024 * 1024,
+  maxImageDimension: 8192,
+  maxImagePixels: 20 * 1024 * 1024
 })
 
 export const CARD_METADATA_KEYWORDS = Object.freeze(['ccv3', 'chara'])

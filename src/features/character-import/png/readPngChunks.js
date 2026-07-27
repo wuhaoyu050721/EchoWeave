@@ -46,7 +46,11 @@ function parseTextChunk(data) {
   return { keyword, textBytes: data.subarray(separator + 1) }
 }
 
-export function readPngChunks(input, { maxChunks = CHARACTER_IMPORT_LIMITS.maxChunks } = {}) {
+export function readPngChunks(input, {
+  maxChunks = CHARACTER_IMPORT_LIMITS.maxChunks,
+  maxImageDimension = CHARACTER_IMPORT_LIMITS.maxImageDimension,
+  maxImagePixels = CHARACTER_IMPORT_LIMITS.maxImagePixels
+} = {}) {
   const bytes = toUint8Array(input)
   if (bytes.length < PNG_SIGNATURE.length + 12) throw importError('truncated_png', 'PNG 文件已截断')
   for (let index = 0; index < PNG_SIGNATURE.length; index += 1) {
@@ -97,6 +101,12 @@ export function readPngChunks(input, { maxChunks = CHARACTER_IMPORT_LIMITS.maxCh
   const width = readUint32(header, 0)
   const height = readUint32(header, 4)
   if (!width || !height) throw importError('invalid_png_dimensions', 'PNG 图像尺寸无效')
+  if (width > maxImageDimension || height > maxImageDimension || width * height > maxImagePixels) {
+    throw importError(
+      'png_dimensions_too_large',
+      `PNG 图像尺寸过大，最长边不能超过 ${maxImageDimension} 像素且总像素不能超过 ${maxImagePixels}`
+    )
+  }
   return { bytes, chunks, textChunks, width, height }
 }
 

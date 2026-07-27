@@ -1,5 +1,6 @@
 import { decryptCloudBackup, encryptCloudBackup } from '../core/cloud-backup-crypto.js'
 import { createCloudBackupPayload, prepareCloudRestore } from '../core/cloud-backup-format.js'
+import { estimateEncryptedEnvelopeBytes } from '../core/backup-size.js'
 import { encodeUtf8 } from '../core/text-encoding-polyfill.js'
 
 export const MAX_CLOUD_BACKUP_BYTES = 100 * 1024 * 1024
@@ -39,10 +40,21 @@ export class CloudBackupService {
   }
 
   async upload({ deviceId, syncPassword }) {
+    const conservativeEstimate = await this.repository?.estimateBackupBytes?.()
+    const estimatedStoredEnvelopeBytes = estimateEncryptedEnvelopeBytes(conservativeEstimate)
+    if (Number.isFinite(conservativeEstimate) && estimatedStoredEnvelopeBytes > this.maxUploadBytes) {
+      throw backupSizeError(estimatedStoredEnvelopeBytes, this.maxUploadBytes)
+    }
     const payload = this.repository
       ? await createCloudBackupPayload(await this.repository.readBackupData(), this.vault)
       : await this.backupService.exportData()
-    const envelope = await this.encrypt(payload, syncPassword)
+    const serializedPayload = JSON.stringify(payload)
+    const plaintextBytes = encodeUtf8(serializedPayload).byteLength
+    const estimatedEnvelopeBytes = estimateEncryptedEnvelopeBytes(plaintextBytes)
+    if (estimatedEnvelopeBytes > this.maxUploadBytes) {
+      throw backupSizeError(estimatedEnvelopeBytes, this.maxUploadBytes)
+    }
+    const envelope = await this.encrypt(payload, syncPassword, { serializedPayload })
     const byteSize = encodeUtf8(JSON.stringify(envelope)).byteLength
     if (byteSize > this.maxUploadBytes) throw backupSizeError(byteSize, this.maxUploadBytes)
     return this.apiClient.uploadBackup({ deviceId, envelope })

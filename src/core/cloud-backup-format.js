@@ -184,11 +184,11 @@ export async function createCloudBackupPayload(data, vault, now = new Date()) {
     exportedAt: now.toISOString(),
     providers,
     conversations,
-    messages: cloneJson(normalized.messages),
-    attachments: cloneJson(normalized.attachments),
-    characters: cloneJson(normalized.characters),
-    worldBooks: cloneJson(normalized.worldBooks),
-    characterAssets: cloneJson(normalized.characterAssets),
+    messages: normalized.messages,
+    attachments: normalized.attachments,
+    characters: normalized.characters,
+    worldBooks: normalized.worldBooks,
+    characterAssets: normalized.characterAssets,
     settings
   }
 }

@@ -645,3 +645,44 @@ test('conditionally imports a sync record only while its local snapshot is uncha
   assert.equal((await repository.getProvider(baseline.id)).name, 'Remote edit')
   await repository.close()
 })
+
+test('bulk resource reads use bounded batches and preserve requested order', async () => {
+  const repository = await setup()
+  const attachments = Array.from({ length: 40 }, (_, index) => ({
+    id: `bulk-attachment-${index + 1}`,
+    conversationId: 'bulk-chat',
+    messageId: 'bulk-message',
+    kind: 'text',
+    name: `${index + 1}.txt`,
+    textContent: `attachment ${index + 1}`,
+    byteSize: 16
+  }))
+  const assets = Array.from({ length: 40 }, (_, index) => ({
+    id: `bulk-avatar-${index + 1}`,
+    characterId: 'bulk-character',
+    type: 'icon',
+    dataUrl: `data:image/png;base64,${index % 2 ? 'AA==' : 'AQ=='}`
+  }))
+  await repository.saveAttachments(attachments)
+  await repository.importCharacterBundle({
+    character: {
+      id: 'bulk-character',
+      name: 'Bulk character',
+      assetIds: assets.map(asset => asset.id)
+    },
+    characterAssets: assets
+  })
+
+  const attachmentIds = attachments.map(value => value.id).reverse()
+  const avatarIds = assets.map(value => value.id).reverse()
+  assert.deepEqual(
+    (await repository.getAttachments([...attachmentIds, 'missing', attachmentIds[0]])).map(value => value.id),
+    attachmentIds
+  )
+  assert.deepEqual(
+    (await repository.getCharacterAssets([...avatarIds, 'missing', avatarIds[0]])).map(value => value.id),
+    avatarIds
+  )
+  assert.ok(await repository.estimateBackupBytes() > 1024)
+  await repository.close()
+})

@@ -1,4 +1,5 @@
 import { createBackup, prepareImport } from '../core/backup-format.js'
+import { MAX_PORTABLE_BACKUP_BYTES, serializePortableBackup } from '../core/backup-size.js'
 import { createRuntimeId } from '../core/runtime-id.js'
 
 export class BackupService {
@@ -10,6 +11,11 @@ export class BackupService {
 
   async exportData() {
     return createBackup(await this.repository.readBackupData(), this.now())
+  }
+
+  async exportText(maxBytes = MAX_PORTABLE_BACKUP_BYTES) {
+    const data = await this.exportData()
+    return { data, ...serializePortableBackup(data, maxBytes) }
   }
 
   async importData(payload) {
