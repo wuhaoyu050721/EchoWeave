@@ -1,5 +1,9 @@
 import { normalizeCloudBaseUrl, resolveCloudRequestBaseUrl } from '../core/cloud-base-url.js'
 
+export const CLOUD_LARGE_TRANSFER_TIMEOUT_MS = 10 * 60 * 1000
+
+const CLOUD_TOKEN_EXPIRY_SAFETY_MS = 60 * 1000
+
 function parseResponse(response) {
   if (!response?.text) return null
   try {
@@ -7,6 +11,42 @@ function parseResponse(response) {
   } catch {
     throw new Error('云端服务返回了无效 JSON')
   }
+}
+
+function serverErrorCode(error) {
+  try {
+    return String(JSON.parse(error?.body || '{}')?.error?.code || '')
+  } catch {
+    return ''
+  }
+}
+
+function transferOperation(path, method) {
+  if (path === '/api/v1/backup') return method === 'GET' ? '云端备份下载' : '云端备份上传'
+  if (path.startsWith('/api/v1/json-exports')) return method === 'GET' ? '云端 JSON 下载' : '云端 JSON 上传'
+  return '云端请求'
+}
+
+function transferTimeoutError(path, method, timeout, cause) {
+  const minutes = Math.max(1, Math.round(Number(timeout) / 60000))
+  const error = new Error(`${transferOperation(path, method)}超时（已等待 ${minutes} 分钟），请保持应用在前台并检查网络后重试`)
+  error.name = 'CloudApiError'
+  error.code = 'cloud_transfer_timeout'
+  error.timeoutMs = timeout
+  error.cause = cause
+  return error
+}
+
+function shouldRefreshBeforeTransfer(session, timeout) {
+  const expiresAtMs = Number(session?.access_expires_at) * 1000
+  const timeoutMs = Number(timeout)
+  return Boolean(
+    session?.refresh_token &&
+    Number.isFinite(expiresAtMs) &&
+    Number.isFinite(timeoutMs) &&
+    timeoutMs > 0 &&
+    expiresAtMs <= Date.now() + timeoutMs + CLOUD_TOKEN_EXPIRY_SAFETY_MS
+  )
 }
 
 function normalizeJsonExportBackup(backup) {
@@ -149,7 +189,8 @@ export class CloudApiClient {
     const result = await this.#request('/api/v1/backup', {
       method: 'PUT',
       body: { device_id: deviceId, envelope },
-      auth: true
+      auth: true,
+      timeout: CLOUD_LARGE_TRANSFER_TIMEOUT_MS
     })
     return result.backup
   }
@@ -160,7 +201,10 @@ export class CloudApiClient {
   }
 
   async downloadBackup() {
-    const result = await this.#request('/api/v1/backup', { auth: true })
+    const result = await this.#request('/api/v1/backup', {
+      auth: true,
+      timeout: CLOUD_LARGE_TRANSFER_TIMEOUT_MS
+    })
     return result.envelope
   }
 
@@ -197,7 +241,8 @@ export class CloudApiClient {
     const result = await this.#request('/api/v1/json-exports', {
       method: 'POST',
       body: { backup: normalizedBackup },
-      auth: true
+      auth: true,
+      timeout: CLOUD_LARGE_TRANSFER_TIMEOUT_MS
     })
     const downloadUrl = String(result?.export?.download_url ?? '').trim()
     this.#jsonExportPath(downloadUrl)
@@ -205,7 +250,9 @@ export class CloudApiClient {
   }
 
   async downloadJsonExport(downloadUrl) {
-    return this.#request(this.#jsonExportPath(downloadUrl))
+    return this.#request(this.#jsonExportPath(downloadUrl), {
+      timeout: CLOUD_LARGE_TRANSFER_TIMEOUT_MS
+    })
   }
 
   #refresh(session) {
@@ -237,8 +284,18 @@ export class CloudApiClient {
     }
   }
 
-  async #request(path, { method = 'GET', body, auth = false, retry = true, authSession = null } = {}) {
-    const session = auth ? (authSession || await this.tokenStore.load()) : null
+  async #request(path, {
+    method = 'GET',
+    body,
+    auth = false,
+    retry = true,
+    authSession = null,
+    timeout
+  } = {}) {
+    let session = auth ? (authSession || await this.tokenStore.load()) : null
+    if (auth && retry && shouldRefreshBeforeTransfer(session, timeout)) {
+      session = await this.#refresh(session)
+    }
     if (auth && session?.access_token) this.#assertSessionScope(session)
     if (auth && !session?.access_token) throw new Error('请先登录云端账号')
     if (
@@ -259,7 +316,8 @@ export class CloudApiClient {
         url: `${this.requestBaseUrl}${path}`,
         method,
         headers,
-        body: body === undefined ? undefined : JSON.stringify(body)
+        body: body === undefined ? undefined : JSON.stringify(body),
+        timeout
       })
       return parseResponse(response)
     } catch (error) {
@@ -267,7 +325,17 @@ export class CloudApiClient {
         const current = await this.tokenStore.load()
         if (sessionAccountScope(current) !== sessionAccountScope(session)) throw sessionChangedError()
         const nextSession = sameSession(current, session) ? await this.#refresh(session) : current
-        return this.#request(path, { method, body, auth: true, retry: false, authSession: nextSession })
+        return this.#request(path, {
+          method,
+          body,
+          auth: true,
+          retry: false,
+          authSession: nextSession,
+          timeout
+        })
+      }
+      if (error?.code === 'request_timeout' && Number(timeout) > 0) {
+        throw transferTimeoutError(path, method, timeout, error)
       }
       if (error?.status === 413) {
         if (path.startsWith('/api/v1/sync')) {
@@ -283,6 +351,17 @@ export class CloudApiClient {
         mappedError.name = 'CloudApiError'
         mappedError.status = 413
         mappedError.code = isJsonExport ? 'json_export_too_large' : 'backup_too_large'
+        mappedError.cause = error
+        throw mappedError
+      }
+      if (error?.status >= 500 && path === '/api/v1/backup') {
+        const mappedError = new Error(
+          `${method === 'GET' ? '云端服务器读取备份失败' : '云端服务器保存备份失败'}（HTTP ${error.status}），请稍后重试；若只在大备份时出现，请检查服务器存储限制`
+        )
+        mappedError.name = 'CloudApiError'
+        mappedError.status = error.status
+        mappedError.code = 'cloud_backup_server_error'
+        mappedError.serverCode = serverErrorCode(error)
         mappedError.cause = error
         throw mappedError
       }

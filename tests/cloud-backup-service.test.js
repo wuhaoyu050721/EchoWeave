@@ -261,3 +261,47 @@ test('checks the serialized encrypted size estimate before PBKDF2 work', async (
   assert.equal(encryptions, 0)
   assert.equal(uploads, 0)
 })
+
+test('reports upload stages and preserves transfer size on network failure', async () => {
+  const stages = []
+  const service = new CloudBackupService({
+    backupService: {
+      exportData: async () => ({
+        formatVersion: 1,
+        providers: [],
+        conversations: [],
+        messages: [],
+        settings: { value: 'content' }
+      }),
+      importData: async () => ({})
+    },
+    apiClient: {
+      uploadBackup: async () => {
+        const error = new Error('offline')
+        error.code = 'network_error'
+        throw error
+      },
+      downloadBackup: async () => ({})
+    },
+    encrypt: async () => ({ version: 1, cipher: { ciphertext: 'encoded' } }),
+    decrypt: async value => value
+  })
+
+  await assert.rejects(
+    service.upload({
+      deviceId: 'device-a',
+      syncPassword: 'sync password',
+      onProgress: progress => stages.push(progress)
+    }),
+    error => error.code === 'network_error' && error.backupByteSize > 0
+  )
+
+  assert.deepEqual(stages.map(progress => progress.stage), [
+    'estimating',
+    'reading',
+    'encrypting',
+    'uploading',
+    'failed'
+  ])
+  assert.equal(stages.at(-1).byteSize > 0, true)
+})

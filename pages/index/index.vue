@@ -108,7 +108,7 @@
 					<text>{{ provider.name }}</text><text>{{ provider.defaultModel }}</text>
 				</button>
 			</view>
-			<scroll-view ref="chatScroll" class="chat-scroll" :class="{ 'has-character-status': latestAssistantStatus }" scroll-y :scroll-into-view="chatScrollIntoView">
+			<scroll-view ref="chatScroll" class="chat-scroll" :class="{ 'has-character-status': latestAssistantStatus }" scroll-y :scroll-into-view="chatScrollIntoView" @scroll="onChatScroll">
 				<view v-if="messageHistoryHasMore || (messageHistoryLoading && messageItems.length)" class="chat-history-loader">
 					<button :disabled="messageHistoryLoading || ui.generating" @click="loadEarlierMessages"><ChevronDown class="chat-history-icon" :size="15" /><text>{{ messageHistoryLoading ? '加载中…' : '加载更早消息' }}</text></button>
 				</view>
@@ -118,12 +118,13 @@
 				</view>
 				<view v-if="messageItems.length" class="date-divider"><text>今天</text></view>
 				<view v-if="!messageItems.length && !messageHistoryLoading" class="empty-chat"><MessageCircle :size="40" /><text>开始新对话</text></view>
-				<template v-for="message in messageItems" :key="message.id">
+				<view v-if="chatVirtualWindow.topPadding" class="chat-virtual-spacer" :style="{ height: `${chatVirtualWindow.topPadding}px` }" aria-hidden="true" />
+				<view v-for="message in virtualMessageItems" :key="message.id" class="chat-virtual-row" :data-chat-message-id="message.id">
 					<view v-if="message.role === 'user'" :id="messageAnchorId(message)" class="message message-user">
 						<view class="user-message-stack" :class="{ 'message-pop': animatedMessageIds.includes(message.id) }" @animationend="finishMessageAnimation(message.id)">
 							<view v-if="message.imageAttachments.length" class="media-message user-media-message">
 								<view class="sent-image-grid" :class="{ single: message.imageAttachments.length === 1 }">
-									<view v-for="attachment in message.imageAttachments" :key="attachment.id" class="sent-image-item"><button class="sent-image-button" :aria-label="`预览图片 ${attachment.name}`" @click="previewImageAttachment(attachment)"><AppImage class="attachment-image" :src="attachmentSource(attachment)" :alt="attachment.name" :mode="message.imageAttachments.length === 1 ? 'widthFix' : 'aspectFill'" /></button><button class="image-download-button" :disabled="imageDownloadBusy" :aria-label="`保存图片 ${attachment.name}`" title="保存到相册" @click.stop="downloadImageAttachment(attachment)"><Download :size="16" /></button></view>
+									<view v-for="attachment in message.imageAttachments" :key="attachment.id" class="sent-image-item"><button class="sent-image-button" :aria-label="`预览图片 ${attachment.name}`" @click="previewImageAttachment(attachment)"><AppImage class="attachment-image" :src="attachmentSource(attachment)" :alt="attachment.name" :mode="message.imageAttachments.length === 1 ? 'widthFix' : 'aspectFill'" @load="scheduleChatVirtualMeasurement" /></button><button class="image-download-button" :disabled="imageDownloadBusy" :aria-label="`保存图片 ${attachment.name}`" title="保存到相册" @click.stop="downloadImageAttachment(attachment)"><Download :size="16" /></button></view>
 								</view>
 								<view v-if="!message.content && !message.textAttachments.length" class="media-message-meta user-media-meta"><text>{{ formatMessageTime(message.updatedAt) }}</text><CheckCheck v-if="isUserMessageRead(message)" class="read-receipt" :size="15" :stroke-width="2.2" /></view>
 							</view>
@@ -159,14 +160,15 @@
 							</view>
 							<view v-if="message.imageAttachments.length" class="media-message assistant-image-surface">
 								<view class="sent-image-grid assistant-image-grid" :class="{ single: message.imageAttachments.length === 1 }">
-									<view v-for="attachment in message.imageAttachments" :key="attachment.id" class="sent-image-item"><button class="sent-image-button" :aria-label="`预览生成图片 ${attachment.name}`" @click="previewImageAttachment(attachment)"><AppImage class="attachment-image" :src="attachmentSource(attachment)" :alt="attachment.name" :mode="message.imageAttachments.length === 1 ? 'widthFix' : 'aspectFill'" /></button><button class="image-download-button" :disabled="imageDownloadBusy" :aria-label="`保存图片 ${attachment.name}`" title="保存到相册" @click.stop="downloadImageAttachment(attachment)"><Download :size="16" /></button></view>
+									<view v-for="attachment in message.imageAttachments" :key="attachment.id" class="sent-image-item"><button class="sent-image-button" :aria-label="`预览生成图片 ${attachment.name}`" @click="previewImageAttachment(attachment)"><AppImage class="attachment-image" :src="attachmentSource(attachment)" :alt="attachment.name" :mode="message.imageAttachments.length === 1 ? 'widthFix' : 'aspectFill'" @load="scheduleChatVirtualMeasurement" /></button><button class="image-download-button" :disabled="imageDownloadBusy" :aria-label="`保存图片 ${attachment.name}`" title="保存到相册" @click.stop="downloadImageAttachment(attachment)"><Download :size="16" /></button></view>
 								</view>
 								<view v-if="!message.displayContent && message.status === 'completed'" class="media-message-meta assistant-media-meta"><text>{{ formatMessageTime(message.updatedAt) }}</text></view>
 								<view v-if="!message.displayContent && message.status === 'completed'" class="assistant-image-footer"><button aria-label="重新生成图片" @click="retryMessage(message.id)"><RotateCcw :size="14" /></button></view>
 							</view>
 						</view>
 					</view>
-				</template>
+				</view>
+				<view v-if="chatVirtualWindow.bottomPadding" class="chat-virtual-spacer" :style="{ height: `${chatVirtualWindow.bottomPadding}px` }" aria-hidden="true" />
 				<view v-if="messageHistoryTrimmed" class="chat-latest-loader">
 					<button :disabled="messageHistoryLoading || ui.generating" @click="reloadLatestMessages"><ChevronDown :size="15" /><text>返回最新消息</text></button>
 				</view>
@@ -542,6 +544,7 @@
 						<button class="backup-choice" :disabled="backupBusy" @click="exportData"><view class="backup-choice-icon local"><Download :size="19" /></view><view><text>保存到本地</text><text>下载 JSON 文件</text></view></button>
 						<button class="backup-choice" :disabled="backupBusy" @click="exportDataToCloud"><view class="backup-choice-icon cloud"><Cloud :size="19" /></view><view><text>保存到云端</text><text>{{ cloudConnected ? '生成下载链接' : '登录后可用' }}</text></view></button>
 					</view>
+					<view v-if="backupTransferStatus" class="backup-transfer-status"><Cloud :size="15" /><text>{{ backupTransferStatus }}</text></view>
 					<view v-if="cloudExportUrl" class="backup-link-result">
 						<text>云端下载链接</text>
 						<view class="backup-link-field"><input :value="cloudExportUrl" readonly /><button aria-label="复制云端下载链接" @click="copyCloudExportLink"><Copy :size="17" /></button></view>
@@ -694,7 +697,10 @@
 	import ProviderLogo from '../../src/components/provider-logo.js'
 	import WorldBookManager from '../../src/components/world-book-manager.vue'
 	import { createCloudServices } from '../../src/app/create-cloud-services.js'
-	import { loadChatMessageResources, mergeEarlierMessageWindow, splitAssistantReplySegments } from '../../src/app/chat-presentation.js'
+	import {
+		buildVirtualMessageLayout, createVirtualMessageWindow, loadChatMessageResources,
+		mergeEarlierMessageWindow, splitAssistantReplySegments
+	} from '../../src/app/chat-presentation.js'
 	import { saveLocalProfileName, syncProfileNameFromCloudSession } from '../../src/app/create-character-instructions.js'
 	import { createPlatformServices, createPlatformWorkspaceManager } from '../../src/app/create-platform-services.js'
 	import { assistantStatusProgressColor, assistantStatusSectionsForDisplay, createAssistantStatusOverview, extractAssistantStatus } from '../../src/core/assistant-status.js'
@@ -739,6 +745,13 @@
 	const COMPOSER_LINE_HEIGHT = 22
 	const CHAT_MESSAGE_PAGE_SIZE = 60
 	const MAX_RENDERED_CHAT_MESSAGES = 240
+	const CHAT_VIRTUAL_MIN_ITEMS = 12
+	const CHAT_VIRTUAL_MAX_ITEMS = 48
+	const CHAT_VIRTUAL_OVERSCAN_PX = 760
+	const CHAT_VIRTUAL_SCROLL_INTERVAL = 32
+	const CHAT_VIRTUAL_MEASURE_INTERVAL = 96
+	const CHAT_HISTORY_AUTO_LOAD_THRESHOLD = 160
+	const CHAT_AUTO_FOLLOW_THRESHOLD = 32
 	const MAX_AVATAR_CACHE_ITEMS = 32
 	const STREAMING_RENDER_INTERVAL = 40
 	const SEGMENT_REVEAL_MIN_DELAY = 320
@@ -771,7 +784,11 @@
 				conversationLoadPromise: null, characterLoadPromise: null, worldBookLoadPromise: null, dataLoadRevision: 0,
 				characterAvatarSources: markRaw(new Map()), characterAvatarLoadPromises: markRaw(new Map()),
 				messageHistoryLoading: false, messageHistoryHasMore: false, messageHistoryTrimmed: false, chatLoadRevision: 0, pendingStreamingMessage: null, streamingRenderTimer: null, segmentedReplyTimers: markRaw(new Map()),
-				chatScrollIntoView: '', chatScrollRevision: 0, chatScrollTimer: null, searchQuery: '', searchOpen: false, homeMenuOpen: false, draftMessage: '', composerInputHeight: COMPOSER_MIN_HEIGHT,
+				chatScrollIntoView: '', chatScrollRevision: 0, chatScrollTimer: null,
+				chatVirtualScrollTop: 0, chatVirtualViewportHeight: 720, chatVirtualPinnedToBottom: true,
+				chatVirtualMeasurementRevision: 0, chatVirtualMeasurements: markRaw(new Map()), chatVirtualScrollTimer: null, chatVirtualMeasureTimer: null,
+				chatHistoryAutoLoadArmed: false, chatHistoryAutoLoadTimer: null,
+				searchQuery: '', searchOpen: false, homeMenuOpen: false, draftMessage: '', composerInputHeight: COMPOSER_MIN_HEIGHT,
 				groupEditorSaving: false, groupEditorReturnScreen: 'conversations',
 				conversationActionSheet: null, conversationActionResolver: null, appDialog: null, appDialogValue: '', appDialogResolver: null,
 				contactSearchQuery: '', contactSortMode: 'name', customCharacterDraft: null, customCharacterAvatar: null, characterDetailEditing: false, characterSaveBusy: false, pendingCharacterAvatarId: '',
@@ -786,7 +803,7 @@
 				providerTesting: false, providerLoadingModels: false, connectionStatus: 'untested', showApiKey: false,
 				providerApiKeyBusy: false, providerApiKeyDirty: false, providerApiKeyLoadedValue: '', providerApiKeyRequestId: 0,
 				providerAvatarPresets: PROVIDER_AVATAR_PRESETS, providerProtocols: PROVIDER_PROTOCOLS, providerAvatarMenuOpen: false, providerAvatarBusy: false,
-				systemPromptEnabled: false, systemPrompt: '', systemPromptSaving: false, streamingEnabled: true, streamingSaving: false, streamingSegmentedDisplay: false, streamingSegmentedSaving: false, characterStatusEnabled: true, characterStatusSaving: false, nsfwEnabled: false, nsfwSaving: false, backupMenuOpen: false, backupBusy: false,
+				systemPromptEnabled: false, systemPrompt: '', systemPromptSaving: false, streamingEnabled: true, streamingSaving: false, streamingSegmentedDisplay: false, streamingSegmentedSaving: false, characterStatusEnabled: true, characterStatusSaving: false, nsfwEnabled: false, nsfwSaving: false, backupMenuOpen: false, backupBusy: false, backupTransferStatus: '',
 				cloudExportUrl: '', cloudImportUrl: '',
 				settingsSearchOpen: false, settingsSearchQuery: '', profileName: '', profileAvatar: null, profileAvatarMenuOpen: false, profileAvatarBusy: false,
 				cloudOpen: false, cloudBusy: false, cloudServices: null, cloudSession: null, networkSyncHandler: null,
@@ -821,6 +838,19 @@
 				return this.cloudConnected && email ? email : '本地模式'
 			},
 			settingsProfileAvatarSource() { return this.profileAvatar?.dataUrl || this.activeProviderLogo },
+			chatVirtualWindow() {
+				void this.chatVirtualMeasurementRevision
+				return createVirtualMessageWindow(this.messageItems, {
+					scrollTop: this.chatVirtualScrollTop,
+					viewportHeight: this.chatVirtualViewportHeight,
+					overscanPixels: CHAT_VIRTUAL_OVERSCAN_PX,
+					minimumItems: CHAT_VIRTUAL_MIN_ITEMS,
+					maximumItems: CHAT_VIRTUAL_MAX_ITEMS,
+					pinnedToBottom: this.chatVirtualPinnedToBottom,
+					measurements: this.chatVirtualMeasurements
+				})
+			},
+			virtualMessageItems() { return this.chatVirtualWindow.items },
 			latestAssistantStatus() {
 				if (!this.characterStatusEnabled) return null
 				const selectedSpeakerId = this.activeGroupConversation ? this.selectedGroupStatusCharacterId : ''
@@ -1100,6 +1130,9 @@
 		beforeUnmount() {
 			clearTimeout(this.toastTimer)
 			clearTimeout(this.chatScrollTimer)
+			clearTimeout(this.chatVirtualScrollTimer)
+			clearTimeout(this.chatVirtualMeasureTimer)
+			clearTimeout(this.chatHistoryAutoLoadTimer)
 			clearTimeout(this.streamingRenderTimer)
 			this.clearSegmentedReplyTimers()
 			this.unbindNetworkSyncListener()
@@ -2316,6 +2349,7 @@
 				this.services?.replyNotificationService?.setActiveConversationId(conversationId)
 				this.animatedMessageIds = []
 				this.assistantStatusOpen = false
+				this.resetChatVirtualWindow()
 				this.messageItems = []
 				this.messageHistoryHasMore = false
 				this.messageHistoryTrimmed = false
@@ -2326,6 +2360,7 @@
 					const messages = await this.hydrateChatMessages(page.messages)
 					if (loadRevision !== this.chatLoadRevision || this.ui.activeConversationId !== conversationId) return
 					this.messageItems = messages
+					this.chatVirtualPinnedToBottom = true
 					this.messageHistoryHasMore = page.hasMore
 					this.groupStatusSpeakerKey = ''
 					for (let index = this.messageItems.length - 1; index >= 0; index -= 1) {
@@ -2338,7 +2373,9 @@
 					}
 					this.modelMenuOpen = false
 					this.closeComposerMenus()
-					this.scrollChatToBottom(true)
+					this.scheduleChatVirtualMeasurement()
+					this.scrollChatToBottom(true, true)
+					this.armChatHistoryAutoLoad()
 				} catch (error) {
 					if (loadRevision === this.chatLoadRevision) this.handleError(error, '对话加载失败')
 				} finally {
@@ -2347,6 +2384,7 @@
 			},
 			async loadEarlierMessages() {
 				if (this.messageHistoryLoading || !this.messageHistoryHasMore || this.ui.generating || !this.messageItems.length) return
+				this.disarmChatHistoryAutoLoad()
 				const conversationId = this.ui.activeConversationId
 				const firstMessage = this.messageItems[0]
 				const anchorId = this.messageAnchorId(firstMessage)
@@ -2360,6 +2398,8 @@
 					if (this.ui.activeConversationId !== conversationId) return
 					const merged = mergeEarlierMessageWindow(this.messageItems, earlier, MAX_RENDERED_CHAT_MESSAGES)
 					this.messageItems = merged.messages
+					this.pruneChatVirtualMeasurements()
+					this.focusChatVirtualMessage(firstMessage.id)
 					this.messageHistoryTrimmed = this.messageHistoryTrimmed || merged.trimmedNewer
 					this.messageHistoryHasMore = page.hasMore
 					this.chatScrollRevision += 1
@@ -2368,10 +2408,14 @@
 					if (!this.restoreChatScrollSnapshot(scrollSnapshot)) {
 						this.chatScrollIntoView = anchorId
 					}
+					this.scheduleChatVirtualMeasurement()
 				} catch (error) {
 					this.handleError(error, '历史消息加载失败')
 				} finally {
-					if (this.ui.activeConversationId === conversationId) this.messageHistoryLoading = false
+					if (this.ui.activeConversationId === conversationId) {
+						this.messageHistoryLoading = false
+						this.armChatHistoryAutoLoad()
+					}
 				}
 			},
 			reloadLatestMessages() {
@@ -2389,6 +2433,7 @@
 				this.streamingRenderTimer = null
 				this.pendingStreamingMessage = null
 				this.clearSegmentedReplyTimers()
+				this.resetChatVirtualWindow()
 				this.messageHistoryLoading = false
 				this.closeComposerMenus()
 				this.assistantStatusOpen = false
@@ -2687,6 +2732,8 @@
 						...current,
 						visibleSegmentCount: currentVisibleCount + 1
 					})
+					this.invalidateChatVirtualMeasurement(messageId)
+					this.scheduleChatVirtualMeasurement()
 					this.scrollChatToBottom()
 					this.scheduleSegmentedReplyReveal(messageId)
 				}, delay)
@@ -2736,6 +2783,7 @@
 						visibleSegmentCount: Math.max(0, Math.min(next.displaySegments.length, currentVisibleCount))
 					}
 				}
+				this.invalidateChatVirtualMeasurement(next.id)
 				if (index === -1) {
 					this.animatedMessageIds.push(next.id)
 					const lastSequence = Number(this.messageItems[this.messageItems.length - 1]?.sequence) || 0
@@ -2750,12 +2798,14 @@
 				}
 				if (this.messageItems.length > MAX_RENDERED_CHAT_MESSAGES) {
 					this.messageItems = this.messageItems.slice(-MAX_RENDERED_CHAT_MESSAGES)
+					this.pruneChatVirtualMeasurements()
 					this.messageHistoryHasMore = true
 				}
 				if (next.status === 'completed' && next.assistantStatus && next.speakerCharacterId) {
 					this.groupStatusSpeakerKey = groupMessageSpeakerKey(next)
 				}
 				if (queueSegmentedReply) this.scheduleSegmentedReplyReveal(next.id)
+				this.scheduleChatVirtualMeasurement()
 				this.scrollChatToBottom()
 			},
 			upsertMessage(message) {
@@ -3265,6 +3315,7 @@
 			showLocalDataInfo() { this.showToast(`${this.conversationItems.length} 个会话，${this.providerItems.length} 个接口`) },
 			openBackupMenu() {
 				this.errorMessage = ''
+				this.backupTransferStatus = ''
 				this.backupMenuOpen = true
 			},
 			closeBackupMenu() {
@@ -3430,18 +3481,81 @@
 				if (entered) await cloud.credentialStore.save(entered)
 				return { newlySaved: Boolean(entered && !existing) }
 			},
+			cloudBackupProgressText(progress = {}) {
+				const bytes = Number(progress.byteSize || progress.estimatedUploadBytes) || 0
+				const size = bytes > 0 ? `（${this.formatAttachmentSize(bytes)}）` : ''
+				return ({
+					estimating: '正在检查备份大小',
+					estimated: `备份大小已估算${size}`,
+					reading: `正在读取本地数据${size}`,
+					encrypting: `正在加密备份${size}`,
+					uploading: `正在上传备份${size}`,
+					completed: `备份已上传${size}`,
+					failed: `备份上传失败${size}`
+				})[progress.stage] || `正在处理云端备份${size}`
+			},
+			cloudBackupFailureText(error, fallbackBytes = 0) {
+				const bytes = Number(error?.backupByteSize || error?.byteSize || fallbackBytes) || 0
+				const size = bytes > 0 ? `（${this.formatAttachmentSize(bytes)}）` : ''
+				if (error?.code === 'backup_too_large') return `备份超过服务器上限${size}`
+				if (error?.code === 'cloud_transfer_timeout') return `备份上传超时${size}`
+				if (error?.code === 'network_error') return `备份上传网络中断${size}`
+				if (error?.code === 'cloud_backup_server_error') return `服务器处理备份失败${size}`
+				return `云端备份失败${size}`
+			},
+			addCloudDiagnostic(type, detail = {}) {
+				try {
+					this.services?.diagnosticLogStore?.add?.(type, detail)
+				} catch (_) {}
+			},
 			async uploadCloudBackup() {
 				this.cloudBusy = true; this.errorMessage = ''
+				const startedAt = Date.now()
+				let transferBytes = 0
+				this.cloudBackupStatus = '正在检查备份大小'
+				this.addCloudDiagnostic('cloud_backup_start', { operation: 'full_backup_upload' })
 				try {
 					const cloud = await this.prepareCloudServices()
 					if (this.autoBackupEnabled && this.cloudForm.syncPassword) await cloud.credentialStore.save(this.cloudForm.syncPassword)
 					const syncPassword = this.cloudForm.syncPassword || await cloud.credentialStore.load()
 					if (!syncPassword) throw new Error('请先输入同步密码')
-					await cloud.cloudBackupService.upload({ deviceId: await this.cloudDeviceId(), syncPassword })
-					this.cloudBackupStatus = `最近备份 ${this.formatMessageTime(new Date().toISOString())}`
+					const result = await cloud.cloudBackupService.upload({
+						deviceId: await this.cloudDeviceId(),
+						syncPassword,
+						onProgress: progress => {
+							transferBytes = Number(progress.byteSize || progress.estimatedUploadBytes) || transferBytes
+							this.cloudBackupStatus = this.cloudBackupProgressText(progress)
+							this.addCloudDiagnostic('cloud_backup_progress', {
+								operation: 'full_backup_upload',
+								stage: progress.stage,
+								byteSize: transferBytes
+							})
+						}
+					})
+					transferBytes = Number(result?.byte_size) || transferBytes
+					const size = transferBytes > 0 ? ` · ${this.formatAttachmentSize(transferBytes)}` : ''
+					this.cloudBackupStatus = `最近备份 ${this.formatMessageTime(new Date().toISOString())}${size}`
+					this.addCloudDiagnostic('cloud_backup_completed', {
+						operation: 'full_backup_upload',
+						byteSize: transferBytes,
+						durationMs: Date.now() - startedAt
+					})
 					this.showToast('云端备份完成')
 				}
-				catch (error) { this.handleError(error, '云端备份失败') }
+				catch (error) {
+					transferBytes = Number(error?.backupByteSize || error?.byteSize) || transferBytes
+					this.cloudBackupStatus = this.cloudBackupFailureText(error, transferBytes)
+					this.addCloudDiagnostic('cloud_backup_failed', {
+						operation: 'full_backup_upload',
+						byteSize: transferBytes,
+						durationMs: Date.now() - startedAt,
+						code: String(error?.code || ''),
+						status: Number(error?.status) || 0,
+						serverCode: String(error?.serverCode || ''),
+						message: String(error?.message || '')
+					})
+					this.handleError(error, '云端备份失败')
+				}
 				finally { this.cloudBusy = false }
 			},
 			async toggleAutoBackup() {
@@ -3581,14 +3695,37 @@
 				if (this.backupBusy) return
 				this.backupBusy = true
 				this.errorMessage = ''
+				this.backupTransferStatus = '正在生成备份文件'
+				const startedAt = Date.now()
+				let transferBytes = 0
+				this.addCloudDiagnostic('cloud_backup_start', { operation: 'json_export_upload' })
 				try {
 					const cloud = await this.prepareCloudServices()
 					if (!this.cloudSession?.access_token) throw new Error('请先在“账号与云端”登录')
-					const { data } = await this.services.backupService.exportText()
+					const { data, byteSize } = await this.services.backupService.exportText()
+					transferBytes = Number(byteSize) || 0
+					this.backupTransferStatus = `正在上传 ${this.formatAttachmentSize(transferBytes)}`
 					const uploaded = await cloud.apiClient.uploadJsonExport(data)
 					this.cloudExportUrl = uploaded.download_url
+					this.backupTransferStatus = `已上传 ${this.formatAttachmentSize(Number(uploaded.byte_size) || transferBytes)}`
+					this.addCloudDiagnostic('cloud_backup_completed', {
+						operation: 'json_export_upload',
+						byteSize: Number(uploaded.byte_size) || transferBytes,
+						durationMs: Date.now() - startedAt
+					})
 					this.showToast('云端 JSON 已保存')
 				} catch (error) {
+					if (error && typeof error === 'object' &&
+						!Number(error.backupByteSize) && transferBytes > 0) error.backupByteSize = transferBytes
+					this.backupTransferStatus = this.cloudBackupFailureText(error, transferBytes)
+					this.addCloudDiagnostic('cloud_backup_failed', {
+						operation: 'json_export_upload',
+						byteSize: transferBytes,
+						durationMs: Date.now() - startedAt,
+						code: String(error?.code || ''),
+						status: Number(error?.status) || 0,
+						message: String(error?.message || '')
+					})
 					this.handleError(error, '云端保存失败')
 				} finally {
 					this.backupBusy = false
@@ -3680,6 +3817,113 @@
 			},
 			formatMessageTime(value) { const date = value ? new Date(value) : new Date(); return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}` },
 			statusLabel(status) { return ({ failed: '回答失败', interrupted: '回答已中断', cancelled: '已停止生成' })[status] || '回答未完成' },
+			resetChatVirtualWindow() {
+				clearTimeout(this.chatVirtualScrollTimer)
+				clearTimeout(this.chatVirtualMeasureTimer)
+				this.chatVirtualScrollTimer = null
+				this.chatVirtualMeasureTimer = null
+				this._chatVirtualPendingScroll = null
+				this.chatVirtualMeasurements.clear()
+				this.chatVirtualMeasurementRevision += 1
+				this.chatVirtualScrollTop = 0
+				this.chatVirtualViewportHeight = Number(this.chatScrollTarget()?.clientHeight) || 720
+				this.chatVirtualPinnedToBottom = true
+				this.disarmChatHistoryAutoLoad()
+			},
+			invalidateChatVirtualMeasurement(messageId) {
+				const id = String(messageId || '')
+				if (id && this.chatVirtualMeasurements.delete(id)) this.chatVirtualMeasurementRevision += 1
+			},
+			pruneChatVirtualMeasurements() {
+				const activeIds = new Set(this.messageItems.map(message => String(message.id || '')))
+				let changed = false
+				for (const id of this.chatVirtualMeasurements.keys()) {
+					if (activeIds.has(id)) continue
+					this.chatVirtualMeasurements.delete(id)
+					changed = true
+				}
+				if (changed) this.chatVirtualMeasurementRevision += 1
+			},
+			focusChatVirtualMessage(messageId) {
+				const index = this.messageItems.findIndex(message => message.id === messageId)
+				if (index < 0) return
+				const layout = buildVirtualMessageLayout(this.messageItems, {
+					measurements: this.chatVirtualMeasurements
+				})
+				this.chatVirtualPinnedToBottom = false
+				this.chatVirtualScrollTop = layout.offsets[index] || 0
+			},
+			scheduleChatVirtualMeasurement() {
+				if (this.chatVirtualMeasureTimer || !this.messageItems.length) return
+				this.chatVirtualMeasureTimer = setTimeout(() => {
+					this.chatVirtualMeasureTimer = null
+					this.$nextTick(() => this.measureChatVirtualRows())
+				}, CHAT_VIRTUAL_MEASURE_INTERVAL)
+			},
+			measureChatVirtualRows() {
+				const target = this.chatScrollTarget()
+				const rows = target?.querySelectorAll?.('.chat-virtual-row[data-chat-message-id]')
+				if (!rows?.length) return
+				let changed = false
+				for (const row of rows) {
+					const id = String(row.dataset?.chatMessageId || row.getAttribute?.('data-chat-message-id') || '')
+					const height = Math.ceil(Number(row.getBoundingClientRect?.().height) || 0)
+					if (!id || height <= 0 || Math.abs((this.chatVirtualMeasurements.get(id) || 0) - height) <= 1) continue
+					this.chatVirtualMeasurements.set(id, height)
+					changed = true
+				}
+				if (!changed) return
+				this.chatVirtualMeasurementRevision += 1
+				if (this.chatVirtualPinnedToBottom) this.scrollChatToBottom()
+			},
+			onChatScroll(event) {
+				const detail = event?.detail || {}
+				const target = this.chatScrollTarget()
+				const scrollTop = Number(detail.scrollTop)
+				if (!Number.isFinite(scrollTop)) return
+				const scrollHeight = Number(detail.scrollHeight) || Number(target?.scrollHeight) || 0
+				const viewportHeight = Number(target?.clientHeight) || this.chatVirtualViewportHeight || 720
+				const distanceToBottom = Math.max(0, scrollHeight - scrollTop - viewportHeight)
+				const pinnedToBottom = distanceToBottom <= CHAT_AUTO_FOLLOW_THRESHOLD
+				if (!pinnedToBottom && (
+					this.chatVirtualPinnedToBottom || this.chatScrollTimer || this.chatScrollIntoView
+				)) this.cancelPendingChatScroll()
+				this.chatVirtualPinnedToBottom = pinnedToBottom
+				this._chatVirtualPendingScroll = {
+					scrollTop,
+					scrollHeight,
+					viewportHeight,
+					pinnedToBottom
+				}
+				if (this.chatVirtualScrollTimer) return
+				this.chatVirtualScrollTimer = setTimeout(() => {
+					this.chatVirtualScrollTimer = null
+					const pending = this._chatVirtualPendingScroll
+					this._chatVirtualPendingScroll = null
+					if (!pending) return
+					this.chatVirtualScrollTop = pending.scrollTop
+					this.chatVirtualViewportHeight = pending.viewportHeight
+					this.chatVirtualPinnedToBottom = pending.pinnedToBottom
+					this.$nextTick(() => this.scheduleChatVirtualMeasurement())
+					if (this.chatHistoryAutoLoadArmed && !pending.pinnedToBottom &&
+						pending.scrollTop <= CHAT_HISTORY_AUTO_LOAD_THRESHOLD) {
+						this.disarmChatHistoryAutoLoad()
+						this.loadEarlierMessages()
+					}
+				}, CHAT_VIRTUAL_SCROLL_INTERVAL)
+			},
+			disarmChatHistoryAutoLoad() {
+				clearTimeout(this.chatHistoryAutoLoadTimer)
+				this.chatHistoryAutoLoadTimer = null
+				this.chatHistoryAutoLoadArmed = false
+			},
+			armChatHistoryAutoLoad() {
+				this.disarmChatHistoryAutoLoad()
+				this.chatHistoryAutoLoadTimer = setTimeout(() => {
+					this.chatHistoryAutoLoadTimer = null
+					this.chatHistoryAutoLoadArmed = this.ui.screen === 'chat' && this.messageHistoryHasMore
+				}, 280)
+			},
 			chatScrollTarget() {
 				const ref = Array.isArray(this.$refs.chatScroll) ? this.$refs.chatScroll[0] : this.$refs.chatScroll
 				return ref?.$el || ref || null
@@ -3712,14 +3956,23 @@
 				}
 				return false
 			},
+			cancelPendingChatScroll() {
+				clearTimeout(this.chatScrollTimer)
+				this.chatScrollTimer = null
+				this.chatScrollRevision += 1
+				this.chatScrollIntoView = ''
+			},
 			requestChatScrollToBottom() {
+				if (!this.chatVirtualPinnedToBottom) return
+				this.chatVirtualPinnedToBottom = true
 				const revision = this.chatScrollRevision + 1
 				this.chatScrollRevision = revision
 				this.chatScrollIntoView = ''
 				this.$nextTick(() => {
-					if (revision !== this.chatScrollRevision) return
+					if (revision !== this.chatScrollRevision || !this.chatVirtualPinnedToBottom) return
 					this.chatScrollIntoView = `chat-bottom-${revision}`
 					this.$nextTick(() => {
+						if (revision !== this.chatScrollRevision || !this.chatVirtualPinnedToBottom) return
 						const ref = Array.isArray(this.$refs.chatScroll) ? this.$refs.chatScroll[0] : this.$refs.chatScroll
 						const target = ref?.$el || ref
 						if (typeof target?.scrollTo === 'function') target.scrollTo({ top: target.scrollHeight })
@@ -3727,20 +3980,22 @@
 					})
 				})
 			},
-			scrollChatToBottom(immediate = false) {
+			scrollChatToBottom(immediate = false, force = false) {
+				if (!force && !this.chatVirtualPinnedToBottom) return
+				if (force) this.chatVirtualPinnedToBottom = true
 				if (immediate) {
 					clearTimeout(this.chatScrollTimer)
 					this.requestChatScrollToBottom()
 					this.chatScrollTimer = setTimeout(() => {
 						this.chatScrollTimer = null
-						this.requestChatScrollToBottom()
+						if (this.chatVirtualPinnedToBottom) this.requestChatScrollToBottom()
 					}, 80)
 					return
 				}
 				if (this.chatScrollTimer) return
 				this.chatScrollTimer = setTimeout(() => {
 					this.chatScrollTimer = null
-					this.requestChatScrollToBottom()
+					if (this.chatVirtualPinnedToBottom) this.requestChatScrollToBottom()
 				}, 64)
 			},
 			showToast(message) { this.toastMessage = message; clearTimeout(this.toastTimer); this.toastTimer = setTimeout(() => { this.toastMessage = '' }, 2200) },
@@ -4603,6 +4858,21 @@
 		font-size: 13px;
 		color: #5d7990;
 		text-shadow: 0 1px 0 rgba(255, 255, 255, 0.8);
+	}
+
+	.chat-virtual-spacer {
+		display: block;
+		width: 100%;
+		min-height: 0;
+		pointer-events: none;
+	}
+
+	.chat-virtual-row {
+		display: flex;
+		width: 100%;
+		min-width: 0;
+		flex-direction: column;
+		contain: layout style;
 	}
 
 	.message {
@@ -8203,6 +8473,26 @@
 		display: grid;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 8px;
+	}
+
+	.backup-transfer-status {
+		display: flex;
+		align-items: center;
+		gap: 7px;
+		min-height: 34px;
+		margin-top: 9px;
+		padding: 7px 9px;
+		border: 1px solid #d7e6f7;
+		border-radius: 7px;
+		background: #f6faff;
+		color: #315f91;
+	}
+
+	.backup-transfer-status text {
+		min-width: 0;
+		font-size: 11px;
+		line-height: 16px;
+		overflow-wrap: anywhere;
 	}
 
 	.backup-choice {

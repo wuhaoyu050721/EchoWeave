@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { ModelHttpError } from '../src/core/model-http-error.js'
-import { CloudApiClient } from '../src/services/cloud-api-client.js'
+import {
+  CLOUD_LARGE_TRANSFER_TIMEOUT_MS,
+  CloudApiClient
+} from '../src/services/cloud-api-client.js'
 
 function createTokenStore(initial = null) {
   let session = initial
@@ -80,6 +83,62 @@ test('uploads and downloads backups with bearer authorization', async () => {
 
   assert.equal(transport.calls[0].headers.Authorization, 'Bearer access')
   assert.deepEqual(JSON.parse(transport.calls[0].body), { device_id: 'device-a', envelope: { version: 1 } })
+  assert.equal(transport.calls[0].timeout, CLOUD_LARGE_TRANSFER_TIMEOUT_MS)
+  assert.equal(transport.calls[1].timeout, CLOUD_LARGE_TRANSFER_TIMEOUT_MS)
+})
+
+test('refreshes a nearly expired access token before uploading a large backup', async () => {
+  const tokenStore = createTokenStore(createSession({
+    access_token: 'expiring-access',
+    refresh_token: 'refresh-1',
+    access_expires_at: Math.floor(Date.now() / 1000) + 30
+  }))
+  const transport = createTransport(async options => {
+    if (options.url.endsWith('/auth/refresh')) {
+      return {
+        status: 200,
+        headers: {},
+        text: JSON.stringify({
+          access_token: 'fresh-access',
+          refresh_token: 'refresh-2',
+          access_expires_at: Math.floor(Date.now() / 1000) + 900
+        })
+      }
+    }
+    return {
+      status: 200,
+      headers: {},
+      text: JSON.stringify({ backup: { version: 1, byte_size: 2048 } })
+    }
+  })
+  const client = new CloudApiClient({ baseUrl: 'https://cloud.example.com', transport, tokenStore })
+
+  await client.uploadBackup({ deviceId: 'device-a', envelope: { version: 1 } })
+
+  assert.equal(transport.calls.length, 2)
+  assert.match(transport.calls[0].url, /\/auth\/refresh$/)
+  assert.equal(transport.calls[1].headers.Authorization, 'Bearer fresh-access')
+  assert.equal(transport.calls[1].timeout, CLOUD_LARGE_TRANSFER_TIMEOUT_MS)
+})
+
+test('maps a large cloud transfer timeout to a backup-specific error', async () => {
+  const tokenStore = createTokenStore(createSession({ access_token: 'access', refresh_token: 'refresh' }))
+  const transport = createTransport(async () => {
+    const error = new Error('request timeout')
+    error.code = 'request_timeout'
+    throw error
+  })
+  const client = new CloudApiClient({ baseUrl: 'https://cloud.example.com', transport, tokenStore })
+
+  await assert.rejects(
+    client.uploadBackup({ deviceId: 'device-a', envelope: { version: 1 } }),
+    error => {
+      assert.equal(error.code, 'cloud_transfer_timeout')
+      assert.equal(error.timeoutMs, CLOUD_LARGE_TRANSFER_TIMEOUT_MS)
+      assert.match(error.message, /10 分钟/)
+      return true
+    }
+  )
 })
 
 test('updates the username and persists it in the encrypted session store', async () => {
@@ -124,6 +183,28 @@ test('maps HTTP 413 to a clear backup size error', async () => {
   )
 })
 
+test('preserves the server error code when backup storage returns HTTP 500', async () => {
+  const tokenStore = createTokenStore(createSession({ access_token: 'access', refresh_token: 'refresh' }))
+  const transport = createTransport(async () => {
+    throw new ModelHttpError('Internal server error', {
+      status: 500,
+      code: 'http_error',
+      body: JSON.stringify({ error: { code: 'server_error', message: 'Internal server error' } })
+    })
+  })
+  const client = new CloudApiClient({ baseUrl: 'https://cloud.example.com', transport, tokenStore })
+
+  await assert.rejects(
+    client.uploadBackup({ deviceId: 'device-a', envelope: { version: 1 } }),
+    error => {
+      assert.equal(error.code, 'cloud_backup_server_error')
+      assert.equal(error.serverCode, 'server_error')
+      assert.equal(error.status, 500)
+      return true
+    }
+  )
+})
+
 test('uploads a JSON export and downloads it from the returned public link', async () => {
   const token = 'a'.repeat(43)
   const downloadUrl = `https://cloud.example.com/api/v1/json-exports/${token}`
@@ -148,6 +229,8 @@ test('uploads a JSON export and downloads it from the returned public link', asy
   assert.deepEqual(JSON.parse(transport.calls[0].body), { backup })
   assert.equal(transport.calls[1].url, downloadUrl)
   assert.equal(transport.calls[1].headers.Authorization, undefined)
+  assert.equal(transport.calls[0].timeout, CLOUD_LARGE_TRANSFER_TIMEOUT_MS)
+  assert.equal(transport.calls[1].timeout, CLOUD_LARGE_TRANSFER_TIMEOUT_MS)
 })
 
 test('normalizes JSON exports that are missing formatVersion before upload', async () => {

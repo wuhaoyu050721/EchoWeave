@@ -14,6 +14,7 @@ test('backup dialog exposes local and cloud save plus file and link import', asy
   assert.match(source, /@click="exportDataToCloud"/)
   assert.match(source, /@change="importData"/)
   assert.match(source, /@click="importDataFromLink"/)
+  assert.match(source, /v-if="backupTransferStatus" class="backup-transfer-status"/)
 })
 
 test('cloud JSON transfer uses the configured login server and shared validated import path', async () => {
@@ -21,6 +22,8 @@ test('cloud JSON transfer uses the configured login server and shared validated 
 
   assert.match(source, /import \{ DEFAULT_CLOUD_BASE_URL, normalizeCloudBaseUrl, resolveCloudRequestBaseUrl \}/)
   assert.match(source, /cloud\.apiClient\.uploadJsonExport\(data\)/)
+  assert.match(source, /正在上传 \$\{this\.formatAttachmentSize\(transferBytes\)\}/)
+  assert.match(source, /operation: 'json_export_upload'/)
   assert.match(source, /cloud\.apiClient\.downloadJsonExport\(downloadUrl\)/)
   assert.match(source, /applyImportedBackup\(payload\)/)
   assert.match(source, /this\.services\.backupService\.importData\(payload\)/)

@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  createVirtualMessageWindow,
+  estimateChatMessageHeight,
   loadChatMessageResources,
   mergeEarlierMessageWindow,
   splitAssistantReplySegments
@@ -33,6 +35,16 @@ test('splits long completed replies at natural sentence boundaries with a bounde
     Array.from({ length: 30 }, (_, index) => `第${index + 1}段。`).join('\n\n'),
     { maximumSegments: 6 }
   ).length <= 6)
+})
+
+test('keeps every paragraph segmented when a completed reply exceeds the old segment cap', () => {
+  const paragraphs = Array.from(
+    { length: 36 },
+    (_, index) => `第 ${index + 1} 段回答，保持为独立气泡。`
+  )
+  const segments = splitAssistantReplySegments(paragraphs.join('\n\n'))
+
+  assert.deepEqual(segments, paragraphs)
 })
 
 test('loads only referenced chat attachments and avatars through bulk repository methods', async () => {
@@ -100,4 +112,74 @@ test('keeps a bounded 240-message window while browsing older history', () => {
   )
   assert.deepEqual(deduplicated.messages.map(message => message.id), ['message-1', 'message-2', 'message-3'])
   assert.equal(deduplicated.trimmedNewer, false)
+})
+
+test('estimates taller rows for long text, attachments, and segmented replies', () => {
+  const short = estimateChatMessageHeight({ role: 'assistant', content: '你好' })
+  const long = estimateChatMessageHeight({ role: 'assistant', content: '很长的回复'.repeat(120) })
+  const media = estimateChatMessageHeight({
+    role: 'assistant',
+    content: '图片',
+    imageAttachments: [{ id: 'image-1' }, { id: 'image-2' }],
+    textAttachments: [{ id: 'text-1' }],
+    responseDisplayMode: 'segmented',
+    displaySegments: ['一', '二', '三']
+  })
+
+  assert.ok(long > short)
+  assert.ok(media > short)
+})
+
+test('virtualizes a large variable-height message list around the viewport', () => {
+  const messages = Array.from({ length: 200 }, (_, index) => ({
+    id: `message-${index + 1}`,
+    role: index % 2 ? 'assistant' : 'user',
+    content: `第 ${index + 1} 条消息 ${'内容'.repeat((index % 8) + 1)}`
+  }))
+  const middle = createVirtualMessageWindow(messages, {
+    scrollTop: 9000,
+    viewportHeight: 760,
+    overscanPixels: 600,
+    maximumItems: 32
+  })
+
+  assert.ok(middle.items.length <= 32)
+  assert.ok(middle.startIndex > 0)
+  assert.ok(middle.endIndex < messages.length)
+  assert.ok(middle.topPadding > 0)
+  assert.ok(middle.bottomPadding > 0)
+
+  const tail = createVirtualMessageWindow(messages, {
+    viewportHeight: 760,
+    maximumItems: 32,
+    pinnedToBottom: true
+  })
+  assert.equal(tail.items.at(-1).id, 'message-200')
+  assert.equal(tail.bottomPadding, 0)
+})
+
+test('virtual message layout prefers measured row heights over estimates', () => {
+  const messages = Array.from({ length: 20 }, (_, index) => ({
+    id: `message-${index + 1}`,
+    role: 'assistant',
+    content: '短消息'
+  }))
+  const estimated = createVirtualMessageWindow(messages, {
+    scrollTop: 800,
+    viewportHeight: 320,
+    minimumItems: 2,
+    maximumItems: 6,
+    overscanPixels: 0
+  })
+  const measured = createVirtualMessageWindow(messages, {
+    scrollTop: 800,
+    viewportHeight: 320,
+    minimumItems: 2,
+    maximumItems: 6,
+    overscanPixels: 0,
+    measurements: new Map(messages.slice(0, 8).map(message => [message.id, 220]))
+  })
+
+  assert.ok(measured.startIndex < estimated.startIndex)
+  assert.equal(measured.heights[0], 220)
 })

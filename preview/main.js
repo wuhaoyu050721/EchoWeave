@@ -7,4 +7,11 @@ const PreviewPage = previewLocation.includes('pages/android-diagnostics/index')
   ? defineAsyncComponent(() => import('../pages/android-diagnostics/index.vue'))
   : MainPage
 
-createApp(PreviewPage).mount('#app')
+const previewApp = createApp(PreviewPage)
+const previewInstance = previewApp.mount('#app')
+if (import.meta.env.DEV) {
+  Object.defineProperty(globalThis, '__echoWeavePreview', {
+    configurable: true,
+    value: previewInstance
+  })
+}

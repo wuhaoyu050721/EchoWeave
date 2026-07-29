@@ -90,5 +90,111 @@ test('core local workflow remains usable', async ({ page }) => {
   await expect(page.locator('.message-content').filter({ hasText: 'E2E 流式回答' })).toBeVisible()
   await expect(page.locator('.generation-status')).toHaveCount(0)
 
+  await page.evaluate(async () => {
+    const preview = globalThis.__echoWeavePreview
+    if (!preview) throw new Error('Preview test instance is unavailable')
+    preview.resetChatVirtualWindow()
+    preview.messageItems = Array.from({ length: 240 }, (_, index) => {
+      const role = index % 2 === 0 ? 'user' : 'assistant'
+      const content = `虚拟滚动消息 ${index + 1}\n${'不同长度的正文内容。'.repeat((index % 18) + 1)}`
+      return preview.decorateChatMessage({
+        id: `virtual-message-${index + 1}`,
+        conversationId: preview.ui.activeConversationId,
+        sequence: index + 1,
+        role,
+        content,
+        status: 'completed',
+        generationMode: 'chat',
+        attachments: [],
+        attachmentIds: [],
+        createdAt: '2026-07-28T00:00:00.000Z',
+        updatedAt: '2026-07-28T00:00:00.000Z'
+      })
+    })
+    preview.chatVirtualPinnedToBottom = true
+    await preview.$nextTick()
+    preview.scrollChatToBottom(true)
+  })
+  await expect(page.locator('[data-chat-message-id="virtual-message-240"]')).toBeVisible()
+  const tailVirtualRows = page.locator('.chat-virtual-row')
+  const tailVirtualRowCount = await tailVirtualRows.count()
+  expect(tailVirtualRowCount).toBeGreaterThan(0)
+  expect(tailVirtualRowCount).toBeLessThanOrEqual(48)
+  await page.waitForTimeout(140)
+
+  const middleWindow = await page.evaluate(async () => {
+    const preview = globalThis.__echoWeavePreview
+    const scroll = document.querySelector('.chat-scroll')
+    const scrollTop = Math.max(0, scroll.scrollHeight / 2)
+    scroll.scrollTop = scrollTop
+    preview.onChatScroll({
+      detail: {
+        scrollTop,
+        scrollHeight: scroll.scrollHeight
+      }
+    })
+    await new Promise(resolve => setTimeout(resolve, 180))
+    const rows = [...document.querySelectorAll('.chat-virtual-row')]
+    return {
+      count: rows.length,
+      firstId: rows[0]?.getAttribute('data-chat-message-id') || '',
+      lastId: rows.at(-1)?.getAttribute('data-chat-message-id') || '',
+      spacerCount: document.querySelectorAll('.chat-virtual-spacer').length
+    }
+  })
+  expect(middleWindow.count).toBeGreaterThan(0)
+  expect(middleWindow.count).toBeLessThanOrEqual(48)
+  expect(middleWindow.firstId).not.toBe('virtual-message-1')
+  expect(middleWindow.lastId).not.toBe('virtual-message-240')
+  expect(middleWindow.spacerCount).toBe(2)
+
+  const pausedSegmentedFollow = await page.evaluate(async () => {
+    const preview = globalThis.__echoWeavePreview
+    const scroll = document.querySelector('.chat-scroll')
+    const messageIndex = preview.messageItems.length - 1
+    const message = preview.messageItems[messageIndex]
+    const before = scroll.scrollTop
+    preview.messageItems.splice(messageIndex, 1, {
+      ...message,
+      responseDisplayMode: 'segmented',
+      displayContent: '第一段\n\n第二段\n\n第三段',
+      displaySegments: ['第一段', '第二段', '第三段'],
+      visibleSegmentCount: 0
+    })
+    preview.scheduleSegmentedReplyReveal(message.id)
+    await new Promise(resolve => setTimeout(resolve, 420))
+    const result = {
+      before,
+      after: scroll.scrollTop,
+      pinnedToBottom: preview.chatVirtualPinnedToBottom,
+      visibleSegmentCount: preview.messageItems[messageIndex].visibleSegmentCount
+    }
+    preview.clearSegmentedReplyTimers()
+    return result
+  })
+  expect(pausedSegmentedFollow.pinnedToBottom).toBe(false)
+  expect(pausedSegmentedFollow.visibleSegmentCount).toBe(1)
+  expect(Math.abs(pausedSegmentedFollow.after - pausedSegmentedFollow.before)).toBeLessThan(3)
+
+  const automaticHistoryLoads = await page.evaluate(async () => {
+    const preview = globalThis.__echoWeavePreview
+    const scroll = document.querySelector('.chat-scroll')
+    const originalLoadEarlierMessages = preview.loadEarlierMessages
+    let calls = 0
+    preview.loadEarlierMessages = () => { calls += 1 }
+    preview.messageHistoryHasMore = true
+    preview.chatHistoryAutoLoadArmed = true
+    preview.onChatScroll({
+      detail: {
+        scrollTop: 32,
+        scrollHeight: scroll.scrollHeight
+      }
+    })
+    await new Promise(resolve => setTimeout(resolve, 100))
+    preview.loadEarlierMessages = originalLoadEarlierMessages
+    return calls
+  })
+  expect(automaticHistoryLoads).toBe(1)
+
   expect(runtimeErrors).toEqual([])
 })

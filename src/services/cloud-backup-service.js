@@ -15,6 +15,12 @@ function backupSizeError(byteSize, maxBytes) {
   return error
 }
 
+function notifyProgress(onProgress, stage, detail = {}) {
+  try {
+    onProgress?.({ stage, ...detail })
+  } catch (_) {}
+}
+
 export class CloudBackupService {
   constructor({
     backupService,
@@ -39,25 +45,59 @@ export class CloudBackupService {
     this.maxUploadBytes = maxUploadBytes
   }
 
-  async upload({ deviceId, syncPassword }) {
-    const conservativeEstimate = await this.repository?.estimateBackupBytes?.()
-    const estimatedStoredEnvelopeBytes = estimateEncryptedEnvelopeBytes(conservativeEstimate)
-    if (Number.isFinite(conservativeEstimate) && estimatedStoredEnvelopeBytes > this.maxUploadBytes) {
-      throw backupSizeError(estimatedStoredEnvelopeBytes, this.maxUploadBytes)
+  async upload({ deviceId, syncPassword, onProgress } = {}) {
+    let transferBytes = 0
+    try {
+      notifyProgress(onProgress, 'estimating')
+      const conservativeEstimate = await this.repository?.estimateBackupBytes?.()
+      const estimatedStoredEnvelopeBytes = estimateEncryptedEnvelopeBytes(conservativeEstimate)
+      if (Number.isFinite(conservativeEstimate)) {
+        transferBytes = estimatedStoredEnvelopeBytes
+        notifyProgress(onProgress, 'estimated', {
+          sourceBytes: conservativeEstimate,
+          estimatedUploadBytes: estimatedStoredEnvelopeBytes
+        })
+      }
+      if (Number.isFinite(conservativeEstimate) && estimatedStoredEnvelopeBytes > this.maxUploadBytes) {
+        throw backupSizeError(estimatedStoredEnvelopeBytes, this.maxUploadBytes)
+      }
+
+      notifyProgress(onProgress, 'reading', { estimatedUploadBytes: transferBytes || null })
+      const payload = this.repository
+        ? await createCloudBackupPayload(await this.repository.readBackupData(), this.vault)
+        : await this.backupService.exportData()
+      const serializedPayload = JSON.stringify(payload)
+      const plaintextBytes = encodeUtf8(serializedPayload).byteLength
+      const estimatedEnvelopeBytes = estimateEncryptedEnvelopeBytes(plaintextBytes)
+      transferBytes = estimatedEnvelopeBytes
+      notifyProgress(onProgress, 'encrypting', {
+        sourceBytes: plaintextBytes,
+        estimatedUploadBytes: estimatedEnvelopeBytes
+      })
+      if (estimatedEnvelopeBytes > this.maxUploadBytes) {
+        throw backupSizeError(estimatedEnvelopeBytes, this.maxUploadBytes)
+      }
+
+      const envelope = await this.encrypt(payload, syncPassword, { serializedPayload })
+      const byteSize = encodeUtf8(JSON.stringify(envelope)).byteLength
+      transferBytes = byteSize
+      if (byteSize > this.maxUploadBytes) throw backupSizeError(byteSize, this.maxUploadBytes)
+      notifyProgress(onProgress, 'uploading', { sourceBytes: plaintextBytes, byteSize })
+      const result = await this.apiClient.uploadBackup({ deviceId, envelope })
+      notifyProgress(onProgress, 'completed', { sourceBytes: plaintextBytes, byteSize })
+      return result
+    } catch (error) {
+      if (error && typeof error === 'object' &&
+        !Number.isFinite(Number(error.backupByteSize)) && transferBytes > 0) {
+        error.backupByteSize = transferBytes
+      }
+      notifyProgress(onProgress, 'failed', {
+        byteSize: Number(error?.backupByteSize) || 0,
+        code: String(error?.code || ''),
+        status: Number(error?.status) || 0
+      })
+      throw error
     }
-    const payload = this.repository
-      ? await createCloudBackupPayload(await this.repository.readBackupData(), this.vault)
-      : await this.backupService.exportData()
-    const serializedPayload = JSON.stringify(payload)
-    const plaintextBytes = encodeUtf8(serializedPayload).byteLength
-    const estimatedEnvelopeBytes = estimateEncryptedEnvelopeBytes(plaintextBytes)
-    if (estimatedEnvelopeBytes > this.maxUploadBytes) {
-      throw backupSizeError(estimatedEnvelopeBytes, this.maxUploadBytes)
-    }
-    const envelope = await this.encrypt(payload, syncPassword, { serializedPayload })
-    const byteSize = encodeUtf8(JSON.stringify(envelope)).byteLength
-    if (byteSize > this.maxUploadBytes) throw backupSizeError(byteSize, this.maxUploadBytes)
-    return this.apiClient.uploadBackup({ deviceId, envelope })
   }
 
   async restore({ syncPassword }) {

@@ -58,7 +58,7 @@
 - 支持从相册、相机和文件管理器添加图片或文本附件。
 - API 密钥使用设备密钥加密保存，编辑时默认隐藏并支持按需查看。
 - 内置流式传输诊断，可查看首块耗时、事件数量、结束原因和状态协议日志。
-- 长会话仅保留有限消息在界面中渲染，并批量、按需加载附件和头像，降低页面切换与滚动卡顿。
+- 长会话按页动态加载，并使用可变高度虚拟滚动；数据窗口最多保留 240 条消息，DOM 仅挂载视口附近最多 48 条，同时批量、按需加载附件和头像。
 
 ### 多角色群聊
 
@@ -91,6 +91,7 @@
 - Android 大型角色卡、世界书、头像、附件及同步状态采用分块存储，避免 `CursorWindow` 超限。
 - 支持本地 JSON 备份、加密云端完整备份和多设备增量同步；备份格式完整保留群聊成员及发言身份。
 - 便携式 JSON 备份限制为 50 MB；云端备份会在密钥派生和加密前估算体积，避免超大数据占满设备内存。
+- 云端大文件传输最长等待 10 分钟，上传前会刷新即将过期的登录令牌，并通过进度和诊断日志区分体积超限、网络中断、超时及服务器错误。
 - 云同步使用本地修订号与内容哈希识别头像变化，仅在需要上传时读取大型资源。
 - 云端恢复后自动修复角色、会话和头像关联。
 - 支持注册、登录、自定义用户名、云端 JSON 分享链接与跨设备恢复。
@@ -147,9 +148,11 @@ npm run dev
 1. 按编号顺序执行 `server/migrations/001_initial.sql` 至 `006_auth_limits_and_sync_compaction.sql`。
 2. 将 `server/config.example.php` 复制为 `server/config.php`，填写数据库连接、公开服务地址和容量限制。
 3. 将站点 Web 根目录指向 `server/public/`，并为公开服务配置 HTTPS。
-4. 在应用“设置 -> 账号与云端”中填写同一个公开服务地址，再进行注册、登录和同步。
+4. 反向代理至少配置 `client_max_body_size 110m`、`client_body_timeout 600s` 和 `fastcgi_read_timeout 600s`。
+5. PHP 建议配置 `memory_limit = 512M`、`max_execution_time = 600`，MySQL/MariaDB 配置 `max_allowed_packet = 128M`；否则较大的加密备份可能在进入应用限制前被网关、PHP 或数据库拒绝。
+6. 在应用“设置 -> 账号与云端”中填写同一个公开服务地址，再进行注册、登录和同步。
 
-`server/config.php` 已被 Git 忽略，不要提交数据库密码或生产环境配置。增量同步协议和部署注意事项见 [docs/cloud-incremental-sync-v1.md](docs/cloud-incremental-sync-v1.md)。
+`server/config.php` 已被 Git 忽略，不要提交数据库密码或生产环境配置。客户端会为完整备份和云端 JSON 使用 10 分钟传输超时，并在诊断日志中记录阶段、字节数、耗时与 HTTP 状态。增量同步协议和部署注意事项见 [docs/cloud-incremental-sync-v1.md](docs/cloud-incremental-sync-v1.md)。
 
 ## 验证
 
