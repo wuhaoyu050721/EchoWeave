@@ -1,5 +1,5 @@
 <template>
-	<view class="app-shell" :class="{ 'chat-active': ui.screen === 'chat' }">
+	<view class="app-shell" :class="{ 'chat-active': ui.screen === 'chat' && !activeStoryConversation, 'story-reader-active': ui.screen === 'chat' && activeStoryConversation }">
 		<view v-show="ui.screen === 'conversations'" class="screen-view conversations-view primary-tab-view">
 				<view class="screen-header conversations-header">
 					<text class="screen-title">织语</text>
@@ -59,7 +59,7 @@
 			<view class="stories-control-band">
 				<view class="stories-search">
 					<Search :size="20" />
-					<input v-model="storySearchQuery" placeholder="搜索故事角色" confirm-type="search" />
+					<input v-model="storySearchQuery" placeholder="搜索故事或角色" confirm-type="search" />
 					<button v-if="storySearchQuery" aria-label="清空故事搜索" @click="storySearchQuery = ''"><X :size="17" /></button>
 				</view>
 				<view class="stories-import-grid">
@@ -68,6 +68,19 @@
 				</view>
 			</view>
 			<scroll-view class="stories-scroll" scroll-y @scrolltolower="showMoreStoryCharacters">
+				<view v-if="renderedStoryConversations.length" class="stories-list story-progress-list">
+					<text class="stories-list-label">继续阅读</text>
+					<view v-for="conversation in renderedStoryConversations" :key="conversation.id" v-memo="[conversation]" class="story-progress-row" :data-story-conversation-id="conversation.id">
+						<button class="story-progress-open" :aria-label="`继续故事 ${conversation.title}`" @click="openChat(conversation.id)" @longpress.stop="manageConversation(conversation)" @contextmenu.prevent.stop="manageConversation(conversation)">
+							<ProviderLogo class="story-progress-avatar" :src="conversationProviderLogo(conversation)" :alt="conversation.title" mode="aspectFill" lazy-load />
+							<view class="story-progress-copy">
+								<view class="story-progress-title-line"><text class="story-progress-name">{{ conversation.title }}</text><text class="story-progress-time">{{ conversation.time }}</text></view>
+								<text class="story-progress-preview">{{ conversation.preview }}</text>
+							</view>
+						</button>
+						<button class="story-progress-manage" :aria-label="`管理故事 ${conversation.title}`" @click.stop="manageConversation(conversation)"><MoreVertical :size="19" /></button>
+					</view>
+				</view>
 				<view v-if="renderedStoryCharacters.length" class="stories-list">
 					<text class="stories-list-label">故事角色</text>
 					<button v-for="character in renderedStoryCharacters" :key="character.id" v-memo="[character]" class="story-character-row" :aria-label="`开始故事 ${character.name}`" @click="startStoryFromCharacter(character)">
@@ -76,10 +89,10 @@
 							<text class="story-character-name">{{ character.name }}</text>
 							<text class="story-character-meta">{{ storyCharacterMeta(character) }}</text>
 						</view>
-						<view class="story-start-pill"><PlayOutline :size="13" /><text>开始</text></view>
+						<view class="story-start-pill"><PlayOutline :size="13" /><text>新故事</text></view>
 					</button>
 				</view>
-				<view v-else class="stories-empty">
+				<view v-if="!renderedStoryConversations.length && !renderedStoryCharacters.length" class="stories-empty">
 					<FileText :size="44" />
 					<text>{{ storySearchQuery ? '没有匹配的故事角色' : '还没有故事角色' }}</text>
 					<button :disabled="characterImportBusy" @click="openStoryCharacterCardPicker('file')"><Import :size="17" /><text>导入故事角色卡</text></button>
@@ -120,6 +133,58 @@
 		</template>
 
 		<template v-else-if="ui.screen === 'chat'">
+			<template v-if="activeStoryConversation">
+				<StoryReader
+					v-model="draftMessage"
+					:conversation="activeConversation"
+					:messages="messageItems"
+					:avatar-source="activeAssistantAvatar"
+					:provider-name="chatProviderName"
+					:model-name="chatModelName"
+					:providers="providerItems"
+					:model-menu-open="modelMenuOpen"
+					:status-available="Boolean(latestAssistantStatus && assistantStatusOverview)"
+					:mode="storyReaderMode"
+					:reader-position="storyReaderPosition"
+					:bookmarks="storyReaderBookmarks"
+					:loading="messageHistoryLoading"
+					:history-has-more="messageHistoryHasMore"
+					:history-trimmed="messageHistoryTrimmed"
+					:generating="ui.generating"
+					:continue-message-id="storyContinueMessageId"
+					:can-send="canSend"
+					:pending-attachments="pendingAttachments"
+					:attachment-processing="attachmentProcessing"
+					:attachment-menu-open="attachmentMenuOpen"
+					:attachment-actions="attachmentActions"
+					@back="backToConversations"
+					@toggle-model="toggleModelMenu"
+					@select-provider="selectConversationProvider"
+					@manage="manageConversation(activeConversation)"
+					@open-status="assistantStatusOpen = true"
+					@update:mode="saveStoryReaderMode"
+					@update:readerPosition="queueStoryReaderPositionSave"
+					@update:bookmarks="saveStoryReaderBookmarks"
+					@load-earlier="loadEarlierMessages"
+					@reload-latest="reloadLatestMessages"
+					@toggle-attachments="toggleAttachmentMenu"
+					@choose-attachment="chooseAttachmentAction"
+					@remove-attachment="removePendingAttachment"
+					@close-menus="closeStoryMenus"
+					@submit="handleComposerAction"
+					@stop="stopGeneration"
+					@retry="retryMessage"
+					@continue="continueMessage"
+					@copy="copyMessage"
+					@feedback="setStoryMessageFeedback"
+					@preview-image="previewImageAttachment"
+					@preview-text="previewTextAttachment"
+				/>
+				<input ref="imageAttachmentInput" class="hidden-file-input" type="file" accept="image/*" multiple @change="handleAttachmentSelection" />
+				<input ref="cameraAttachmentInput" class="hidden-file-input" type="file" accept="image/*" capture="environment" @change="handleAttachmentSelection" />
+				<input ref="fileAttachmentInput" class="hidden-file-input" type="file" :accept="textAttachmentAccept" multiple @change="handleAttachmentSelection" />
+			</template>
+			<template v-else>
 			<view class="chat-toolbar">
 				<button class="icon-button chat-back-button" data-testid="back-to-conversations" aria-label="返回会话" @click="backToConversations"><ArrowLeft :size="26" /></button>
 				<button class="model-selector" :disabled="ui.generating" @click="toggleModelMenu">
@@ -253,6 +318,7 @@
 				<input ref="cameraAttachmentInput" class="hidden-file-input" type="file" accept="image/*" capture="environment" @change="handleAttachmentSelection" />
 				<input ref="fileAttachmentInput" class="hidden-file-input" type="file" :accept="textAttachmentAccept" multiple @change="handleAttachmentSelection" />
 			</view>
+			</template>
 		</template>
 
 		<template v-else-if="ui.screen === 'providers'">
@@ -736,6 +802,7 @@
 	import GroupAvatar from '../../src/components/group-avatar.vue'
 	import GroupChatEditor from '../../src/components/group-chat-editor.vue'
 	import ProviderLogo from '../../src/components/provider-logo.js'
+	import StoryReader from '../../src/components/story-reader.vue'
 	import WorldBookManager from '../../src/components/world-book-manager.vue'
 	import { createCloudServices } from '../../src/app/create-cloud-services.js'
 	import {
@@ -756,6 +823,11 @@
 	import { imageAttachmentSource } from '../../src/core/image-output.js'
 	import { PROFILE_AVATAR_SETTING_KEY, createProfileAvatar, normalizeProfileAvatar } from '../../src/core/profile-avatar.js'
 	import { extractStoryMemory } from '../../src/core/story-memory.js'
+	import {
+		STORY_READER_MODE_SETTING_KEY, normalizeStoryReaderBookmarks, normalizeStoryReaderMode,
+		normalizeStoryReaderPosition, readStoryReaderBookmarks, readStoryReaderMode, readStoryReaderPosition,
+		storyReaderBookmarksSettingKey, storyReaderPositionSettingKey
+	} from '../../src/core/story-reader.js'
 	import {
 		STREAMING_SEGMENTED_DISPLAY_SETTING_KEY, STREAMING_SETTING_KEY,
 		readStreamingEnabled, readStreamingSegmentedDisplayEnabled
@@ -798,6 +870,7 @@
 	const STREAMING_RENDER_INTERVAL = 40
 	const SEGMENT_REVEAL_MIN_DELAY = 320
 	const SEGMENT_REVEAL_MAX_DELAY = 760
+	const STORY_READER_POSITION_SAVE_DELAY = 220
 	const PRIMARY_LIST_BATCH_SIZE = 16
 	const CHARACTER_MAKER_URL = 'https://www.surtr.cn:8019/'
 	const SAVED_API_KEY_MASK = '••••••••••••'
@@ -815,7 +888,7 @@
 		components: {
 			Activity, AlertCircle, ArrowLeft, Camera, Check, CheckCheck, ChevronDown, ChevronRight, CircleHelp, Cloud, Copy, Database,
 			Contact, Download, EyeOff, FileCog, FileText, Image, Import, Info, KeyRound, LockKeyhole, MessageCircle, Mic,
-			MoreVertical, Paperclip, PlayOutline, Plus, AppDialogLayer, AppImage, CharacterContacts, CharacterDetail, GroupAvatar, GroupChatEditor, ProviderLogo, WorldBookManager, RefreshCw, RotateCcw, Search, Send, Settings, Square,
+			MoreVertical, Paperclip, PlayOutline, Plus, AppDialogLayer, AppImage, CharacterContacts, CharacterDetail, GroupAvatar, GroupChatEditor, ProviderLogo, StoryReader, WorldBookManager, RefreshCw, RotateCcw, Search, Send, Settings, Square,
 			ThumbsDown, ThumbsUp, Trash2, Upload, X
 		},
 		data() {
@@ -845,7 +918,7 @@
 				providerTesting: false, providerLoadingModels: false, connectionStatus: 'untested', showApiKey: false,
 				providerApiKeyBusy: false, providerApiKeyDirty: false, providerApiKeyLoadedValue: '', providerApiKeyRequestId: 0,
 				providerAvatarPresets: PROVIDER_AVATAR_PRESETS, providerProtocols: PROVIDER_PROTOCOLS, providerAvatarMenuOpen: false, providerAvatarBusy: false,
-				systemPromptEnabled: false, systemPrompt: '', systemPromptSaving: false, streamingEnabled: true, streamingSaving: false, streamingSegmentedDisplay: false, streamingSegmentedSaving: false, characterStatusEnabled: true, characterStatusSaving: false, nsfwEnabled: false, nsfwSaving: false, backupMenuOpen: false, backupBusy: false, backupTransferStatus: '',
+				systemPromptEnabled: false, systemPrompt: '', systemPromptSaving: false, streamingEnabled: true, streamingSaving: false, streamingSegmentedDisplay: false, streamingSegmentedSaving: false, storyReaderMode: 'page', storyReaderPosition: null, storyReaderPositionSaveTimer: null, pendingStoryReaderPositionSave: null, storyReaderPositionWritePromise: null, storyReaderBookmarks: [], storyReaderBookmarksWritePromise: null, storyReaderBookmarksRevision: 0, characterStatusEnabled: true, characterStatusSaving: false, nsfwEnabled: false, nsfwSaving: false, backupMenuOpen: false, backupBusy: false, backupTransferStatus: '',
 				cloudExportUrl: '', cloudImportUrl: '',
 				settingsSearchOpen: false, settingsSearchQuery: '', profileName: '', profileAvatar: null, profileAvatarMenuOpen: false, profileAvatarBusy: false,
 				cloudOpen: false, cloudBusy: false, cloudServices: null, cloudSession: null, networkSyncHandler: null,
@@ -966,11 +1039,23 @@
 			},
 			filteredConversations() {
 				const keyword = this.searchQuery.trim().toLowerCase()
-				if (!keyword) return this.conversationItems
-				return this.conversationItems.filter((item) => `${item.title} ${item.preview}`.toLowerCase().includes(keyword))
+				const conversations = this.conversationItems.filter(item => item?.conversationKind !== 'story')
+				if (!keyword) return conversations
+				return conversations.filter((item) => `${item.title} ${item.preview}`.toLowerCase().includes(keyword))
 			},
 			renderedConversations() {
 				return this.filteredConversations.slice(0, this.conversationRenderLimit)
+			},
+			storyConversations() {
+				return this.conversationItems.filter(item => item?.conversationKind === 'story')
+			},
+			filteredStoryConversations() {
+				const keyword = this.storySearchQuery.trim().toLowerCase()
+				if (!keyword) return this.storyConversations
+				return this.storyConversations.filter(item => `${item.title} ${item.preview}`.toLowerCase().includes(keyword))
+			},
+			renderedStoryConversations() {
+				return this.filteredStoryConversations.slice(0, this.storyRenderLimit)
 			},
 			contactCharacters() {
 				return this.characterItems.filter(item => String(item?.storyScope || '').trim() !== 'story')
@@ -1143,6 +1228,14 @@
 			automaticProviderAvatar() { return detectProviderAvatarPreset(this.providerForm) },
 			automaticProviderAvatarSource() { return this.automaticProviderAvatar.source },
 			automaticProviderAvatarLabel() { return `当前识别为 ${this.automaticProviderAvatar.label}` },
+			storyContinueMessageId() {
+				for (let index = this.messageItems.length - 1; index >= 0; index -= 1) {
+					const message = this.messageItems[index]
+					if (message.role !== 'assistant') continue
+					return this.canContinueMessage(message) ? String(message.id || '') : ''
+				}
+				return ''
+			},
 			canStoryContinue() {
 				return Boolean(
 					this.activeStoryConversation &&
@@ -1180,7 +1273,10 @@
 			},
 			storySearchQuery() {
 				this.storyRenderLimit = PRIMARY_LIST_BATCH_SIZE
-				this.$nextTick(() => this.hydrateVisibleCharacterAvatars())
+				this.$nextTick(() => Promise.all([
+					this.hydrateVisibleCharacterAvatars(),
+					this.hydrateVisibleConversationAvatars()
+				]))
 			},
 			draftMessage(value) {
 				if (!value) {
@@ -1225,9 +1321,12 @@
 			clearTimeout(this.chatVirtualMeasureTimer)
 			clearTimeout(this.chatHistoryAutoLoadTimer)
 			clearTimeout(this.streamingRenderTimer)
+			clearTimeout(this.storyReaderPositionSaveTimer)
 			this.clearSegmentedReplyTimers()
 			this.unbindNetworkSyncListener()
-			const closeWorkspace = async () => {
+				const closeWorkspace = async () => {
+					await this.flushStoryReaderPositionSave()
+					await this.waitForStoryReaderBookmarksSave()
 				await this.stopCloudActivityAndWait()
 				if (this.workspaceManager) await this.workspaceManager.close()
 				else await this.services?.replyNotificationService?.dispose?.()
@@ -1439,10 +1538,13 @@
 			},
 			async showMoreStoryCharacters() {
 				this.storyRenderLimit = Math.min(
-					this.filteredStoryCharacters.length,
+					Math.max(this.filteredStoryCharacters.length, this.filteredStoryConversations.length),
 					this.storyRenderLimit + PRIMARY_LIST_BATCH_SIZE
 				)
-				await this.hydrateVisibleCharacterAvatars()
+				await Promise.all([
+					this.hydrateVisibleCharacterAvatars(),
+					this.hydrateVisibleConversationAvatars()
+				])
 			},
 			openCharacterMaker() {
 				const plusApi = typeof plus !== 'undefined' ? plus : null
@@ -1731,7 +1833,10 @@
 				return this.hydrateCharacterAvatars([...visibleById.values()])
 			},
 			async hydrateVisibleConversationAvatars() {
-				const visibleIds = new Set(this.renderedConversations.map(conversation => conversation.id))
+				const visibleIds = new Set(
+					[...this.renderedConversations, ...this.renderedStoryConversations]
+						.map(conversation => conversation.id)
+				)
 				const targets = this.conversationItems.filter(conversation => visibleIds.has(conversation.id))
 				const assetIds = targets.flatMap(conversation => [
 					conversation.characterAvatarAssetId,
@@ -2100,12 +2205,91 @@
 				this.composerInputHeight = nextHeight
 			},
 			toggleModelMenu() { this.closeComposerMenus(); this.modelMenuOpen = !this.modelMenuOpen },
+			async saveStoryReaderMode(mode) {
+				const nextMode = normalizeStoryReaderMode(mode)
+				const previousMode = this.storyReaderMode
+				if (nextMode === previousMode) return
+				this.storyReaderMode = nextMode
+				try {
+					await this.services?.repository?.setSetting?.(STORY_READER_MODE_SETTING_KEY, nextMode)
+				} catch (error) {
+					if (this.storyReaderMode === nextMode) this.storyReaderMode = previousMode
+					this.handleError(error, '阅读方式保存失败')
+				}
+			},
+			queueStoryReaderPositionSave(position) {
+				const conversationId = this.activeStoryConversation
+					? String(this.activeConversation?.id || '')
+					: ''
+				const normalized = normalizeStoryReaderPosition(position, conversationId)
+				if (!normalized || !conversationId) return
+				this.storyReaderPosition = normalized
+				if (this.pendingStoryReaderPositionSave?.conversationId && this.pendingStoryReaderPositionSave.conversationId !== conversationId) {
+					this.flushStoryReaderPositionSave()
+				}
+				this.pendingStoryReaderPositionSave = { conversationId, position: normalized }
+				clearTimeout(this.storyReaderPositionSaveTimer)
+				this.storyReaderPositionSaveTimer = setTimeout(() => this.flushStoryReaderPositionSave(), STORY_READER_POSITION_SAVE_DELAY)
+			},
+			flushStoryReaderPositionSave() {
+				clearTimeout(this.storyReaderPositionSaveTimer)
+				this.storyReaderPositionSaveTimer = null
+				const pending = this.pendingStoryReaderPositionSave
+				this.pendingStoryReaderPositionSave = null
+				const key = storyReaderPositionSettingKey(pending?.conversationId)
+				const position = normalizeStoryReaderPosition(pending?.position, pending?.conversationId)
+				const repository = this.services?.repository
+				const activeWrite = this.storyReaderPositionWritePromise || Promise.resolve()
+				if (!pending || !key || !position || !repository?.setSetting) return activeWrite
+				const queuedWrite = activeWrite
+					.catch(() => {})
+					.then(() => repository.setSetting(key, position))
+					.catch(error => this.handleError(error, '阅读位置保存失败'))
+				this.storyReaderPositionWritePromise = queuedWrite
+				return queuedWrite
+			},
+			async saveStoryReaderBookmarks(values) {
+				const conversationId = this.activeStoryConversation
+					? String(this.activeConversation?.id || '')
+					: ''
+				if (!conversationId) return
+				const previous = normalizeStoryReaderBookmarks(this.storyReaderBookmarks, conversationId)
+				const next = normalizeStoryReaderBookmarks(values, conversationId)
+				if (JSON.stringify(previous) === JSON.stringify(next)) return
+				const key = storyReaderBookmarksSettingKey(conversationId)
+				const repository = this.services?.repository
+				if (!key || !repository?.setSetting) return
+				const previousKeys = new Set(previous.map(item => `${item.blockId}:${item.characterOffset}`))
+				const added = next.some(item => !previousKeys.has(`${item.blockId}:${item.characterOffset}`))
+				const revision = ++this.storyReaderBookmarksRevision
+				this.storyReaderBookmarks = next
+				const activeWrite = this.storyReaderBookmarksWritePromise || Promise.resolve()
+				const queuedWrite = activeWrite.catch(() => {}).then(() => repository.setSetting(key, next))
+				this.storyReaderBookmarksWritePromise = queuedWrite
+				try {
+					await queuedWrite
+					if (revision === this.storyReaderBookmarksRevision && this.activeConversation?.id === conversationId) {
+						this.showToast(added ? '书签已添加' : '书签已删除')
+					}
+				} catch (error) {
+					if (revision === this.storyReaderBookmarksRevision && this.activeConversation?.id === conversationId) {
+						this.storyReaderBookmarks = previous
+					}
+					this.handleError(error, '书签保存失败')
+				} finally {
+					if (this.storyReaderBookmarksWritePromise === queuedWrite) this.storyReaderBookmarksWritePromise = null
+				}
+			},
+			waitForStoryReaderBookmarksSave() {
+				return (this.storyReaderBookmarksWritePromise || Promise.resolve()).catch(() => {})
+			},
 			setChatGenerationMode() { setGenerationMode(this.ui, 'chat') },
 			setImageGenerationMode() {
 				if (this.pendingAttachments.length) { this.showToast('生图模式暂不支持输入附件'); return }
 				setGenerationMode(this.ui, 'image')
 			},
 			closeComposerMenus() { this.attachmentMenuOpen = false; this.emojiMenuOpen = false },
+			closeStoryMenus() { this.modelMenuOpen = false; this.closeComposerMenus() },
 			toggleAttachmentMenu() { this.modelMenuOpen = false; this.emojiMenuOpen = false; this.attachmentMenuOpen = !this.attachmentMenuOpen },
 			toggleEmojiMenu() { this.modelMenuOpen = false; this.attachmentMenuOpen = false; this.emojiMenuOpen = !this.emojiMenuOpen },
 			appendEmoji(emoji) { this.draftMessage += emoji; this.emojiMenuOpen = false },
@@ -2275,6 +2459,7 @@
 				this.replyNotificationsEnabled = Boolean(await this.services.repository.getSetting(REPLY_NOTIFICATION_SETTING_KEY, true))
 				this.streamingEnabled = await readStreamingEnabled(this.services.repository)
 				this.streamingSegmentedDisplay = await readStreamingSegmentedDisplayEnabled(this.services.repository)
+				this.storyReaderMode = await readStoryReaderMode(this.services.repository)
 				this.characterStatusEnabled = await readCharacterStatusEnabled(this.services.repository)
 				this.nsfwEnabled = Boolean(await this.services.repository.getSetting(NSFW_SETTING_KEY, false))
 				const prompt = await this.services.repository.getSetting('systemPrompt', { enabled: false, encryptedValue: null })
@@ -2329,6 +2514,8 @@
 				this.ui.activeCharacterId = null
 				this.ui.generating = false
 				this.messageItems = []
+				this.storyReaderPosition = null
+				this.storyReaderBookmarks = []
 				this.messageHistoryLoading = false
 				this.messageHistoryHasMore = false
 				this.messageHistoryTrimmed = false
@@ -2350,6 +2537,7 @@
 			},
 			async activateWorkspaceForSession(session) {
 				if (!this.workspaceManager) return
+				await this.flushStoryReaderPositionSave()
 				const previousCloud = this.cloudServices
 				await this.stopCloudActivityAndWait(previousCloud)
 				const services = await this.workspaceManager.switchToSession(session, {
@@ -2509,6 +2697,9 @@
 				this.clearSegmentedReplyTimers()
 				openConversation(this.ui, conversationId)
 				if (isGroupConversation(this.activeConversation) || this.activeStoryConversation) setGenerationMode(this.ui, 'chat')
+				const storyConversationActive = Boolean(this.activeStoryConversation)
+				this.storyReaderPosition = null
+				this.storyReaderBookmarks = []
 				this.services?.replyNotificationService?.setActiveConversationId(conversationId)
 				this.animatedMessageIds = []
 				this.assistantStatusOpen = false
@@ -2519,9 +2710,19 @@
 				this.messageHistoryLoading = true
 				const loadRevision = ++this.chatLoadRevision
 				try {
-					const page = await this.readChatMessagePage(conversationId)
+					const [page, savedStoryPosition, savedStoryBookmarks] = await Promise.all([
+						this.readChatMessagePage(conversationId),
+						storyConversationActive
+							? readStoryReaderPosition(this.services?.repository, conversationId)
+							: Promise.resolve(null),
+						storyConversationActive
+							? readStoryReaderBookmarks(this.services?.repository, conversationId)
+							: Promise.resolve([])
+					])
 					const messages = await this.hydrateChatMessages(page.messages)
 					if (loadRevision !== this.chatLoadRevision || this.ui.activeConversationId !== conversationId) return
+					this.storyReaderPosition = savedStoryPosition
+					this.storyReaderBookmarks = savedStoryBookmarks
 					this.messageItems = messages
 					this.chatVirtualPinnedToBottom = true
 					this.messageHistoryHasMore = page.hasMore
@@ -2536,9 +2737,13 @@
 					}
 					this.modelMenuOpen = false
 					this.closeComposerMenus()
-					this.scheduleChatVirtualMeasurement()
-					this.scrollChatToBottom(true, true)
-					this.armChatHistoryAutoLoad()
+					if (this.activeStoryConversation) {
+						this.disarmChatHistoryAutoLoad()
+					} else {
+						this.scheduleChatVirtualMeasurement()
+						this.scrollChatToBottom(true, true)
+						this.armChatHistoryAutoLoad()
+					}
 				} catch (error) {
 					if (loadRevision === this.chatLoadRevision) this.handleError(error, '对话加载失败')
 				} finally {
@@ -2549,6 +2754,7 @@
 				if (this.messageHistoryLoading || !this.messageHistoryHasMore || this.ui.generating || !this.messageItems.length) return
 				this.disarmChatHistoryAutoLoad()
 				const conversationId = this.ui.activeConversationId
+				const storyReaderActive = this.activeStoryConversation
 				const firstMessage = this.messageItems[0]
 				const anchorId = this.messageAnchorId(firstMessage)
 				const scrollSnapshot = this.captureChatScrollSnapshot(anchorId)
@@ -2561,23 +2767,27 @@
 					if (this.ui.activeConversationId !== conversationId) return
 					const merged = mergeEarlierMessageWindow(this.messageItems, earlier, MAX_RENDERED_CHAT_MESSAGES)
 					this.messageItems = merged.messages
-					this.pruneChatVirtualMeasurements()
-					this.focusChatVirtualMessage(firstMessage.id)
+					if (!storyReaderActive) {
+						this.pruneChatVirtualMeasurements()
+						this.focusChatVirtualMessage(firstMessage.id)
+					}
 					this.messageHistoryTrimmed = this.messageHistoryTrimmed || merged.trimmedNewer
 					this.messageHistoryHasMore = page.hasMore
-					this.chatScrollRevision += 1
-					this.chatScrollIntoView = ''
-					await this.$nextTick()
-					if (!this.restoreChatScrollSnapshot(scrollSnapshot)) {
-						this.chatScrollIntoView = anchorId
+					if (!storyReaderActive) {
+						this.chatScrollRevision += 1
+						this.chatScrollIntoView = ''
+						await this.$nextTick()
+						if (!this.restoreChatScrollSnapshot(scrollSnapshot)) {
+							this.chatScrollIntoView = anchorId
+						}
+						this.scheduleChatVirtualMeasurement()
 					}
-					this.scheduleChatVirtualMeasurement()
 				} catch (error) {
 					this.handleError(error, '历史消息加载失败')
 				} finally {
 					if (this.ui.activeConversationId === conversationId) {
 						this.messageHistoryLoading = false
-						this.armChatHistoryAutoLoad()
+						if (!storyReaderActive) this.armChatHistoryAutoLoad()
 					}
 				}
 			},
@@ -2590,7 +2800,10 @@
 				const id = String(message?.id || '').replace(/[^A-Za-z0-9_-]/g, '-').slice(-32)
 				return `chat-message-${sequence}-${id}`
 			},
-			backToConversations() {
+			async backToConversations() {
+				const returnTab = this.activeStoryConversation ? 'stories' : 'conversations'
+				await this.flushStoryReaderPositionSave()
+				await this.waitForStoryReaderBookmarksSave()
 				this.chatLoadRevision += 1
 				clearTimeout(this.streamingRenderTimer)
 				this.streamingRenderTimer = null
@@ -2602,7 +2815,7 @@
 				this.assistantStatusOpen = false
 				this.groupStatusSpeakerKey = ''
 				this.services?.replyNotificationService?.setActiveConversationId(null)
-				selectTab(this.ui, 'conversations')
+				selectTab(this.ui, returnTab)
 			},
 			goToTab(tab) {
 				if (tab !== 'providers') this.hideProviderApiKey()
@@ -2899,8 +3112,10 @@
 						...current,
 						visibleSegmentCount: currentVisibleCount + 1
 					})
-					this.invalidateChatVirtualMeasurement(messageId)
-					this.scheduleChatVirtualMeasurement({ follow: false })
+					if (!this.activeStoryConversation) {
+						this.invalidateChatVirtualMeasurement(messageId)
+						this.scheduleChatVirtualMeasurement({ follow: false })
+					}
 					this.scheduleSegmentedReplyReveal(messageId)
 				}, delay)
 				this.segmentedReplyTimers.set(messageId, timer)
@@ -2971,6 +3186,7 @@
 					this.groupStatusSpeakerKey = groupMessageSpeakerKey(next)
 				}
 				if (queueSegmentedReply) this.scheduleSegmentedReplyReveal(next.id)
+				if (this.activeStoryConversation) return
 				const suppressAssistantAutoScroll = this.shouldSuppressAssistantAutoScroll(next)
 				this.scheduleChatVirtualMeasurement({ follow: !suppressAssistantAutoScroll })
 				if (!suppressAssistantAutoScroll) this.scrollChatToBottom()
@@ -3066,7 +3282,7 @@
 			},
 			async continueMessage(messageId) {
 				if (this.ui.generating) return
-				this.closeComposerMenus()
+				this.closeStoryMenus()
 				this.errorMessage = ''
 				try {
 					await this.services.chatService.continueResponse(messageId, {
@@ -3080,6 +3296,11 @@
 				}
 			},
 			async copyMessage(content) { try { await this.writeClipboard(content); this.showToast('已复制') } catch { this.showToast('复制失败') } },
+			setStoryMessageFeedback({ messageId, feedback } = {}) {
+				const message = this.messageItems.find(item => item.id === messageId)
+				if (message) return this.setMessageFeedback(message, feedback)
+				return Promise.resolve()
+			},
 			async setMessageFeedback(message, feedback) {
 				if (!message?.id || !['positive', 'negative'].includes(feedback)) return
 				try {
@@ -4267,6 +4488,10 @@
 		background-size: cover;
 	}
 
+	.app-shell.story-reader-active {
+		background: #fff;
+	}
+
 	.screen-view {
 		position: relative;
 		display: flex;
@@ -4528,12 +4753,112 @@
 		box-shadow: 0 4px 15px rgba(42, 39, 45, 0.05);
 	}
 
+	.story-progress-list {
+		margin-bottom: 14px;
+	}
+
 	.stories-list-label {
 		display: block;
 		padding: 14px 16px 7px;
 		font-size: 12px;
 		font-weight: 650;
 		color: var(--story-accent);
+	}
+
+	.story-progress-row {
+		display: flex;
+		align-items: center;
+		min-height: 76px;
+		background: #fff;
+		content-visibility: auto;
+		contain-intrinsic-size: 76px;
+	}
+
+	.story-progress-row + .story-progress-row {
+		border-top: 1px solid #efedf0;
+	}
+
+	.story-progress-open {
+		display: flex;
+		align-items: center;
+		gap: 11px;
+		min-width: 0;
+		min-height: 76px;
+		padding: 9px 4px 9px 14px;
+		flex: 1;
+		text-align: left;
+	}
+
+	.story-progress-open:active,
+	.story-progress-manage:active {
+		background: #f5faf8;
+	}
+
+	.story-progress-avatar {
+		display: block;
+		width: 52px;
+		height: 52px;
+		overflow: hidden;
+		border-radius: 50%;
+		background: #e9edef;
+		flex: 0 0 auto;
+	}
+
+	.story-progress-copy {
+		display: flex;
+		min-width: 0;
+		flex: 1;
+		flex-direction: column;
+		gap: 5px;
+	}
+
+	.story-progress-title-line {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		min-width: 0;
+	}
+
+	.story-progress-name,
+	.story-progress-preview {
+		display: block;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.story-progress-name {
+		min-width: 0;
+		font-size: 15px;
+		font-weight: 650;
+		line-height: 20px;
+		color: #25272c;
+		flex: 1;
+	}
+
+	.story-progress-time {
+		font-size: 10px;
+		line-height: 16px;
+		color: #9b9ca1;
+		flex: 0 0 auto;
+	}
+
+	.story-progress-preview {
+		font-size: 11px;
+		line-height: 17px;
+		color: #8f9196;
+	}
+
+	.story-progress-manage {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 42px;
+		height: 42px;
+		margin-right: 5px;
+		border-radius: 50%;
+		color: #8f9095;
+		flex: 0 0 auto;
 	}
 
 	.story-character-row {
@@ -4604,7 +4929,7 @@
 	}
 
 	.story-start-pill {
-		width: 54px;
+		width: 62px;
 		height: 30px;
 	}
 

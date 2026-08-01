@@ -4,6 +4,8 @@ const ICONS = {
   Activity: { glyph: '\ue657' },
   AlertCircle: { glyph: '\ue649' },
   ArrowLeft: { glyph: '\ue6bc' },
+  Bookmark: { glyph: '\u2606', system: true },
+  BookmarkFilled: { glyph: '\u2605', system: true },
   Camera: { glyph: '\ue65a' },
   Check: { glyph: '\ue65c' },
   CheckCheck: { glyph: '\ue65c' },
@@ -90,6 +92,8 @@ function createIcon(name) {
 export const Activity = createIcon('Activity')
 export const AlertCircle = createIcon('AlertCircle')
 export const ArrowLeft = createIcon('ArrowLeft')
+export const Bookmark = createIcon('Bookmark')
+export const BookmarkFilled = createIcon('BookmarkFilled')
 export const Camera = createIcon('Camera')
 export const Check = createIcon('Check')
 export const CheckCheck = createIcon('CheckCheck')
