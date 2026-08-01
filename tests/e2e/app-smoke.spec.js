@@ -161,6 +161,7 @@ test('core local workflow remains usable', async ({ page }) => {
       displaySegments: ['第一段', '第二段', '第三段'],
       visibleSegmentCount: 0
     })
+    preview.chatVirtualPinnedToBottom = true
     preview.scheduleSegmentedReplyReveal(message.id)
     await new Promise(resolve => setTimeout(resolve, 420))
     const result = {
@@ -172,9 +173,38 @@ test('core local workflow remains usable', async ({ page }) => {
     preview.clearSegmentedReplyTimers()
     return result
   })
-  expect(pausedSegmentedFollow.pinnedToBottom).toBe(false)
+  expect(pausedSegmentedFollow.pinnedToBottom).toBe(true)
   expect(pausedSegmentedFollow.visibleSegmentCount).toBe(1)
   expect(Math.abs(pausedSegmentedFollow.after - pausedSegmentedFollow.before)).toBeLessThan(3)
+
+  const pausedNonStreamingFollow = await page.evaluate(async () => {
+    const preview = globalThis.__echoWeavePreview
+    const scroll = document.querySelector('.chat-scroll')
+    const messageIndex = preview.messageItems.length - 1
+    const message = preview.messageItems[messageIndex]
+    const before = scroll.scrollTop
+    const previousStreamingEnabled = preview.streamingEnabled
+    preview.streamingEnabled = false
+    preview.chatVirtualPinnedToBottom = true
+    preview.commitMessageUpdate({
+      ...message,
+      role: 'assistant',
+      responseDisplayMode: 'continuous',
+      status: 'completed',
+      content: `${message.content || ''}\n\nNon-streaming completed reply.`,
+      updatedAt: '2026-07-30T00:00:00.000Z'
+    })
+    await new Promise(resolve => setTimeout(resolve, 180))
+    const result = {
+      before,
+      after: scroll.scrollTop,
+      pinnedToBottom: preview.chatVirtualPinnedToBottom
+    }
+    preview.streamingEnabled = previousStreamingEnabled
+    return result
+  })
+  expect(pausedNonStreamingFollow.pinnedToBottom).toBe(true)
+  expect(Math.abs(pausedNonStreamingFollow.after - pausedNonStreamingFollow.before)).toBeLessThan(3)
 
   const automaticHistoryLoads = await page.evaluate(async () => {
     const preview = globalThis.__echoWeavePreview

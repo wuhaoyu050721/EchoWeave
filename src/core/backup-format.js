@@ -60,17 +60,55 @@ function validateReferenceList(value, validIds, label) {
   }
 }
 
+function validateStoryConfig(conversation, characterIds, worldBookIds, worldBookById) {
+  const storyConfig = conversation.storyConfig
+  if (conversation.conversationKind !== 'story' && storyConfig == null) return
+  if (!storyConfig || typeof storyConfig !== 'object' || Array.isArray(storyConfig)) {
+    throw new Error(`故事会话 ${conversation.id} 的配置无效`)
+  }
+  validateReferenceList(storyConfig.characterIds, characterIds, `故事会话 ${conversation.id} 的角色列表`)
+  validateReferenceList(storyConfig.worldBookIds, worldBookIds, `故事会话 ${conversation.id} 的世界书列表`)
+  const memoryWorldBookId = String(storyConfig.memoryWorldBookId ?? '').trim()
+  if (!memoryWorldBookId) return
+  const memoryWorldBook = worldBookById.get(memoryWorldBookId)
+  if (!memoryWorldBook || memoryWorldBook.scope !== 'story') {
+    throw new Error(`故事会话 ${conversation.id} 引用了无效的自动记忆世界书`)
+  }
+  if (memoryWorldBook.conversationId && memoryWorldBook.conversationId !== conversation.id) {
+    throw new Error(`故事会话 ${conversation.id} 引用了其他会话的自动记忆世界书`)
+  }
+}
+
+function remapStoryConfig(storyConfig, characterIds, worldBookIds) {
+  if (!storyConfig || typeof storyConfig !== 'object' || Array.isArray(storyConfig)) return storyConfig
+  return {
+    ...storyConfig,
+    ...(Array.isArray(storyConfig.characterIds)
+      ? { characterIds: storyConfig.characterIds.map(id => characterIds.get(id)) }
+      : {}),
+    ...(Array.isArray(storyConfig.worldBookIds)
+      ? { worldBookIds: storyConfig.worldBookIds.map(id => worldBookIds.get(id)) }
+      : {}),
+    ...('memoryWorldBookId' in storyConfig
+      ? { memoryWorldBookId: worldBookIds.get(storyConfig.memoryWorldBookId) ?? null }
+      : {})
+  }
+}
+
 function validateCharacterData({ providers, conversations, messages, characters, worldBooks, characterAssets }) {
   const providerIds = new Set(providers.map(provider => provider.id))
   const characterIds = validateUniqueIds(characters, '角色')
   const worldBookIds = validateUniqueIds(worldBooks, '世界书')
   const characterAssetIds = validateUniqueIds(characterAssets, '角色资源')
+  const conversationById = new Map(conversations.map(conversation => [conversation.id, conversation]))
+  const worldBookById = new Map(worldBooks.map(worldBook => [worldBook.id, worldBook]))
   const assetById = new Map(characterAssets.map(asset => [asset.id, asset]))
 
   for (const conversation of conversations) {
     if (conversation.characterId && !characterIds.has(conversation.characterId)) {
       throw new Error(`会话 ${conversation.id} 引用了不存在的角色`)
     }
+    validateStoryConfig(conversation, characterIds, worldBookIds, worldBookById)
     if (conversation.conversationKind !== 'group') continue
     if (!Array.isArray(conversation.participants) || conversation.participants.length > 8) {
       throw new Error(`群聊 ${conversation.id} 的成员列表无效`)
@@ -122,9 +160,15 @@ function validateCharacterData({ providers, conversations, messages, characters,
     }
   }
   for (const worldBook of worldBooks) {
-    if (!['character', 'global'].includes(worldBook.scope)) throw new Error(`世界书 ${worldBook.id} 作用域无效`)
+    if (!['character', 'global', 'story'].includes(worldBook.scope)) throw new Error(`世界书 ${worldBook.id} 作用域无效`)
     if (worldBook.scope === 'character' && !characterIds.has(worldBook.characterId)) {
       throw new Error(`世界书 ${worldBook.id} 引用了不存在的角色`)
+    }
+    if (worldBook.scope === 'story' && worldBook.conversationId) {
+      const conversation = conversationById.get(worldBook.conversationId)
+      if (!conversation || conversation.conversationKind !== 'story') {
+        throw new Error(`故事世界书 ${worldBook.id} 引用了无效的故事会话`)
+      }
     }
     validateReferenceList(worldBook.characterIds, characterIds, `世界书 ${worldBook.id} 的角色绑定`)
     if (!worldBook.data || typeof worldBook.data !== 'object' || !Array.isArray(worldBook.data.entries)) {
@@ -213,6 +257,9 @@ export function prepareImport(payload, idFactory = createRuntimeId) {
     providerProfileId: providerIds.get(entity.providerProfileId) ?? null,
     characterId: characterIds.get(entity.characterId) ?? null,
     characterAvatarAssetId: characterAssetIds.get(entity.characterAvatarAssetId) ?? null,
+    ...(entity.storyConfig !== undefined
+      ? { storyConfig: remapStoryConfig(entity.storyConfig, characterIds, worldBookIds) }
+      : {}),
     participants: Array.isArray(entity.participants)
       ? entity.participants.map(participant => (
           groupParticipantKind(participant) === 'provider'
@@ -257,7 +304,10 @@ export function prepareImport(payload, idFactory = createRuntimeId) {
     ...stripSensitive(entity),
     id: worldBookIds.get(entity.id),
     characterId: characterIds.get(entity.characterId) ?? null,
-    characterIds: (entity.characterIds ?? []).map(id => characterIds.get(id))
+    characterIds: (entity.characterIds ?? []).map(id => characterIds.get(id)),
+    ...(entity.conversationId !== undefined
+      ? { conversationId: conversationIds.get(entity.conversationId) ?? null }
+      : {})
   }))
   const remappedCharacterAssets = characterAssets.map(entity => ({
     ...stripSensitive(entity),

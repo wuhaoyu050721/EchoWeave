@@ -5,7 +5,13 @@ function timestampValue(now) {
   return value instanceof Date ? value.toISOString() : String(value || new Date().toISOString())
 }
 
-export function mapCharacterToDomain(preview, { idFactory, now = () => new Date().toISOString() } = {}) {
+export function mapCharacterToDomain(preview, {
+  idFactory,
+  now = () => new Date().toISOString(),
+  characterScope = '',
+  characterOverrides = {},
+  worldBookOverrides = {}
+} = {}) {
   if (typeof idFactory !== 'function') throw importError('missing_id_factory', '角色导入缺少 ID 生成器', { stage: 'commit' })
   if (!preview?.cardV3?.data || !preview?.commitData?.avatarDataUrl) {
     throw importError('invalid_import_preview', '角色卡预览数据不完整', { stage: 'commit' })
@@ -27,6 +33,7 @@ export function mapCharacterToDomain(preview, { idFactory, now = () => new Date(
       id: idFactory(),
       characterId,
       scope: 'character',
+      ...worldBookOverrides,
       source: 'character-card',
       name: preview.cardV3.data.character_book.name || `${preview.cardV3.data.name} 世界书`,
       data: preview.cardV3.data.character_book,
@@ -52,10 +59,12 @@ export function mapCharacterToDomain(preview, { idFactory, now = () => new Date(
     worldBookIds: worldBooks.map(book => book.id),
     assetIds: assets.map(asset => asset.id),
     cloudBackupAllowed: true,
+    storyScope: characterScope || null,
     importedAt: timestamp,
     createdAt: timestamp,
     updatedAt: timestamp,
-    deletedAt: null
+    deletedAt: null,
+    ...characterOverrides
   }
   return { character, worldBooks, characterAssets: assets }
 }

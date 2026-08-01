@@ -7,7 +7,10 @@ export async function commitCharacterImport(preview, {
   repository,
   idFactory = createRuntimeId,
   now = () => new Date().toISOString(),
-  allowSensitiveExtensions = false
+  allowSensitiveExtensions = false,
+  characterScope = '',
+  characterOverrides = {},
+  worldBookOverrides = {}
 } = {}) {
   if (!repository?.importCharacterBundle) {
     throw importError('character_repository_unavailable', '当前存储层不支持角色导入', { stage: 'commit' })
@@ -21,7 +24,13 @@ export async function commitCharacterImport(preview, {
     const duplicates = repository.findCharactersBySourceHash
       ? await repository.findCharactersBySourceHash(preview.source.hash)
       : []
-    const bundle = mapCharacterToDomain(safePreview, { idFactory, now })
+    const bundle = mapCharacterToDomain(safePreview, {
+      idFactory,
+      now,
+      characterScope,
+      characterOverrides,
+      worldBookOverrides
+    })
     await repository.importCharacterBundle(bundle)
     return {
       character: bundle.character,

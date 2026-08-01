@@ -1,5 +1,6 @@
 import { normalizeProviderAvatar } from './core/provider-avatar.js'
 import { extractAssistantStatus } from './core/assistant-status.js'
+import { extractStoryMemory } from './core/story-memory.js'
 import {
   defaultProviderBaseUrl,
   normalizeProviderProtocol,
@@ -9,6 +10,7 @@ import {
 const tabScreens = {
   conversations: 'conversations',
   contacts: 'contacts',
+  stories: 'stories',
   providers: 'providers',
   settings: 'settings'
 }
@@ -16,6 +18,7 @@ const tabScreens = {
 export const navigationItems = [
   { id: 'conversations', label: '会话', icon: 'MessageCircle' },
   { id: 'contacts', label: '联系人', icon: 'Contact' },
+  { id: 'stories', label: '故事', icon: 'FileText' },
   { id: 'providers', label: '接口', icon: 'Server' },
   { id: 'settings', label: '设置', icon: 'Settings' }
 ]
@@ -239,6 +242,10 @@ export function resolveAppBackAction(state) {
     return 'conversations'
   }
 
+  if (state?.screen === 'stories') {
+    return 'conversations'
+  }
+
   if (state?.screen && state.screen !== 'conversations') {
     return 'conversations'
   }
@@ -311,9 +318,12 @@ function formatConversationTime(value, now) {
 export function summarizeConversation(conversation, latestMessage, now = new Date()) {
   const timestamp = latestMessage?.updatedAt || conversation.lastMessageAt || conversation.updatedAt
   const rawContent = String(latestMessage?.content ?? '')
+  const cleanContent = latestMessage?.role === 'assistant'
+    ? extractStoryMemory(rawContent, { hideIncomplete: true }).content
+    : rawContent
   const presentation = latestMessage?.role === 'assistant'
-    ? extractAssistantStatus(rawContent)
-    : { content: rawContent, status: null }
+    ? extractAssistantStatus(cleanContent)
+    : { content: cleanContent, status: null }
   return {
     ...conversation,
     preview: presentation.content.trim() || (

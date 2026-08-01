@@ -115,6 +115,83 @@ test('stops requesting character status when the persisted setting is disabled',
   assert.doesNotMatch(instructions.postHistoryPrompt, /状态栏最终提醒/)
 })
 
+test('builds a story prompt with memory protocol and scoped world books', async () => {
+  const character = {
+    id: 'char-story',
+    name: 'Lyra',
+    storyMemoryPatches: [{ content: 'Lyra trusts the silver key.' }],
+    card: {
+      data: {
+        name: 'Lyra',
+        description: 'Guardian of {{user}}',
+        personality: 'Careful and watchful',
+        scenario: 'A sealed midnight road',
+        system_prompt: 'Write as a long-form story.'
+      }
+    }
+  }
+  const repository = {
+    getSetting: async (key, fallback) => fallback,
+    getCharacter: async id => id === character.id ? character : null,
+    listWorldBooks: async () => { throw new Error('story mode should use listAllWorldBooks') },
+    listAllWorldBooks: async () => [
+      {
+        id: 'story-book',
+        scope: 'story',
+        conversationId: 'story-1',
+        data: {
+          entries: [{
+            id: 'story-entry',
+            constant: true,
+            content: 'STORY_WORLD: the tower moves at dawn.',
+            position: 'after_char'
+          }]
+        }
+      },
+      {
+        id: 'character-book',
+        scope: 'character',
+        characterId: 'char-story',
+        data: {
+          entries: [{
+            id: 'character-entry',
+            constant: true,
+            content: 'CHARACTER_WORLD: Lyra fears rain.',
+            position: 'after_char'
+          }]
+        }
+      }
+    ]
+  }
+  const resolveInstructions = createChatInstructionResolver({
+    repository,
+    vault: { decryptString: async value => value },
+    getUserName: async () => 'Reader'
+  })
+
+  const instructions = await resolveInstructions({
+    id: 'story-1',
+    conversationKind: 'story',
+    title: 'Midnight Road',
+    characterId: 'char-story',
+    storyConfig: { characterIds: ['char-story'], worldBookIds: ['story-book'] },
+    systemPromptMode: 'inherit'
+  }, {
+    messages: [{ role: 'user', content: 'Continue through the gate.', status: 'completed' }]
+  })
+
+  assert.equal(typeof instructions, 'object')
+  assert.match(instructions.systemPrompt, /Midnight Road/)
+  assert.match(instructions.systemPrompt, /Guardian of Reader/)
+  assert.match(instructions.systemPrompt, /Lyra trusts the silver key/)
+  assert.match(instructions.systemPrompt, /STORY_WORLD: the tower moves at dawn/)
+  assert.match(instructions.systemPrompt, /CHARACTER_WORLD: Lyra fears rain/)
+  assert.match(instructions.postHistoryPrompt, /<echo_story_memory>/)
+  assert.match(instructions.postHistoryPrompt, /"characterPatches"/)
+  assert.match(instructions.userTurnPrompt, /<echo_story_memory>/)
+  assert.doesNotMatch(JSON.stringify(instructions), /<sumo_monitor>/)
+})
+
 test('builds an isolated group prompt for the requested speaker', async () => {
   const characters = new Map([
     ['char-a', {

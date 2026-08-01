@@ -175,3 +175,66 @@ test('restores provider members and their speaker references in cloud format 5',
   assert.equal(restored.messages[0].speakerProviderProfileId, restored.providers[1].id)
   assert.deepEqual(restored.providers[1].encryptedApiKey, { encrypted: 'new:member-secret' })
 })
+
+test('uploads and restores the complete story memory graph', async () => {
+  const vault = createVault('device')
+  const payload = await createCloudBackupPayload({
+    providers: [{ id: 'provider-story' }],
+    conversations: [{
+      id: 'conversation-story',
+      conversationKind: 'story',
+      providerProfileId: 'provider-story',
+      characterId: 'character-story',
+      storyConfig: {
+        characterIds: ['character-story'],
+        worldBookIds: ['book-card', 'book-memory'],
+        memoryWorldBookId: 'book-memory'
+      }
+    }],
+    messages: [{ id: 'message-story', conversationId: 'conversation-story', content: 'Story' }],
+    attachments: [],
+    characters: [{
+      id: 'character-story',
+      storyScope: 'story',
+      worldBookIds: ['book-card'],
+      assetIds: []
+    }],
+    worldBooks: [
+      {
+        id: 'book-card',
+        characterId: 'character-story',
+        conversationId: null,
+        scope: 'story',
+        data: { entries: [] }
+      },
+      {
+        id: 'book-memory',
+        characterIds: ['character-story'],
+        conversationId: 'conversation-story',
+        scope: 'story',
+        data: { entries: [] }
+      }
+    ],
+    characterAssets: [],
+    settings: {}
+  }, vault, new Date('2026-07-31T00:00:00.000Z'))
+  let sequence = 0
+  const restored = await prepareCloudRestore(payload, {
+    vault,
+    idFactory: () => `cloud-story-${++sequence}`
+  })
+  const conversation = restored.conversations[0]
+  const character = restored.characters[0]
+  const [cardBook, memoryBook] = restored.worldBooks
+
+  assert.equal(payload.worldBooks[1].scope, 'story')
+  assert.equal(conversation.characterId, character.id)
+  assert.deepEqual(conversation.storyConfig.characterIds, [character.id])
+  assert.deepEqual(conversation.storyConfig.worldBookIds, [cardBook.id, memoryBook.id])
+  assert.equal(conversation.storyConfig.memoryWorldBookId, memoryBook.id)
+  assert.equal(cardBook.characterId, character.id)
+  assert.equal(cardBook.conversationId, null)
+  assert.equal(memoryBook.conversationId, conversation.id)
+  assert.deepEqual(memoryBook.characterIds, [character.id])
+  assert.equal(character.storyScope, 'story')
+})

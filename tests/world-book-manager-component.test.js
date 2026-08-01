@@ -24,7 +24,7 @@ test('world-book manager SFC compiles and exposes its integration contract', asy
   assert.deepEqual(template.errors, [])
 
   const script = descriptor.script.content
-  for (const prop of ['open', 'repository', 'worldBooks', 'characters', 'busy']) {
+  for (const prop of ['open', 'repository', 'worldBooks', 'characters', 'hiddenScopes', 'busy']) {
     assert.match(script, new RegExp(`\\b${prop}: \\{ type:`), `missing prop ${prop}`)
   }
   assert.match(script, /emits: \['changed', 'close', 'error', 'import', 'update:open', 'update:worldBooks'\]/)
@@ -32,6 +32,7 @@ test('world-book manager SFC compiles and exposes its integration contract', asy
   assert.match(script, /service\.update\(this\.editingId, input\)/)
   assert.match(script, /service\.create\(input\)/)
   assert.match(script, /managementService\(\)\.remove\(this\.editingId\)/)
+  assert.match(script, /hiddenScopes\.has\(String\(book\.scope/)
 })
 
 test('world-book manager template includes the complete editable field and interaction contract', async () => {

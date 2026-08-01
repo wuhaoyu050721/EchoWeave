@@ -217,3 +217,38 @@ test('commit requires explicit sensitive-extension confirmation and saves one at
   assert.deepEqual(result.duplicateOfCharacterIds, ['existing'])
   assert.equal(result.character.avatarAssetId, result.assets[0].id)
 })
+
+test('commit can isolate a story character import and carry world book overrides', async () => {
+  const payload = v3('Story Hero')
+  payload.data.character_book.entries[0].content = 'Story-only lore'
+  const preview = await inspectCharacterCard(input(cardPng([textChunk('ccv3', payload)])))
+  const calls = []
+  let nextId = 0
+  const repository = {
+    findCharactersBySourceHash: async () => [],
+    importCharacterBundle: async bundle => calls.push(bundle)
+  }
+
+  const result = await commitCharacterImport(preview, {
+    repository,
+    idFactory: () => `story-id-${++nextId}`,
+    now: () => '2026-07-20T00:00:00.000Z',
+    characterScope: 'story',
+    characterOverrides: { storyImportedAt: '2026-07-20T00:00:00.000Z' },
+    worldBookOverrides: {
+      scope: 'story',
+      conversationId: 'story-draft',
+      storyOnly: true
+    }
+  })
+
+  assert.equal(calls.length, 1)
+  assert.equal(result.character.storyScope, 'story')
+  assert.equal(result.character.storyImportedAt, '2026-07-20T00:00:00.000Z')
+  assert.equal(result.worldBooks.length, 1)
+  assert.equal(result.worldBooks[0].scope, 'story')
+  assert.equal(result.worldBooks[0].conversationId, 'story-draft')
+  assert.equal(result.worldBooks[0].storyOnly, true)
+  assert.equal(result.worldBooks[0].characterId, result.character.id)
+  assert.deepEqual(calls[0].worldBooks, result.worldBooks)
+})

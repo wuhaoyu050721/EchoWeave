@@ -241,6 +241,160 @@ test('creates a fresh character conversation with a rendered greeting', async ()
   await assert.rejects(service.retry(greeting.id), /问候语不能重试/)
 })
 
+test('creates a fresh story conversation with isolated story config and greeting', async () => {
+  const repository = new IndexedDbRepository({ indexedDB: new IDBFactory(), keyRange: IDBKeyRange, databaseName: `story-chat-${crypto.randomUUID()}` })
+  await repository.init()
+  await repository.importCharacterBundle({
+    character: {
+      id: 'char-story',
+      name: 'Lyra',
+      avatarAssetId: 'asset-story',
+      sourceHash: 'story-hash',
+      card: { data: { first_mes: '{{char}} meets {{user}}.', alternate_greetings: ['Alternate opening.'] } }
+    },
+    characterAssets: [{ id: 'asset-story', characterId: 'char-story', type: 'icon', dataUrl: 'data:image/png;base64,AA==' }]
+  })
+  let nextId = 0
+  const service = new ChatService({
+    repository,
+    idFactory: () => `story-id-${++nextId}`,
+    now: () => '2026-07-20T00:00:00.000Z',
+    getUserName: async () => 'Reader'
+  })
+
+  const conversation = await service.createStoryConversation({
+    characterId: 'char-story',
+    providerProfileId: 'provider-1',
+    providerNameSnapshot: 'OpenAI',
+    modelName: 'story-model',
+    title: 'Midnight Road'
+  })
+  const greeting = (await repository.listMessages(conversation.id))[0]
+
+  assert.equal(conversation.conversationKind, 'story')
+  assert.equal(conversation.title, 'Midnight Road')
+  assert.equal(conversation.characterId, 'char-story')
+  assert.deepEqual(conversation.storyConfig.characterIds, ['char-story'])
+  assert.equal(conversation.storyConfig.memoryMode, 'auto')
+  assert.equal(conversation.storyConfig.allowCharacterPatches, true)
+  assert.deepEqual(conversation.storyConfig.worldBookIds, [])
+  assert.equal(conversation.storyConfig.memoryWorldBookId, null)
+  assert.equal(greeting.role, 'assistant')
+  assert.equal(greeting.generationMode, 'story')
+  assert.equal(greeting.content, 'Lyra meets Reader.')
+  assert.equal(greeting.isGreeting, true)
+})
+
+test('applies returned story memory to a story world book and character patch list', async () => {
+  const returnedMemory = {
+    sceneSummary: 'The gate opened and Lyra kept the silver key.',
+    characterPatches: [{
+      characterId: 'char-story',
+      field: 'relationship_memory',
+      content: 'Lyra now trusts the silver key.',
+      confidence: 0.9
+    }],
+    worldBookEntries: [{
+      name: 'Silver Gate',
+      keys: ['gate', 'silver key'],
+      content: 'The silver gate opens only after midnight.',
+      constant: true,
+      confidence: 0.8
+    }]
+  }
+  const { repository, service } = await setup(async (profile, request, handlers) => {
+    handlers.onDelta(`Story body.\n<echo_story_memory>${JSON.stringify(returnedMemory)}</echo_story_memory>`)
+    return { finishReason: 'stop' }
+  }, {}, {
+    title: 'Midnight Road',
+    conversationKind: 'story',
+    characterId: 'char-story',
+    storyConfig: {
+      characterIds: ['char-story'],
+      memoryMode: 'auto',
+      allowCharacterPatches: true,
+      worldBookIds: [],
+      memoryWorldBookId: null
+    }
+  }, {
+    getSystemPrompt: async () => ({
+      systemPrompt: 'story system',
+      postHistoryPrompt: '<echo_story_memory>protocol</echo_story_memory>',
+      userTurnPrompt: 'return <echo_story_memory>'
+    })
+  })
+  await repository.saveCharacter({
+    id: 'char-story',
+    name: 'Lyra',
+    card: { data: { name: 'Lyra', extensions: {} } },
+    storyMemoryPatches: [],
+    deletedAt: null
+  })
+
+  const result = await service.send({ conversationId: 'conversation-1', content: 'Continue.' })
+  const assistant = await repository.getMessage(result.id)
+  const updatedConversation = await repository.getConversation('conversation-1')
+  const savedCharacter = await repository.getCharacter('char-story')
+  const worldBooks = await repository.listAllWorldBooks()
+  const worldBook = worldBooks[0]
+  const entryContents = worldBook.data.entries.map(entry => entry.content)
+
+  assert.equal(result.status, 'completed')
+  assert.equal(result.generationMode, 'story')
+  assert.equal(assistant.storyMemoryApplied.worldBookId, worldBook.id)
+  assert.equal(assistant.storyMemoryApplied.characterPatchCount, 1)
+  assert.equal(worldBook.scope, 'story')
+  assert.equal(worldBook.conversationId, 'conversation-1')
+  assert.deepEqual(worldBook.characterIds, ['char-story'])
+  assert.equal(updatedConversation.storyConfig.memoryWorldBookId, worldBook.id)
+  assert.deepEqual(updatedConversation.storyConfig.worldBookIds, [worldBook.id])
+  assert.equal(entryContents.some(content => content.includes(returnedMemory.sceneSummary)), true)
+  assert.equal(entryContents.some(content => content.includes('Lyra now trusts the silver key.')), true)
+  assert.equal(entryContents.some(content => content.includes('The silver gate opens only after midnight.')), true)
+  assert.equal(savedCharacter.storyMemoryPatches.length, 1)
+  assert.equal(savedCharacter.storyMemoryPatches[0].content, 'Lyra now trusts the silver key.')
+  assert.deepEqual(savedCharacter.card.data.extensions.echoWeaveStoryPatches, savedCharacter.storyMemoryPatches)
+
+  await service.send({ conversationId: 'conversation-1', content: 'Continue again.' })
+  const characterAfterDuplicate = await repository.getCharacter('char-story')
+  assert.equal(characterAfterDuplicate.storyMemoryPatches.length, 1)
+})
+
+test('deleting a story conversation also retires only its owned memory books', async () => {
+  const { repository, service } = await setup(async () => ({ finishReason: 'stop' }), {}, {
+    conversationKind: 'story',
+    characterId: 'char-story',
+    storyConfig: {
+      characterIds: ['char-story'],
+      worldBookIds: ['book-imported', 'book-memory'],
+      memoryWorldBookId: 'book-memory'
+    }
+  })
+  await repository.saveWorldBook({
+    id: 'book-imported',
+    scope: 'story',
+    characterId: 'char-story',
+    conversationId: null,
+    data: { entries: [] },
+    deletedAt: null
+  })
+  await repository.saveWorldBook({
+    id: 'book-memory',
+    scope: 'story',
+    characterIds: ['char-story'],
+    conversationId: 'conversation-1',
+    data: { entries: [] },
+    deletedAt: null
+  })
+
+  await service.deleteConversation('conversation-1')
+
+  assert.equal(await repository.getConversation('conversation-1'), undefined)
+  assert.equal((await repository.getWorldBook('book-memory')).deletedAt, '2026-07-13T01:00:00.000Z')
+  assert.equal((await repository.getWorldBook('book-imported')).deletedAt, null)
+  assert.deepEqual((await repository.listAllWorldBooks()).map(book => book.id), ['book-imported'])
+})
+
 test('creates and updates a bounded group conversation without inserting single-chat greetings', async () => {
   const repository = new IndexedDbRepository({ indexedDB: new IDBFactory(), databaseName: `group-chat-${crypto.randomUUID()}` })
   await repository.init()
@@ -705,6 +859,26 @@ test('retries an assistant response without duplicating the user message', async
   assert.equal(retried.status, 'completed')
   assert.equal(retried.retryOfMessageId, failed.id)
   assert.deepEqual(requestedStreams, [false, true])
+})
+
+test('keeps story generation mode when retrying a failed story response', async () => {
+  let call = 0
+  const { service } = await setup(async (profile, request, handlers) => {
+    call += 1
+    if (call === 1) throw new Error('first failed')
+    handlers.onDelta('Story retry success')
+    return { finishReason: 'stop' }
+  }, {}, {
+    conversationKind: 'story',
+    characterId: 'char-story',
+    storyConfig: { characterIds: ['char-story'], worldBookIds: [] }
+  })
+
+  const failed = await service.send({ conversationId: 'conversation-1', content: 'Try once', mode: 'image' })
+  const retried = await service.retry(failed.id)
+
+  assert.equal(failed.generationMode, 'story')
+  assert.equal(retried.generationMode, 'story')
 })
 
 test('continues the latest assistant response without persisting the internal user instruction', async () => {

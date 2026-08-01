@@ -130,6 +130,7 @@
 			repository: { type: Object, default: null },
 			worldBooks: { type: Array, default: () => [] },
 			characters: { type: Array, default: () => [] },
+			hiddenScopes: { type: Array, default: () => [] },
 			busy: { type: Boolean, default: false }
 		},
 		emits: ['changed', 'close', 'error', 'import', 'update:open', 'update:worldBooks'],
@@ -172,8 +173,9 @@
 		},
 		methods: {
 			sortBooks(books) {
+				const hiddenScopes = new Set(this.hiddenScopes.map(scope => String(scope || '').trim()).filter(Boolean))
 				return (Array.isArray(books) ? books : [])
-					.filter(book => book && !book.deletedAt)
+					.filter(book => book && !book.deletedAt && !hiddenScopes.has(String(book.scope || '').trim()))
 					.slice()
 					.sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')))
 			},

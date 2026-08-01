@@ -34,7 +34,8 @@ test('chat derives display content without changing the stored assistant respons
   const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
   const decorator = source.slice(source.indexOf('decorateChatMessage(message)'), source.indexOf('async openChat(conversationId)'))
 
-  assert.match(decorator, /extractAssistantStatus\(rawContent, \{ hideIncomplete: message\.status === 'generating' \}\)/)
+  assert.match(decorator, /extractStoryMemory\(rawContent, \{ hideIncomplete: message\.status === 'generating' \}\)/)
+  assert.match(decorator, /extractAssistantStatus\(visibleContent, \{ hideIncomplete: message\.status === 'generating' \}\)/)
   assert.match(decorator, /decorateAssistantContent\(extracted\.content, extracted\.status, statusParsingStarted\)/)
   assert.match(decorator, /displayContent,\s*displaySegments:/)
   assert.match(source, /\{\{ segment \}\}/)

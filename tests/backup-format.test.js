@@ -236,3 +236,101 @@ test('remaps provider group members and provider speaker references in version 5
   assert.equal(imported.messages[0].speakerModelName, 'deepseek-chat')
   assert.equal(imported.messages[0].speakerAvatarSource, '/static/providers/deepseek.png')
 })
+
+test('round-trips story conversations and remaps their character and world book graph', () => {
+  let sequence = 0
+  const backup = createBackup({
+    providers: [{ id: 'provider-story', name: 'Story provider' }],
+    conversations: [{
+      id: 'conversation-story',
+      conversationKind: 'story',
+      providerProfileId: 'provider-story',
+      characterId: 'character-story',
+      storyConfig: {
+        characterIds: ['character-story'],
+        worldBookIds: ['book-card', 'book-memory'],
+        memoryWorldBookId: 'book-memory',
+        memoryMode: 'auto'
+      }
+    }],
+    messages: [{ id: 'message-story', conversationId: 'conversation-story', role: 'assistant', content: 'Story' }],
+    attachments: [],
+    characters: [{
+      id: 'character-story',
+      storyScope: 'story',
+      worldBookIds: ['book-card'],
+      assetIds: []
+    }],
+    worldBooks: [
+      {
+        id: 'book-card',
+        characterId: 'character-story',
+        conversationId: null,
+        scope: 'story',
+        data: { entries: [] }
+      },
+      {
+        id: 'book-memory',
+        characterId: null,
+        characterIds: ['character-story'],
+        conversationId: 'conversation-story',
+        scope: 'story',
+        data: { entries: [] }
+      }
+    ],
+    characterAssets: [],
+    settings: {}
+  }, new Date('2026-07-31T00:00:00.000Z'))
+
+  const imported = prepareImport(backup, () => `story-new-${++sequence}`)
+  const conversation = imported.conversations[0]
+  const character = imported.characters[0]
+  const [cardBook, memoryBook] = imported.worldBooks
+
+  assert.equal(conversation.characterId, character.id)
+  assert.deepEqual(conversation.storyConfig.characterIds, [character.id])
+  assert.deepEqual(conversation.storyConfig.worldBookIds, [cardBook.id, memoryBook.id])
+  assert.equal(conversation.storyConfig.memoryWorldBookId, memoryBook.id)
+  assert.equal(cardBook.characterId, character.id)
+  assert.equal(cardBook.conversationId, null)
+  assert.equal(memoryBook.conversationId, conversation.id)
+  assert.deepEqual(memoryBook.characterIds, [character.id])
+  assert.equal(character.storyScope, 'story')
+})
+
+test('rejects story memory books that belong to another conversation', () => {
+  assert.throws(() => prepareImport({
+    formatVersion: 5,
+    providers: [],
+    conversations: [
+      {
+        id: 'story-one',
+        conversationKind: 'story',
+        characterId: 'character-story',
+        storyConfig: {
+          characterIds: ['character-story'],
+          worldBookIds: ['book-memory'],
+          memoryWorldBookId: 'book-memory'
+        }
+      },
+      {
+        id: 'story-two',
+        conversationKind: 'story',
+        characterId: 'character-story',
+        storyConfig: { characterIds: ['character-story'], worldBookIds: [] }
+      }
+    ],
+    messages: [],
+    attachments: [],
+    characters: [{ id: 'character-story', worldBookIds: [], assetIds: [] }],
+    worldBooks: [{
+      id: 'book-memory',
+      conversationId: 'story-two',
+      characterIds: ['character-story'],
+      scope: 'story',
+      data: { entries: [] }
+    }],
+    characterAssets: [],
+    settings: {}
+  }), /其他会话/)
+})

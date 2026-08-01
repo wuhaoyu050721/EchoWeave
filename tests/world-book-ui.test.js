@@ -17,8 +17,9 @@ test('contacts wires the standalone world-book manager and import preview', asyn
   assert.match(page, /@manage-world-books="openWorldBookManager"/)
   assert.match(page, /<WorldBookManager/)
   assert.match(page, /:repository="services\?\.repository"/)
-  assert.match(page, /:world-books="worldBookItems"/)
-  assert.match(page, /:characters="characterItems"/)
+  assert.match(page, /:world-books="contactWorldBooks"/)
+  assert.match(page, /:characters="contactCharacters"/)
+  assert.match(page, /:hidden-scopes="\['story'\]"/)
   assert.match(page, /@changed="handleWorldBookChanged"/)
   assert.match(page, /@import="openWorldBookPicker"/)
 

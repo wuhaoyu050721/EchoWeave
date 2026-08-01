@@ -36,7 +36,7 @@
 			:query="contactSearchQuery"
 			:sort-mode="contactSortMode"
 			:busy="characterImportBusy"
-			:world-book-count="worldBookItems.length"
+			:world-book-count="contactWorldBooks.length"
 			@update:query="contactSearchQuery = $event"
 			@toggle-sort="toggleContactSort"
 			@load-more="showMoreCharacters"
@@ -48,9 +48,49 @@
 			@open-character-maker="openCharacterMaker"
 		/>
 
+		<view v-show="ui.screen === 'stories'" class="screen-view stories-view primary-tab-view">
+			<view class="stories-header">
+				<view>
+					<text class="stories-title">故事</text>
+					<text class="stories-subtitle">独立角色卡 · 自动维护长期记忆</text>
+				</view>
+				<button class="stories-header-import" :disabled="characterImportBusy" aria-label="从文件导入故事角色卡" @click="openStoryCharacterCardPicker('file')"><Import :size="21" /></button>
+			</view>
+			<view class="stories-control-band">
+				<view class="stories-search">
+					<Search :size="20" />
+					<input v-model="storySearchQuery" placeholder="搜索故事角色" confirm-type="search" />
+					<button v-if="storySearchQuery" aria-label="清空故事搜索" @click="storySearchQuery = ''"><X :size="17" /></button>
+				</view>
+				<view class="stories-import-grid">
+					<button :disabled="characterImportBusy" @click="openStoryCharacterCardPicker('gallery')"><Image :size="20" /><view><text>相册导入</text><text>保存为故事角色</text></view></button>
+					<button :disabled="characterImportBusy" @click="openStoryCharacterCardPicker('file')"><FileText :size="20" /><view><text>文件导入</text><text>PNG 角色卡</text></view></button>
+				</view>
+			</view>
+			<scroll-view class="stories-scroll" scroll-y @scrolltolower="showMoreStoryCharacters">
+				<view v-if="renderedStoryCharacters.length" class="stories-list">
+					<text class="stories-list-label">故事角色</text>
+					<button v-for="character in renderedStoryCharacters" :key="character.id" v-memo="[character]" class="story-character-row" :aria-label="`开始故事 ${character.name}`" @click="startStoryFromCharacter(character)">
+						<ProviderLogo class="story-character-avatar" :src="character.avatarDataUrl || '/static/zhiyu-logo.png'" :alt="character.name" mode="aspectFill" lazy-load />
+						<view class="story-character-copy">
+							<text class="story-character-name">{{ character.name }}</text>
+							<text class="story-character-meta">{{ storyCharacterMeta(character) }}</text>
+						</view>
+						<view class="story-start-pill"><PlayOutline :size="13" /><text>开始</text></view>
+					</button>
+				</view>
+				<view v-else class="stories-empty">
+					<FileText :size="44" />
+					<text>{{ storySearchQuery ? '没有匹配的故事角色' : '还没有故事角色' }}</text>
+					<button :disabled="characterImportBusy" @click="openStoryCharacterCardPicker('file')"><Import :size="17" /><text>导入故事角色卡</text></button>
+				</view>
+				<view class="stories-tail" />
+			</scroll-view>
+		</view>
+
 		<template v-if="ui.screen === 'group-editor'">
 			<GroupChatEditor
-				:characters="characterItems"
+				:characters="contactCharacters"
 				:providers="providerItems"
 				:conversation="groupEditorConversation"
 				:saving="groupEditorSaving"
@@ -102,7 +142,7 @@
 				<text class="popover-label">选择接口与模型</text>
 				<view class="generation-mode-tabs" role="tablist">
 					<button class="generation-mode-tab" :class="{ active: ui.generationMode === 'chat' }" @click="setChatGenerationMode"><MessageCircle :size="15" /><text>聊天</text></button>
-					<button v-if="!activeGroupConversation" class="generation-mode-tab" :class="{ active: ui.generationMode === 'image' }" @click="setImageGenerationMode"><Image :size="15" /><text>生图</text></button>
+					<button v-if="!activeGroupConversation && !activeStoryConversation" class="generation-mode-tab" :class="{ active: ui.generationMode === 'image' }" @click="setImageGenerationMode"><Image :size="15" /><text>生图</text></button>
 				</view>
 				<button v-for="provider in providerItems" :key="provider.id" class="popover-option" @click="selectConversationProvider(provider)">
 					<text>{{ provider.name }}</text><text>{{ provider.defaultModel }}</text>
@@ -203,7 +243,7 @@
 							<view v-if="attachmentProcessing" class="pending-processing"><RefreshCw :size="17" /><text>处理中</text></view>
 						</view>
 					</scroll-view>
-					<textarea ref="composerInput" class="composer-input" v-model="draftMessage" rows="1" maxlength="-1" :style="{ height: composerInputHeight + 'px' }" placeholder-style="color:#858d90;font-size:15.5px" :placeholder="ui.generationMode === 'image' ? '描述要生成的图片...' : '输入消息'" @focus="closeComposerMenus" @linechange="resizeComposerInput" />
+					<textarea ref="composerInput" class="composer-input" v-model="draftMessage" rows="1" maxlength="-1" :style="{ height: composerInputHeight + 'px' }" placeholder-style="color:#858d90;font-size:15.5px" :placeholder="composerPlaceholder" @focus="closeComposerMenus" @linechange="resizeComposerInput" />
 				</view>
 				<button class="composer-attachment" :disabled="ui.generationMode === 'image'" aria-label="添加附件" @click="toggleAttachmentMenu"><Paperclip :size="27" /></button>
 				<button class="composer-stop" :disabled="!ui.generating && (attachmentProcessing || (ui.generationMode === 'image' && !canSend))" :aria-label="ui.generating ? '停止生成' : (ui.generationMode === 'image' ? '生成图片' : (canSend ? '发送消息' : '语音输入'))" @click="handleComposerAction">
@@ -462,8 +502,8 @@
 			</view>
 		</view>
 		<view v-if="characterImportPreview" class="modal-backdrop character-import-backdrop" @click.self="closeCharacterImportPreview">
-			<view class="character-import-modal" role="dialog" aria-modal="true" aria-label="角色卡导入预览">
-				<view class="modal-heading"><text>导入角色卡</text><button aria-label="关闭角色卡预览" :disabled="characterImportBusy" @click="closeCharacterImportPreview"><X :size="19" /></button></view>
+			<view class="character-import-modal" role="dialog" aria-modal="true" :aria-label="characterImportTitle">
+				<view class="modal-heading"><text>{{ characterImportTitle }}</text><button aria-label="关闭角色卡预览" :disabled="characterImportBusy" @click="closeCharacterImportPreview"><X :size="19" /></button></view>
 				<scroll-view class="character-import-content" scroll-y>
 					<view class="character-preview-identity">
 						<ProviderLogo class="character-preview-avatar" :src="characterImportPreview.character.avatarDataUrl" :alt="characterImportPreview.character.name" mode="aspectFill" />
@@ -482,8 +522,8 @@
 					</button>
 				</scroll-view>
 				<view class="character-import-actions">
-					<button class="secondary-button" :disabled="characterImportBusy" @click="commitCharacterPreview(false)">仅保存</button>
-					<button class="primary-button" :disabled="characterImportBusy" @click="commitCharacterPreview(true)">{{ characterImportBusy ? '导入中...' : '导入并新建聊天' }}</button>
+					<button class="secondary-button" :disabled="characterImportBusy" @click="commitCharacterPreview(false)">{{ characterImportSecondaryLabel }}</button>
+					<button class="primary-button" :disabled="characterImportBusy" @click="commitCharacterPreview(true)">{{ characterImportBusy ? '导入中...' : characterImportPrimaryLabel }}</button>
 				</view>
 			</view>
 		</view>
@@ -492,11 +532,12 @@
 		<WorldBookManager
 			:open="worldBookManagerOpen"
 			:repository="services?.repository"
-			:world-books="worldBookItems"
-			:characters="characterItems"
+			:world-books="contactWorldBooks"
+			:characters="contactCharacters"
+			:hidden-scopes="['story']"
 			:busy="worldBookImportBusy"
 			@update:open="worldBookManagerOpen = $event"
-			@update:world-books="worldBookItems = $event"
+			@update:world-books="mergeContactWorldBooks"
 			@changed="handleWorldBookChanged"
 			@close="closeWorldBookManager"
 			@import="openWorldBookPicker"
@@ -519,8 +560,8 @@
 						<button class="world-book-binding-row world-book-binding-all" :class="{ selected: worldBookApplyToAll }" @click="setWorldBookApplyToAll"><view class="world-book-binding-check"><Check v-if="worldBookApplyToAll" :size="14" /></view><view><text>所有角色</text><text>也会自动应用到以后导入的角色</text></view></button>
 						<button class="world-book-binding-row world-book-binding-all" :class="{ selected: !worldBookApplyToAll }" @click="setWorldBookApplyToSelected"><view class="world-book-binding-check"><Check v-if="!worldBookApplyToAll" :size="14" /></view><view><text>指定角色</text><text>可同时选择多个联系人</text></view></button>
 						<view v-if="!worldBookApplyToAll" class="world-book-character-list">
-							<button v-for="character in characterItems" :key="character.id" class="world-book-binding-row" :class="{ selected: worldBookSelectedCharacterIds.includes(character.id) }" @click="toggleWorldBookCharacter(character.id)"><ProviderLogo class="world-book-character-avatar" :src="character.avatarDataUrl || '/static/zhiyu-logo.png'" :alt="character.name" mode="aspectFill" /><text>{{ character.name }}</text><view class="world-book-binding-check"><Check v-if="worldBookSelectedCharacterIds.includes(character.id)" :size="14" /></view></button>
-							<text v-if="!characterItems.length" class="world-book-no-characters">请先导入角色联系人，或选择“所有角色”</text>
+							<button v-for="character in contactCharacters" :key="character.id" class="world-book-binding-row" :class="{ selected: worldBookSelectedCharacterIds.includes(character.id) }" @click="toggleWorldBookCharacter(character.id)"><ProviderLogo class="world-book-character-avatar" :src="character.avatarDataUrl || '/static/zhiyu-logo.png'" :alt="character.name" mode="aspectFill" /><text>{{ character.name }}</text><view class="world-book-binding-check"><Check v-if="worldBookSelectedCharacterIds.includes(character.id)" :size="14" /></view></button>
+							<text v-if="!contactCharacters.length" class="world-book-no-characters">请先导入角色联系人，或选择“所有角色”</text>
 						</view>
 					</view>
 					<button v-if="worldBookImportPreview.requiresSensitiveExtensionConfirmation" class="character-permission-row" :class="{ confirmed: worldBookImportConfirmed }" @click="worldBookImportConfirmed = !worldBookImportConfirmed">
@@ -714,6 +755,7 @@
 	} from '../../src/core/group-chat.js'
 	import { imageAttachmentSource } from '../../src/core/image-output.js'
 	import { PROFILE_AVATAR_SETTING_KEY, createProfileAvatar, normalizeProfileAvatar } from '../../src/core/profile-avatar.js'
+	import { extractStoryMemory } from '../../src/core/story-memory.js'
 	import {
 		STREAMING_SEGMENTED_DISPLAY_SETTING_KEY, STREAMING_SETTING_KEY,
 		readStreamingEnabled, readStreamingSegmentedDisplayEnabled
@@ -780,19 +822,19 @@
 			return {
 				ui: createInitialUiState(), iconMap, navigationItems, attachmentActions, appVersion: APP_VERSION, services: null, workspaceManager: null, ready: false, initializing: false, initializationError: '',
 				conversationItems: [], characterItems: [], worldBookItems: [], providerItems: [], messageItems: [], animatedMessageIds: [], assistantStatusOpen: false, groupStatusSpeakerKey: '',
-				conversationRenderLimit: PRIMARY_LIST_BATCH_SIZE, characterRenderLimit: PRIMARY_LIST_BATCH_SIZE,
+				conversationRenderLimit: PRIMARY_LIST_BATCH_SIZE, characterRenderLimit: PRIMARY_LIST_BATCH_SIZE, storyRenderLimit: PRIMARY_LIST_BATCH_SIZE,
 				conversationLoadPromise: null, characterLoadPromise: null, worldBookLoadPromise: null, dataLoadRevision: 0,
 				characterAvatarSources: markRaw(new Map()), characterAvatarLoadPromises: markRaw(new Map()),
 				messageHistoryLoading: false, messageHistoryHasMore: false, messageHistoryTrimmed: false, chatLoadRevision: 0, pendingStreamingMessage: null, streamingRenderTimer: null, segmentedReplyTimers: markRaw(new Map()),
 				chatScrollIntoView: '', chatScrollRevision: 0, chatScrollTimer: null,
 				chatVirtualScrollTop: 0, chatVirtualViewportHeight: 720, chatVirtualPinnedToBottom: true,
-				chatVirtualMeasurementRevision: 0, chatVirtualMeasurements: markRaw(new Map()), chatVirtualScrollTimer: null, chatVirtualMeasureTimer: null,
+				chatVirtualMeasurementRevision: 0, chatVirtualMeasurements: markRaw(new Map()), chatVirtualScrollTimer: null, chatVirtualMeasureTimer: null, chatVirtualSuppressMeasurementScroll: false,
 				chatHistoryAutoLoadArmed: false, chatHistoryAutoLoadTimer: null,
 				searchQuery: '', searchOpen: false, homeMenuOpen: false, draftMessage: '', composerInputHeight: COMPOSER_MIN_HEIGHT,
 				groupEditorSaving: false, groupEditorReturnScreen: 'conversations',
 				conversationActionSheet: null, conversationActionResolver: null, appDialog: null, appDialogValue: '', appDialogResolver: null,
-				contactSearchQuery: '', contactSortMode: 'name', customCharacterDraft: null, customCharacterAvatar: null, characterDetailEditing: false, characterSaveBusy: false, pendingCharacterAvatarId: '',
-				characterImportBusy: false, characterImportStage: '', characterImportPreview: null, characterImportConfirmed: false,
+				contactSearchQuery: '', storySearchQuery: '', contactSortMode: 'name', customCharacterDraft: null, customCharacterAvatar: null, characterDetailEditing: false, characterSaveBusy: false, pendingCharacterAvatarId: '',
+				characterImportBusy: false, characterImportStage: '', characterImportPreview: null, characterImportConfirmed: false, characterImportTarget: 'contacts',
 				worldBookManagerOpen: false, worldBookImportBusy: false, worldBookImportPreview: null, worldBookImportConfirmed: false,
 				worldBookApplyToAll: true, worldBookSelectedCharacterIds: [],
 				pendingAttachments: [], attachmentProcessing: false, attachmentPreview: null, imageDownloadBusy: false,
@@ -930,21 +972,44 @@
 			renderedConversations() {
 				return this.filteredConversations.slice(0, this.conversationRenderLimit)
 			},
+			contactCharacters() {
+				return this.characterItems.filter(item => String(item?.storyScope || '').trim() !== 'story')
+			},
+			storyCharacters() {
+				return this.characterItems.filter(item => String(item?.storyScope || '').trim() === 'story')
+			},
+			contactWorldBooks() {
+				return this.worldBookItems.filter(book => String(book?.scope || '').trim() !== 'story')
+			},
+			sortCharactersByMode() {
+				return (items, sortMode = this.contactSortMode) => [...items].sort((left, right) => sortMode === 'recent'
+					? String(right.importedAt || '').localeCompare(String(left.importedAt || ''))
+					: String(left.name || '').localeCompare(String(right.name || ''), 'zh-CN'))
+			},
 			filteredCharacters() {
 				const keyword = this.contactSearchQuery.trim().toLowerCase()
 				const filtered = keyword
-					? this.characterItems.filter(item => `${item.name} ${item.creator || ''} ${(item.tags || []).join(' ')}`.toLowerCase().includes(keyword))
-					: [...this.characterItems]
-				return filtered.sort((left, right) => this.contactSortMode === 'recent'
-					? String(right.importedAt || '').localeCompare(String(left.importedAt || ''))
-					: String(left.name || '').localeCompare(String(right.name || '')))
+					? this.contactCharacters.filter(item => `${item.name} ${item.creator || ''} ${(item.tags || []).join(' ')}`.toLowerCase().includes(keyword))
+					: this.contactCharacters
+				return this.sortCharactersByMode(filtered)
 			},
 			renderedCharacters() {
 				return this.filteredCharacters.slice(0, this.characterRenderLimit)
 			},
+			filteredStoryCharacters() {
+				const keyword = this.storySearchQuery.trim().toLowerCase()
+				const filtered = keyword
+					? this.storyCharacters.filter(item => `${item.name} ${item.creator || ''} ${(item.tags || []).join(' ')}`.toLowerCase().includes(keyword))
+					: this.storyCharacters
+				return this.sortCharactersByMode(filtered, 'recent')
+			},
+			renderedStoryCharacters() {
+				return this.filteredStoryCharacters.slice(0, this.storyRenderLimit)
+			},
 			activeConversation() { return this.conversationItems.find((item) => item.id === this.ui.activeConversationId) || null },
 			groupEditorConversation() { return this.conversationItems.find(item => item.id === this.ui.groupEditorConversationId) || null },
 			activeGroupConversation() { return isGroupConversation(this.activeConversation) },
+			activeStoryConversation() { return this.activeConversation?.conversationKind === 'story' },
 			activeGroupParticipants() {
 				return this.activeGroupConversation
 					? (Array.isArray(this.activeConversation.participants) ? this.activeConversation.participants : [])
@@ -1078,7 +1143,29 @@
 			automaticProviderAvatar() { return detectProviderAvatarPreset(this.providerForm) },
 			automaticProviderAvatarSource() { return this.automaticProviderAvatar.source },
 			automaticProviderAvatarLabel() { return `当前识别为 ${this.automaticProviderAvatar.label}` },
-			canSend() { return canSendMessage(this.ui, this.draftMessage, Boolean(this.activeProvider), this.pendingAttachments.length, this.attachmentProcessing) },
+			canStoryContinue() {
+				return Boolean(
+					this.activeStoryConversation &&
+					this.ui.generationMode === 'chat' &&
+					!this.ui.generating &&
+					!this.attachmentProcessing &&
+					Boolean(this.activeProvider) &&
+					!this.pendingAttachments.length &&
+					this.latestCompletedAssistantMessage &&
+					this.canContinueMessage(this.latestCompletedAssistantMessage)
+				)
+			},
+			composerPlaceholder() {
+				if (this.ui.generationMode === 'image') return '描述要生成的图片...'
+				return this.activeStoryConversation ? '输入事件走向，留空点发送可续写' : '输入消息'
+			},
+			characterImportTitle() { return this.characterImportTarget === 'story' ? '导入故事角色卡' : '导入角色卡' },
+			characterImportSecondaryLabel() { return this.characterImportTarget === 'story' ? '仅保存到故事' : '仅保存' },
+			characterImportPrimaryLabel() { return this.characterImportTarget === 'story' ? '导入并开始故事' : '导入并新建聊天' },
+			canSend() {
+				return canSendMessage(this.ui, this.draftMessage, Boolean(this.activeProvider), this.pendingAttachments.length, this.attachmentProcessing) ||
+					this.canStoryContinue
+			},
 			composerMultiline() { return this.composerInputHeight > COMPOSER_MIN_HEIGHT },
 			providerBusy() { return !this.ready || this.providerSaving || this.providerDefaultSaving || this.providerTesting || this.providerLoadingModels || this.providerApiKeyBusy }
 		},
@@ -1089,6 +1176,10 @@
 			},
 			contactSearchQuery() {
 				this.characterRenderLimit = PRIMARY_LIST_BATCH_SIZE
+				this.$nextTick(() => this.hydrateVisibleCharacterAvatars())
+			},
+			storySearchQuery() {
+				this.storyRenderLimit = PRIMARY_LIST_BATCH_SIZE
 				this.$nextTick(() => this.hydrateVisibleCharacterAvatars())
 			},
 			draftMessage(value) {
@@ -1324,6 +1415,14 @@
 				this.characterRenderLimit = PRIMARY_LIST_BATCH_SIZE
 				this.$nextTick(() => this.hydrateVisibleCharacterAvatars())
 			},
+			storyCharacterMeta(character) {
+				const patches = Array.isArray(character?.storyMemoryPatches) ? character.storyMemoryPatches.length : 0
+				const entries = character?.card?.data?.character_book?.entries?.length || 0
+				return [
+					patches ? `故事记忆 ${patches} 条` : '等待故事推进',
+					entries ? `内嵌世界书 ${entries} 条` : ''
+				].filter(Boolean).join(' · ')
+			},
 			async showMoreConversations() {
 				this.conversationRenderLimit = Math.min(
 					this.filteredConversations.length,
@@ -1335,6 +1434,13 @@
 				this.characterRenderLimit = Math.min(
 					this.filteredCharacters.length,
 					this.characterRenderLimit + PRIMARY_LIST_BATCH_SIZE
+				)
+				await this.hydrateVisibleCharacterAvatars()
+			},
+			async showMoreStoryCharacters() {
+				this.storyRenderLimit = Math.min(
+					this.filteredStoryCharacters.length,
+					this.storyRenderLimit + PRIMARY_LIST_BATCH_SIZE
 				)
 				await this.hydrateVisibleCharacterAvatars()
 			},
@@ -1617,7 +1723,12 @@
 				})
 			},
 			hydrateVisibleCharacterAvatars() {
-				return this.hydrateCharacterAvatars(this.renderedCharacters)
+				const visibleById = new Map(
+					[...this.renderedCharacters, ...this.renderedStoryCharacters]
+						.filter(character => character?.id)
+						.map(character => [character.id, character])
+				)
+				return this.hydrateCharacterAvatars([...visibleById.values()])
 			},
 			async hydrateVisibleConversationAvatars() {
 				const visibleIds = new Set(this.renderedConversations.map(conversation => conversation.id))
@@ -1661,6 +1772,7 @@
 					if (this.services?.repository === repository && this.dataLoadRevision === revision) {
 						this.characterItems = items
 						this.characterRenderLimit = PRIMARY_LIST_BATCH_SIZE
+						this.storyRenderLimit = PRIMARY_LIST_BATCH_SIZE
 						await this.hydrateVisibleCharacterAvatars()
 					}
 					return items
@@ -1698,6 +1810,10 @@
 				if (this.worldBookImportBusy) return
 				this.loadWorldBooks().catch(error => this.handleError(error, '世界书加载失败'))
 				this.worldBookManagerOpen = true
+			},
+			mergeContactWorldBooks(books) {
+				const storyBooks = this.worldBookItems.filter(book => String(book?.scope || '').trim() === 'story')
+				this.worldBookItems = [...storyBooks, ...(Array.isArray(books) ? books : [])]
 			},
 			closeWorldBookManager() {
 				if (!this.worldBookImportBusy) this.worldBookManagerOpen = false
@@ -1822,8 +1938,12 @@
 					this.worldBookImportBusy = false
 				}
 			},
-			openCharacterCardPicker(source = 'file') {
+			openStoryCharacterCardPicker(source = 'file') {
+				this.openCharacterCardPicker(source, 'story')
+			},
+			openCharacterCardPicker(source = 'file', target = 'contacts') {
 				if (this.characterImportBusy) return
+				this.characterImportTarget = target === 'story' ? 'story' : 'contacts'
 				if (this.services?.nativeCharacterCardPicker) {
 					this.pickNativeCharacterCard(source)
 					return
@@ -1877,6 +1997,7 @@
 				if (this.characterImportBusy) return
 				this.characterImportPreview = null
 				this.characterImportConfirmed = false
+				this.characterImportTarget = 'contacts'
 			},
 			async commitCharacterPreview(openChatAfterImport) {
 				if (!this.characterImportPreview || this.characterImportBusy) return
@@ -1887,18 +2008,40 @@
 				this.characterImportBusy = true
 				this.characterImportStage = 'saving'
 				this.errorMessage = ''
+				const importTarget = this.characterImportTarget
+				const storyImport = importTarget === 'story'
 				try {
 					await this.$nextTick()
 					await new Promise(resolve => setTimeout(resolve, 16))
 					const result = await commitCharacterImport(this.characterImportPreview, {
 						repository: this.services.repository,
-						allowSensitiveExtensions: this.characterImportConfirmed
+						allowSensitiveExtensions: this.characterImportConfirmed,
+						...(storyImport ? {
+							characterScope: 'story',
+							characterOverrides: {
+								storyImportedAt: new Date().toISOString(),
+								storyMemoryPatches: []
+							},
+							worldBookOverrides: {
+								scope: 'story',
+								conversationId: null
+							}
+						} : {})
 					})
 					this.characterImportPreview = null
 					this.characterImportConfirmed = false
-					await this.loadCharacters()
-					if (openChatAfterImport) await this.startCharacterChat(result.character)
-					else this.showToast(result.duplicateOfCharacterIds.length ? '已另存为新角色联系人' : '角色已保存到联系人')
+					this.characterImportTarget = 'contacts'
+					await Promise.all(storyImport
+						? [this.loadCharacters(), this.loadWorldBooks()]
+						: [this.loadCharacters()])
+					if (openChatAfterImport) {
+						if (storyImport) await this.startStoryFromCharacter(result.character)
+						else await this.startCharacterChat(result.character)
+					} else if (storyImport) {
+						this.showToast(result.duplicateOfCharacterIds.length ? '已另存为新故事角色' : '故事角色已保存')
+					} else {
+						this.showToast(result.duplicateOfCharacterIds.length ? '已另存为新角色联系人' : '角色已保存到联系人')
+					}
 				} catch (error) {
 					this.handleError(error, '角色卡导入失败')
 				} finally {
@@ -1921,6 +2064,23 @@
 					await this.openChat(conversation.id)
 				} catch (error) {
 					this.handleError(error, '新建角色聊天失败')
+				}
+			},
+			async startStoryFromCharacter(character) {
+				if (!character) return
+				try {
+					const provider = this.providerItems.find(item => item.id === this.ui.activeProviderId) || this.providerItems[0]
+					if (!provider) { this.goToTab('providers'); throw new Error('请先添加一个模型接口') }
+					const conversation = await this.services.chatService.createStoryConversation({
+						characterId: character.id,
+						providerProfileId: provider.id,
+						providerNameSnapshot: provider.name,
+						modelName: provider.defaultModel
+					})
+					await this.loadConversations()
+					await this.openChat(conversation.id)
+				} catch (error) {
+					this.handleError(error, '开始故事失败')
 				}
 			},
 			resizeComposerInput(event) {
@@ -2177,6 +2337,7 @@
 				this.worldBookItems = []
 				this.conversationRenderLimit = PRIMARY_LIST_BATCH_SIZE
 				this.characterRenderLimit = PRIMARY_LIST_BATCH_SIZE
+				this.storyRenderLimit = PRIMARY_LIST_BATCH_SIZE
 				this.providerItems = []
 				this.pendingAttachments = []
 				this.assistantStatusOpen = false
@@ -2321,6 +2482,8 @@
 				if (message?.role !== 'assistant') {
 					return { ...presentation, displayContent: rawContent, assistantStatus: null, statusParsingStarted: false }
 				}
+				const storyExtracted = extractStoryMemory(rawContent, { hideIncomplete: message.status === 'generating' })
+				const visibleContent = storyExtracted.content
 				const decorateAssistantContent = (displayContent, assistantStatus, statusParsingStarted) => ({
 					...presentation,
 					displayContent,
@@ -2331,11 +2494,11 @@
 					statusParsingStarted
 				})
 				const statusParsingStarted = Boolean(message.statusParsingStarted) ||
-					/<\s*sumo_monitor\b/i.test(rawContent.slice(-4096))
+					/<\s*sumo_monitor\b/i.test(visibleContent.slice(-4096))
 				if (message.status === 'generating' && !statusParsingStarted) {
-					return decorateAssistantContent(rawContent, null, false)
+					return decorateAssistantContent(visibleContent, null, false)
 				}
-				const extracted = extractAssistantStatus(rawContent, { hideIncomplete: message.status === 'generating' })
+				const extracted = extractAssistantStatus(visibleContent, { hideIncomplete: message.status === 'generating' })
 				return decorateAssistantContent(extracted.content, extracted.status, statusParsingStarted)
 			},
 			async openChat(conversationId) {
@@ -2345,7 +2508,7 @@
 				this.pendingStreamingMessage = null
 				this.clearSegmentedReplyTimers()
 				openConversation(this.ui, conversationId)
-				if (isGroupConversation(this.activeConversation)) setGenerationMode(this.ui, 'chat')
+				if (isGroupConversation(this.activeConversation) || this.activeStoryConversation) setGenerationMode(this.ui, 'chat')
 				this.services?.replyNotificationService?.setActiveConversationId(conversationId)
 				this.animatedMessageIds = []
 				this.assistantStatusOpen = false
@@ -2705,6 +2868,10 @@
 			isLastAssistantSegment(message, segmentIndex) {
 				return segmentIndex === this.assistantVisibleSegments(message).length - 1
 			},
+			shouldSuppressAssistantAutoScroll(message) {
+				if (message?.role !== 'assistant') return false
+				return message.responseDisplayMode === 'segmented' || this.streamingEnabled === false
+			},
 			scheduleSegmentedReplyReveal(messageId) {
 				if (!messageId || this.segmentedReplyTimers.has(messageId)) return
 				const message = this.messageItems.find(item => item.id === messageId)
@@ -2733,8 +2900,7 @@
 						visibleSegmentCount: currentVisibleCount + 1
 					})
 					this.invalidateChatVirtualMeasurement(messageId)
-					this.scheduleChatVirtualMeasurement()
-					this.scrollChatToBottom()
+					this.scheduleChatVirtualMeasurement({ follow: false })
 					this.scheduleSegmentedReplyReveal(messageId)
 				}, delay)
 				this.segmentedReplyTimers.set(messageId, timer)
@@ -2805,8 +2971,9 @@
 					this.groupStatusSpeakerKey = groupMessageSpeakerKey(next)
 				}
 				if (queueSegmentedReply) this.scheduleSegmentedReplyReveal(next.id)
-				this.scheduleChatVirtualMeasurement()
-				this.scrollChatToBottom()
+				const suppressAssistantAutoScroll = this.shouldSuppressAssistantAutoScroll(next)
+				this.scheduleChatVirtualMeasurement({ follow: !suppressAssistantAutoScroll })
+				if (!suppressAssistantAutoScroll) this.scrollChatToBottom()
 			},
 			upsertMessage(message) {
 				if (message?.conversationId && message.conversationId !== this.ui.activeConversationId) return
@@ -2870,6 +3037,10 @@
 			},
 			handleComposerAction() {
 				if (this.ui.generating) { this.stopGeneration(); return }
+				if (this.canStoryContinue && !this.draftMessage.trim() && !this.pendingAttachments.length) {
+					this.continueMessage(this.latestCompletedAssistantMessage.id)
+					return
+				}
 				if (this.canSend) { this.sendMessage(); return }
 				if (this.ui.generationMode === 'chat') this.startVoiceInput()
 			},
@@ -3828,6 +3999,7 @@
 				this.chatVirtualScrollTop = 0
 				this.chatVirtualViewportHeight = Number(this.chatScrollTarget()?.clientHeight) || 720
 				this.chatVirtualPinnedToBottom = true
+				this.chatVirtualSuppressMeasurementScroll = false
 				this.disarmChatHistoryAutoLoad()
 			},
 			invalidateChatVirtualMeasurement(messageId) {
@@ -3853,7 +4025,8 @@
 				this.chatVirtualPinnedToBottom = false
 				this.chatVirtualScrollTop = layout.offsets[index] || 0
 			},
-			scheduleChatVirtualMeasurement() {
+			scheduleChatVirtualMeasurement({ follow = true } = {}) {
+				if (!follow) this.chatVirtualSuppressMeasurementScroll = true
 				if (this.chatVirtualMeasureTimer || !this.messageItems.length) return
 				this.chatVirtualMeasureTimer = setTimeout(() => {
 					this.chatVirtualMeasureTimer = null
@@ -3861,6 +4034,8 @@
 				}, CHAT_VIRTUAL_MEASURE_INTERVAL)
 			},
 			measureChatVirtualRows() {
+				const suppressAutoScroll = this.chatVirtualSuppressMeasurementScroll
+				this.chatVirtualSuppressMeasurementScroll = false
 				const target = this.chatScrollTarget()
 				const rows = target?.querySelectorAll?.('.chat-virtual-row[data-chat-message-id]')
 				if (!rows?.length) return
@@ -3874,7 +4049,7 @@
 				}
 				if (!changed) return
 				this.chatVirtualMeasurementRevision += 1
-				if (this.chatVirtualPinnedToBottom) this.scrollChatToBottom()
+				if (this.chatVirtualPinnedToBottom && !suppressAutoScroll) this.scrollChatToBottom()
 			},
 			onChatScroll(event) {
 				const detail = event?.detail || {}
@@ -4200,6 +4375,269 @@
 		align-items: center;
 		gap: 2px;
 		margin-left: auto;
+	}
+
+	.stories-view {
+		--story-accent: #18856f;
+		--story-warm: #d97736;
+		background: #f3f3f5;
+		color: #202328;
+	}
+
+	.stories-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		height: 64px;
+		padding: 4px 18px 0;
+		background: #fff;
+		border-bottom: 1px solid #efedf0;
+		flex: 0 0 auto;
+	}
+
+	.stories-header > view,
+	.story-character-copy,
+	.stories-import-grid button > view {
+		display: flex;
+		min-width: 0;
+		flex-direction: column;
+	}
+
+	.stories-title {
+		font-size: 25px;
+		font-weight: 700;
+		line-height: 30px;
+		letter-spacing: 0;
+	}
+
+	.stories-subtitle {
+		margin-top: 1px;
+		font-size: 11px;
+		line-height: 16px;
+		color: #85868b;
+	}
+
+	.stories-header-import,
+	.stories-search button {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 40px;
+		height: 40px;
+		border-radius: 50%;
+		background: #eaf6f2;
+		color: var(--story-accent);
+		flex: 0 0 auto;
+	}
+
+	.stories-control-band {
+		padding: 12px 16px 14px;
+		border-bottom: 1px solid #e6e4e8;
+		background: #fff;
+		flex: 0 0 auto;
+	}
+
+	.stories-search {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		height: 48px;
+		padding: 0 13px;
+		border: 1px solid #e5e4e7;
+		border-radius: 8px;
+		background: #f7f7f8;
+		color: #8b8d92;
+	}
+
+	.stories-search input {
+		min-width: 0;
+		font-size: 15px;
+		color: #22252a;
+		flex: 1;
+	}
+
+	.stories-search button {
+		width: 30px;
+		height: 30px;
+		background: transparent;
+		color: #7a7c81;
+	}
+
+	.stories-import-grid {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 10px;
+		margin-top: 10px;
+	}
+
+	.stories-import-grid button {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		min-width: 0;
+		height: 54px;
+		padding: 0 12px;
+		border: 1px solid #e3e1e5;
+		border-radius: 8px;
+		background: #fff;
+		color: var(--story-accent);
+		text-align: left;
+		box-shadow: 0 3px 10px rgba(35, 39, 44, 0.04);
+	}
+
+	.stories-import-grid button:nth-child(2) {
+		color: var(--story-warm);
+	}
+
+	.stories-import-grid button > view {
+		gap: 1px;
+		flex: 1;
+	}
+
+	.stories-import-grid button text:first-child {
+		overflow: hidden;
+		font-size: 13px;
+		font-weight: 650;
+		line-height: 18px;
+		color: #303238;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.stories-import-grid button text:last-child {
+		overflow: hidden;
+		font-size: 10px;
+		line-height: 15px;
+		color: #929398;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.stories-scroll {
+		min-height: 0;
+		padding: 16px;
+		box-sizing: border-box;
+		flex: 1;
+	}
+
+	.stories-list {
+		overflow: hidden;
+		border: 1px solid #e7e5e8;
+		border-radius: 8px;
+		background: #fff;
+		box-shadow: 0 4px 15px rgba(42, 39, 45, 0.05);
+	}
+
+	.stories-list-label {
+		display: block;
+		padding: 14px 16px 7px;
+		font-size: 12px;
+		font-weight: 650;
+		color: var(--story-accent);
+	}
+
+	.story-character-row {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		width: 100%;
+		min-height: 76px;
+		padding: 9px 14px;
+		background: #fff;
+		text-align: left;
+		content-visibility: auto;
+		contain-intrinsic-size: 76px;
+	}
+
+	.story-character-row:active {
+		background: #f5faf8;
+	}
+
+	.story-character-avatar {
+		display: block;
+		width: 56px;
+		height: 56px;
+		overflow: hidden;
+		border-radius: 50%;
+		background: #e9edef;
+		flex: 0 0 auto;
+	}
+
+	.story-character-copy {
+		gap: 5px;
+		flex: 1;
+	}
+
+	.story-character-name,
+	.story-character-meta {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.story-character-name {
+		font-size: 16px;
+		font-weight: 650;
+		line-height: 21px;
+		color: #25272c;
+	}
+
+	.story-character-meta {
+		font-size: 11px;
+		line-height: 17px;
+		color: #96979c;
+	}
+
+	.story-start-pill,
+	.stories-empty button {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 4px;
+		border: 1px solid #cfe7df;
+		border-radius: 8px;
+		background: #edf8f4;
+		color: var(--story-accent);
+		font-size: 11px;
+		font-weight: 650;
+		flex: 0 0 auto;
+	}
+
+	.story-start-pill {
+		width: 54px;
+		height: 30px;
+	}
+
+	.stories-empty {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 250px;
+		padding: 24px;
+		flex-direction: column;
+		gap: 12px;
+		color: #95969b;
+		font-size: 14px;
+	}
+
+	.stories-empty > .app-icon {
+		color: #a7b9b4;
+	}
+
+	.stories-empty button {
+		height: 40px;
+		padding: 0 14px;
+		font-size: 12px;
+	}
+
+	.stories-tail {
+		height: 108px;
+	}
+
+	.stories-header-import:disabled,
+	.stories-import-grid button:disabled,
+	.stories-empty button:disabled {
+		opacity: 0.55;
 	}
 
 	.conversations-header .icon-button {
@@ -7329,7 +7767,7 @@
 		bottom: max(8px, env(safe-area-inset-bottom));
 		z-index: 18;
 		display: grid;
-		grid-template-columns: repeat(4, 1fr);
+		grid-template-columns: repeat(5, 1fr);
 		height: 68px;
 		padding: 4px 9px;
 		border: 1px solid rgba(224, 218, 225, 0.86);
@@ -7345,7 +7783,7 @@
 		top: 4px;
 		left: 9px;
 		z-index: 0;
-		width: calc(25% - 4.5px);
+		width: calc(20% - 3.6px);
 		height: 58px;
 		border-radius: 29px;
 		background: #fff0fb;

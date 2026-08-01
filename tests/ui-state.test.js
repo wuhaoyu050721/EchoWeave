@@ -66,10 +66,10 @@ test('selecting provider screen leaves chat and activates provider tab', () => {
   assert.equal(state.activeTab, 'providers')
 })
 
-test('navigation exposes conversations contacts providers and settings', () => {
+test('navigation exposes conversations contacts stories providers and settings', () => {
   assert.deepEqual(
     navigationItems.map((item) => item.id),
-    ['conversations', 'contacts', 'providers', 'settings']
+    ['conversations', 'contacts', 'stories', 'providers', 'settings']
   )
 })
 
@@ -78,6 +78,16 @@ test('selecting contacts opens the character contact screen', () => {
   selectTab(state, 'contacts')
   assert.equal(state.screen, 'contacts')
   assert.equal(state.activeTab, 'contacts')
+})
+
+test('selecting stories opens the story screen and app back returns home', () => {
+  const state = createInitialUiState()
+
+  selectTab(state, 'stories')
+
+  assert.equal(state.screen, 'stories')
+  assert.equal(state.activeTab, 'stories')
+  assert.equal(resolveAppBackAction(state), 'conversations')
 })
 
 test('character details keep the contacts tab active and return to contacts', () => {
@@ -204,7 +214,7 @@ test('app back navigation returns internal screens to conversations', () => {
   openConversation(state, 'product-review')
   assert.equal(resolveAppBackAction(state), 'conversations')
 
-  for (const tab of ['contacts', 'providers', 'settings']) {
+  for (const tab of ['contacts', 'stories', 'providers', 'settings']) {
     selectTab(state, tab)
     assert.equal(resolveAppBackAction(state), 'conversations')
   }
@@ -350,4 +360,19 @@ test('conversation summary hides a trailing assistant status block', () => {
 
   assert.equal(summary.preview, '她向你挥了挥手。')
   assert.doesNotMatch(summary.preview, /character_status/)
+})
+
+test('conversation summary hides trailing story memory blocks', () => {
+  const summary = summarizeConversation(
+    { id: 'story-1', title: 'Story' },
+    {
+      role: 'assistant',
+      content: 'Story body.\n<echo_story_memory>{"sceneSummary":"Hidden"}</echo_story_memory>',
+      updatedAt: '2026-07-20T09:29:00.000+08:00'
+    },
+    new Date('2026-07-20T10:00:00.000+08:00')
+  )
+
+  assert.equal(summary.preview, 'Story body.')
+  assert.doesNotMatch(summary.preview, /echo_story_memory/)
 })

@@ -1,4 +1,5 @@
 import { extractAssistantStatus } from './assistant-status.js'
+import { extractStoryMemory } from './story-memory.js'
 
 function isContextMessage(message) {
   if (!message || message.deletedAt || !['user', 'assistant'].includes(message.role)) {
@@ -14,7 +15,7 @@ function isContextMessage(message) {
 }
 
 function contextMessageContent(message) {
-  const content = String(message?.content ?? '')
+  const content = extractStoryMemory(String(message?.content ?? ''), { hideIncomplete: true }).content
   if (message?.role !== 'assistant') return content
   return extractAssistantStatus(content, { hideIncomplete: true }).content
 }

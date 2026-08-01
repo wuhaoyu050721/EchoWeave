@@ -1,4 +1,5 @@
 import { extractAssistantStatus } from './assistant-status.js'
+import { extractStoryMemory } from './story-memory.js'
 
 function cleanText(value) {
   return String(value ?? '').trim()
@@ -88,12 +89,17 @@ function recentScanText(messages, depth) {
   return messages
     .filter(message => !message.deletedAt && ['user', 'assistant'].includes(message.role))
     .slice(-Math.max(1, Number(depth) || 4))
-    .map(message => extractAssistantStatus(String(message.content ?? ''), { hideIncomplete: true }).content)
+    .map(message => {
+      const content = extractStoryMemory(String(message.content ?? ''), { hideIncomplete: true }).content
+      return message.role === 'assistant'
+        ? extractAssistantStatus(content, { hideIncomplete: true }).content
+        : content
+    })
     .join('\n')
     .slice(-20000)
 }
 
-function activateWorldBooks(worldBooks, messages, random, render) {
+export function activateWorldBooks(worldBooks, messages, random, render) {
   const activated = []
   const skippedRegexEntries = []
   for (const book of worldBooks) {
@@ -145,7 +151,8 @@ function latestAssistantStatus(messages) {
     .sort((left, right) => (Number(left.message.sequence) || 0) - (Number(right.message.sequence) || 0) || left.index - right.index)
 
   for (let index = ordered.length - 1; index >= 0; index -= 1) {
-    const status = extractAssistantStatus(ordered[index].message.content).status
+    const content = extractStoryMemory(ordered[index].message.content, { hideIncomplete: true }).content
+    const status = extractAssistantStatus(content).status
     if (status?.raw) return status
   }
   return null

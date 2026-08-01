@@ -19,6 +19,11 @@ import { normalizeImageOutput } from '../core/image-output.js'
 import { resolveProviderAvatarSource } from '../core/provider-avatar.js'
 import { renderCharacterTemplate } from '../core/character-prompt.js'
 import { createRuntimeId } from '../core/runtime-id.js'
+import {
+  createStoryMemoryEntry,
+  extractStoryMemory,
+  storyMemoryHasChanges
+} from '../core/story-memory.js'
 
 function isAbortError(error, signal) {
   return signal?.aborted || error?.name === 'AbortError'
@@ -32,6 +37,22 @@ function createTitle(content) {
 function textTail(value, maximumLength = 1200) {
   const text = String(value ?? '')
   return text.slice(-Math.max(0, Number(maximumLength) || 0))
+}
+
+function isStoryConversation(conversation) {
+  return conversation?.conversationKind === 'story'
+}
+
+function uniqueText(values) {
+  return [...new Set((Array.isArray(values) ? values : [])
+    .map(value => String(value ?? '').trim())
+    .filter(Boolean))]
+}
+
+function sameTextArray(left, right) {
+  const leftItems = uniqueText(left)
+  const rightItems = uniqueText(right)
+  return leftItems.length === rightItems.length && leftItems.every((value, index) => value === rightItems[index])
 }
 
 const CONTINUE_RESPONSE_PROMPT = [
@@ -254,6 +275,67 @@ export class ChatService {
     return conversation
   }
 
+  async createStoryConversation({
+    characterId,
+    providerProfileId,
+    providerNameSnapshot,
+    modelName,
+    title = '',
+    greetingIndex = 0
+  } = {}) {
+    const character = await this.repository.getCharacter?.(characterId)
+    if (!character || character.deletedAt) throw new Error('故事角色不存在')
+    const timestamp = this.now()
+    const greetings = [character.card?.data?.first_mes, ...(character.card?.data?.alternate_greetings || [])]
+    const greeting = String(greetings[Math.max(0, Number(greetingIndex) || 0)] ?? greetings[0] ?? '').trim()
+    const userName = await this.getUserName()
+    const conversation = {
+      id: this.idFactory(),
+      title: String(title ?? '').trim() || `${character.name} · 故事`,
+      conversationKind: 'story',
+      providerProfileId,
+      providerNameSnapshot,
+      modelName,
+      characterId: character.id,
+      characterNameSnapshot: character.name,
+      characterAvatarAssetId: character.avatarAssetId,
+      storyConfig: {
+        characterIds: [character.id],
+        memoryMode: 'auto',
+        allowCharacterPatches: true,
+        worldBookIds: [],
+        memoryWorldBookId: null,
+        updatedAt: timestamp
+      },
+      systemPromptMode: 'inherit',
+      lastMessageAt: timestamp,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      deletedAt: null
+    }
+    const greetingMessage = greeting ? {
+      id: this.idFactory(),
+      conversationId: conversation.id,
+      sequence: 1,
+      role: 'assistant',
+      content: renderCharacterTemplate(greeting, { characterName: character.name, userName }),
+      attachmentIds: [],
+      generationMode: 'story',
+      status: 'completed',
+      isGreeting: true,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      deletedAt: null
+    } : null
+    if (this.repository.createConversationWithInitialMessage) {
+      await this.repository.createConversationWithInitialMessage(conversation, greetingMessage)
+    } else {
+      await this.repository.saveConversation(conversation)
+      if (greetingMessage) await this.repository.saveMessage(greetingMessage)
+    }
+    return conversation
+  }
+
   async #resolveGroupParticipants(values, timestamp, previousParticipants = []) {
     const requested = groupParticipantInputs(values)
     if (requested.length < 2) throw new Error('群聊至少需要选择两个成员')
@@ -371,8 +453,33 @@ export class ChatService {
     return updated
   }
 
-  deleteConversation(id) {
-    return this.repository.deleteConversation(id)
+  async deleteConversation(id) {
+    const conversation = await this.repository.getConversation(id)
+    if (!isStoryConversation(conversation)) return this.repository.deleteConversation(id)
+
+    const configuredBookIds = uniqueText([
+      ...(Array.isArray(conversation.storyConfig?.worldBookIds) ? conversation.storyConfig.worldBookIds : []),
+      conversation.storyConfig?.memoryWorldBookId
+    ])
+    const candidates = typeof this.repository.listAllWorldBooks === 'function'
+      ? await this.repository.listAllWorldBooks()
+      : (await Promise.all(configuredBookIds.map(bookId => this.repository.getWorldBook?.(bookId)))).filter(Boolean)
+    const ownedStoryBooks = candidates.filter(worldBook => (
+      worldBook.scope === 'story' &&
+      worldBook.conversationId === conversation.id &&
+      !worldBook.deletedAt
+    ))
+
+    await this.repository.deleteConversation(id)
+    if (typeof this.repository.saveWorldBook !== 'function') return
+    const timestamp = this.now()
+    for (const worldBook of ownedStoryBooks) {
+      await this.repository.saveWorldBook({
+        ...worldBook,
+        updatedAt: timestamp,
+        deletedAt: timestamp
+      })
+    }
   }
 
   #startRequest({ requestId, assistantMessageId, onState, run }) {
@@ -401,11 +508,11 @@ export class ChatService {
     if (this.activeRequest) throw new Error('当前回答仍在生成，请先停止生成')
     const text = String(content ?? '').trim()
     const preparedAttachments = Array.isArray(attachments) ? attachments : []
-    const generationMode = mode === 'image' ? 'image' : 'chat'
-    if (!text && !preparedAttachments.length) throw new Error('消息不能为空')
-    if (generationMode === 'image' && preparedAttachments.length) throw new Error('生图模式暂不支持输入附件')
     const conversation = await this.repository.getConversation(conversationId)
     if (!conversation) throw new Error('会话不存在')
+    const generationMode = isStoryConversation(conversation) ? 'story' : (mode === 'image' ? 'image' : 'chat')
+    if (!text && !preparedAttachments.length) throw new Error('消息不能为空')
+    if (generationMode === 'image' && preparedAttachments.length) throw new Error('生图模式暂不支持输入附件')
     const { messages: existingMessages } = await readMessagePage(this.repository, conversationId)
     const groupSpeakers = isGroupConversation(conversation) && generationMode === 'chat'
       ? selectGroupResponders({ conversation, messages: existingMessages, content: text })
@@ -513,7 +620,9 @@ export class ChatService {
       conversationId: conversation.id,
       sequence: (Number(latestMessages[latestMessages.length - 1]?.sequence) || 0) + 1,
       timestamp,
-      generationMode: previous.generationMode === 'image' ? 'image' : 'chat',
+      generationMode: previous.generationMode === 'image'
+        ? 'image'
+        : (isStoryConversation(conversation) ? 'story' : 'chat'),
       speaker: speakerFromMessage(previous),
       replyBatchId: isGroupConversation(conversation) ? this.idFactory() : null,
       retryOfMessageId: previous.id
@@ -560,7 +669,7 @@ export class ChatService {
       conversationId: conversation.id,
       sequence: lastSequence + 1,
       timestamp,
-      generationMode: 'chat',
+      generationMode: isStoryConversation(conversation) ? 'story' : 'chat',
       speaker: speakerFromMessage(previous),
       replyBatchId: isGroupConversation(conversation) ? this.idFactory() : null
     })
@@ -596,7 +705,7 @@ export class ChatService {
         userMessage: requestOnlyUserMessage,
         assistantMessage,
         contextMessages: [...messages, requestOnlyUserMessage],
-        generationMode: 'chat',
+        generationMode: isStoryConversation(conversation) ? 'story' : 'chat',
         providerProfileId,
         imageOptions: {},
         onMessage,
@@ -795,7 +904,7 @@ export class ChatService {
             userTurnPrompt
           })
           const statusCharacterId = assistantMessage.speakerCharacterId || conversation.characterId
-          if (statusCharacterId) {
+          if (generationMode === 'chat' && statusCharacterId) {
             const systemMessages = requestMessages.filter(message => message.role === 'system')
             const firstSystem = systemMessages[0]?.content || ''
             const lastSystem = systemMessages.length ? systemMessages[systemMessages.length - 1].content : ''
@@ -875,6 +984,19 @@ export class ChatService {
       } finally {
       this.clearIntervalFn(interval)
       assistantMessage.updatedAt = this.now()
+      if (assistantMessage.status === 'completed' && isStoryConversation(conversation)) {
+        try {
+          const memoryResult = await this.#applyStoryMemory(conversation, assistantMessage)
+          if (memoryResult) {
+            assistantMessage.storyMemoryAppliedAt = this.now()
+            assistantMessage.storyMemoryApplied = memoryResult
+            dirty = true
+          }
+        } catch (error) {
+          assistantMessage.storyMemoryError = error?.message || '故事记忆写入失败'
+          dirty = true
+        }
+      }
       await queuePersistence(true)
       const statusCharacterId = assistantMessage.speakerCharacterId || conversation.characterId
       if (generationMode === 'chat' && statusCharacterId) {
@@ -909,6 +1031,206 @@ export class ChatService {
       onMessage?.({ ...assistantMessage })
     }
     return { ...assistantMessage }
+  }
+
+  async #applyStoryMemory(conversation, assistantMessage) {
+    const extracted = extractStoryMemory(assistantMessage.content)
+    const memory = extracted.memory
+    if (!storyMemoryHasChanges(memory)) return null
+    const timestamp = this.now()
+    const storyConfig = conversation.storyConfig && typeof conversation.storyConfig === 'object'
+      ? conversation.storyConfig
+      : {}
+    const characterIds = uniqueText([
+      ...(Array.isArray(storyConfig.characterIds) ? storyConfig.characterIds : []),
+      conversation.characterId
+    ])
+    const worldBook = await this.#loadOrCreateStoryMemoryBook(conversation, storyConfig, characterIds, timestamp)
+    const entries = Array.isArray(worldBook.data?.entries) ? [...worldBook.data.entries] : []
+    const existingContent = new Set(entries.map(entry => String(entry.content || '').trim()).filter(Boolean))
+    let addedEntries = 0
+
+    if (memory.sceneSummary) {
+      const summaryId = `${worldBook.id}-scene-summary`
+      const summary = createStoryMemoryEntry({
+        id: summaryId,
+        name: '当前剧情摘要',
+        keys: ['当前剧情', '剧情摘要', conversation.title],
+        content: memory.sceneSummary,
+        constant: true,
+        order: 10,
+        sourceMessageId: assistantMessage.id
+      })
+      const index = entries.findIndex(entry => entry.id === summaryId)
+      if (index >= 0) entries.splice(index, 1, summary)
+      else entries.unshift(summary)
+    }
+
+    for (const patch of memory.characterPatches || []) {
+      const result = await this.#applyStoryCharacterPatch(patch, {
+        characterIds,
+        timestamp,
+        sourceMessageId: assistantMessage.id
+      })
+      if (!result?.content || existingContent.has(result.content)) continue
+      entries.push(createStoryMemoryEntry({
+        id: this.idFactory(),
+        name: `角色记忆：${result.characterName}`,
+        keys: [result.characterName, patch.characterName],
+        content: result.content,
+        constant: true,
+        order: 40 + entries.length,
+        sourceMessageId: assistantMessage.id
+      }))
+      existingContent.add(result.content)
+      addedEntries += 1
+    }
+
+    for (const entry of memory.worldBookEntries || []) {
+      const content = String(entry.content || '').trim()
+      if (!content || existingContent.has(content)) continue
+      entries.push(createStoryMemoryEntry({
+        id: this.idFactory(),
+        name: entry.name,
+        keys: entry.keys?.length ? entry.keys : [entry.name],
+        content,
+        constant: entry.constant,
+        order: 80 + entries.length,
+        sourceMessageId: assistantMessage.id
+      }))
+      existingContent.add(content)
+      addedEntries += 1
+    }
+
+    const cappedEntries = entries.slice(-120)
+    const summaryIndex = entries.findIndex(entry => entry.id === `${worldBook.id}-scene-summary`)
+    const summaryEntry = summaryIndex >= 0 ? entries[summaryIndex] : null
+    const nextEntries = summaryEntry && !cappedEntries.some(entry => entry.id === summaryEntry.id)
+      ? [summaryEntry, ...cappedEntries.slice(1)]
+      : cappedEntries
+    const savedBook = {
+      ...worldBook,
+      conversationId: String(worldBook.conversationId || '').trim() || conversation.id,
+      characterIds: uniqueText([...(Array.isArray(worldBook.characterIds) ? worldBook.characterIds : []), ...characterIds]),
+      scope: 'story',
+      data: {
+        ...(worldBook.data || {}),
+        entries: nextEntries
+      },
+      updatedAt: timestamp,
+      deletedAt: null
+    }
+    await this.repository.saveWorldBook?.(savedBook)
+    const previousWorldBookIds = uniqueText(storyConfig.worldBookIds)
+    const previousCharacterIds = uniqueText(storyConfig.characterIds)
+    const worldBookIds = uniqueText([...previousWorldBookIds, savedBook.id])
+    const nextStoryConfig = {
+      ...storyConfig,
+      characterIds,
+      worldBookIds,
+      memoryWorldBookId: savedBook.id,
+      updatedAt: timestamp
+    }
+    if (
+      storyConfig.memoryWorldBookId !== savedBook.id ||
+      !sameTextArray(worldBookIds, previousWorldBookIds) ||
+      !sameTextArray(characterIds, previousCharacterIds)
+    ) {
+      const updatedConversation = {
+        ...conversation,
+        storyConfig: nextStoryConfig,
+        updatedAt: timestamp
+      }
+      await this.repository.saveConversation?.(updatedConversation)
+      conversation.storyConfig = nextStoryConfig
+      conversation.updatedAt = timestamp
+    }
+    return {
+      worldBookId: savedBook.id,
+      entryCount: addedEntries,
+      characterPatchCount: (memory.characterPatches || []).length
+    }
+  }
+
+  async #loadOrCreateStoryMemoryBook(conversation, storyConfig, characterIds, timestamp) {
+    const configuredId = String(storyConfig.memoryWorldBookId || '').trim()
+    const existing = configuredId && await this.repository.getWorldBook?.(configuredId)
+    if (existing && !existing.deletedAt) return existing
+    const id = configuredId || this.idFactory()
+    return {
+      id,
+      conversationId: conversation.id,
+      characterId: null,
+      characterIds,
+      scope: 'story',
+      source: 'story-auto',
+      sourceFormat: 'echo-story-memory',
+      name: `${conversation.title || '故事'} · 自动记忆`,
+      data: {
+        name: `${conversation.title || '故事'} · 自动记忆`,
+        description: '故事模式自动维护的长期设定、剧情摘要和角色变化。',
+        scan_depth: 12,
+        token_budget: 1800,
+        recursive_scanning: false,
+        extensions: { source: 'echo_story_memory' },
+        entries: []
+      },
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      deletedAt: null
+    }
+  }
+
+  async #applyStoryCharacterPatch(patch, { characterIds, timestamp, sourceMessageId }) {
+    if (!this.repository.getCharacter || !this.repository.saveCharacter) return null
+    const candidates = (await Promise.all(characterIds.map(id => this.repository.getCharacter(id))))
+      .filter(character => character && !character.deletedAt)
+    const requestedId = String(patch.characterId || '').trim()
+    const requestedName = String(patch.characterName || '').trim()
+    const character = candidates.find(item => item.id === requestedId) ||
+      candidates.find(item => requestedName && String(item.name || item.card?.data?.name || '').trim() === requestedName)
+    if (!character) return null
+    const characterName = String(character.name || character.card?.data?.name || requestedName || '故事角色').trim()
+    const content = String(patch.content || '').trim()
+    if (!content) return null
+    const field = String(patch.field || 'story_memory').trim() || 'story_memory'
+    const existingPatches = Array.isArray(character.storyMemoryPatches) ? character.storyMemoryPatches : []
+    const formattedContent = `【${characterName}｜${field}】${content}`
+    if (existingPatches.some(item => String(item?.field || '').trim() === field && String(item?.content || '').trim() === content)) {
+      return { characterId: character.id, characterName, content: formattedContent }
+    }
+    const memoryPatch = {
+      id: this.idFactory(),
+      field,
+      content,
+      confidence: patch.confidence ?? null,
+      sourceMessageId,
+      createdAt: timestamp
+    }
+    const patches = [...existingPatches, memoryPatch].slice(-80)
+    const card = character.card && typeof character.card === 'object'
+      ? {
+          ...character.card,
+          data: {
+            ...(character.card.data || {}),
+            extensions: {
+              ...(character.card.data?.extensions || {}),
+              echoWeaveStoryPatches: patches
+            }
+          }
+        }
+      : character.card
+    await this.repository.saveCharacter({
+      ...character,
+      card,
+      storyMemoryPatches: patches,
+      updatedAt: timestamp
+    })
+    return {
+      characterId: character.id,
+      characterName,
+      content: formattedContent
+    }
   }
 
   async #persistGeneratedImages(images, conversation, assistantMessage, onMessage, markDirty) {
