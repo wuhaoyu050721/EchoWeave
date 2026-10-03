@@ -28,6 +28,25 @@ export function validateProxyTarget(value) {
   return target
 }
 
+export function validateProxyUrl(value) {
+  let proxy
+  try {
+    proxy = new URL(String(value ?? ''))
+  } catch {
+    throw new Error('代理地址无效')
+  }
+  if (!['http:', 'https:'].includes(proxy.protocol)) {
+    throw new Error('代理仅支持 HTTP 或 HTTPS 地址')
+  }
+  if (!proxy.hostname || proxy.username || proxy.password) {
+    throw new Error('代理地址不能包含用户凭据')
+  }
+  if (proxy.pathname !== '/' || proxy.search || proxy.hash) {
+    throw new Error('代理地址不能包含路径、查询参数或片段')
+  }
+  return proxy
+}
+
 export function filterProxyRequestHeaders(headers = {}) {
   const result = {}
   for (const [name, value] of Object.entries(headers)) {

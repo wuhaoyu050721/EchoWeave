@@ -1,8 +1,9 @@
+import { readMainPageSource } from './helpers/read-main-page.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 
-const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+const source = await readMainPageSource()
 
 test('removes the simulated status bar and keeps native safe spacing', () => {
   assert.doesNotMatch(source, /class="status-bar"/)

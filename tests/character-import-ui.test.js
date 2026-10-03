@@ -1,23 +1,26 @@
+import { readMainPageSource } from './helpers/read-main-page.js'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 test('contacts groups character actions behind one animated add menu', async () => {
   const [page, contacts] = await Promise.all([
-    readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8'),
+    readMainPageSource(),
     readFile(new URL('../src/components/character-contacts.vue', import.meta.url), 'utf8')
   ])
 
   assert.match(contacts, /\$emit\('import-character-gallery'\)/)
   assert.match(contacts, /\$emit\('import-character-file'\)/)
-  assert.match(contacts, /class="contacts-add-toggle"/)
+  assert.match(contacts, /class="contacts-add-toggle paper-action"[^>]*:disabled="busy"[^>]*:aria-expanded="addMenuOpen"[^>]*@click="toggleAddMenu"/)
   assert.match(contacts, />添加</)
   assert.match(contacts, /class="contacts-add-menu"/)
   assert.match(contacts, /addMenuOpen/)
   assert.match(contacts, />相册导入</)
   assert.match(contacts, />文件导入</)
-  assert.match(contacts, /contacts-add-option:nth-child\(3\)/)
-  assert.match(contacts, /prefers-reduced-motion: reduce/)
+  assert.match(contacts, /\.contacts-add-menu\s*\{[^}]*animation:\s*contacts-menu-enter 150ms/s)
+  assert.match(contacts, /@media \(prefers-reduced-motion:\s*reduce\)\s*\{\s*\.contacts-add-menu\s*\{\s*animation:\s*none/s)
+  assert.match(contacts, /@keydown\.esc="closeAddMenu"/)
+  assert.match(contacts, /class="contacts-add-scrim"[^>]*@click="closeAddMenu"/)
   assert.match(page, /@import-character-gallery="openCharacterCardPicker\('gallery'\)"/)
   assert.match(page, /@import-character-file="openCharacterCardPicker\('file'\)"/)
   assert.match(page, /nativeCharacterCardPicker\.pick\(source\)/)
@@ -25,7 +28,7 @@ test('contacts groups character actions behind one animated add menu', async () 
 
 test('contact rows open character details instead of immediately creating a chat', async () => {
   const [page, contacts] = await Promise.all([
-    readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8'),
+    readMainPageSource(),
     readFile(new URL('../src/components/character-contacts.vue', import.meta.url), 'utf8')
   ])
 
@@ -38,7 +41,7 @@ test('contact rows open character details instead of immediately creating a chat
 
 test('contacts can open a blank custom character editor without importing a file', async () => {
   const [page, contacts] = await Promise.all([
-    readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8'),
+    readMainPageSource(),
     readFile(new URL('../src/components/character-contacts.vue', import.meta.url), 'utf8')
   ])
 
@@ -52,7 +55,7 @@ test('contacts can open a blank custom character editor without importing a file
 })
 
 test('character-card import shows staged loading feedback while parsing and saving', async () => {
-  const page = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+  const page = await readMainPageSource()
 
   assert.match(page, /v-if="characterImportBusy"\s+class="character-import-loading-layer"/)
   assert.match(page, /characterImportStage: ''/)
@@ -68,7 +71,7 @@ test('character-card import shows staged loading feedback while parsing and savi
 
 test('contacts link to the external character-card maker', async () => {
   const [page, contacts] = await Promise.all([
-    readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8'),
+    readMainPageSource(),
     readFile(new URL('../src/components/character-contacts.vue', import.meta.url), 'utf8')
   ])
 

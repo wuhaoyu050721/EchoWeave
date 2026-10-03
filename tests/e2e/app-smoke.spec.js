@@ -300,7 +300,7 @@ test('story mode reads like a book in page and scroll layouts', async ({ page })
 	await expect(page.locator('[data-story-conversation-id="story-reader-e2e"]')).toHaveCount(1)
 	await page.locator('[data-tab="stories"]').click()
 	await expect(page.locator('[data-story-conversation-id="story-reader-e2e"]')).toBeVisible()
-	await expect(page.getByText('继续阅读', { exact: true })).toBeVisible()
+	await expect(page.locator('[data-story-conversation-id="story-reader-e2e"] .story-progress-open').getByText('继续阅读', { exact: true })).toBeVisible()
 	await page.evaluate(async () => {
 		const preview = globalThis.__echoWeavePreview
 		preview.ui.screen = 'chat'

@@ -1,9 +1,10 @@
+import { readMainPageSource } from './helpers/read-main-page.js'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 test('chat follows the Telegram-inspired wallpaper, compact header, and composer layout', async () => {
-  const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+  const source = await readMainPageSource()
 
   assert.match(source, /\.app-shell\.chat-active\s*\{[^}]*background-image:\s*url\(['"]\/static\/chat-wallpaper\.jpg['"]\)/s)
   assert.match(source, /\.chat-toolbar\s*\{[^}]*height:\s*62px[^}]*padding:\s*8px 6px[^}]*background:\s*transparent/s)
@@ -20,7 +21,7 @@ test('chat follows the Telegram-inspired wallpaper, compact header, and composer
 })
 
 test('chat content scrolls behind the floating toolbar and fades out at the top edge', async () => {
-  const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+  const source = await readMainPageSource()
 
   assert.match(source, /\.chat-toolbar\s*\{[^}]*position:\s*absolute[^}]*top:\s*var\(--status-bar-height,\s*0px\)[^}]*left:\s*0[^}]*right:\s*0[^}]*z-index:\s*6/s)
   assert.match(source, /\.chat-scroll\s*\{[^}]*padding:\s*74px 11px 0[^}]*-webkit-overflow-scrolling:\s*touch[^}]*overscroll-behavior-y:\s*contain/s)
@@ -28,14 +29,14 @@ test('chat content scrolls behind the floating toolbar and fades out at the top 
   assert.match(source, /mask-image:\s*linear-gradient\(to bottom,\s*transparent 0,[^;]+#000 70px,\s*#000 100%\)/s)
 })
 
-test('Android diagnostics follows the themed two-column layout and preserves every action', async () => {
+test('Android diagnostics follows the paper two-column layout and preserves every action', async () => {
   const [source, previewSource] = await Promise.all([
     readFile(new URL('../pages/android-diagnostics/index.vue', import.meta.url), 'utf8'),
     readFile(new URL('../preview/main.js', import.meta.url), 'utf8')
   ])
 
-	assert.match(source, /--accent:\s*#d43bc2/)
-	assert.match(source, /\.diagnostic-header\s*\{[^}]*background:\s*#fff[^}]*color:\s*var\(--text\)/s)
+	assert.match(source, /--accent:\s*#7850a0/)
+	assert.match(source, /\.diagnostic-header\s*\{[^}]*background:\s*#f8f7f4[^}]*color:\s*var\(--text\)[^}]*flex:\s*0 0 auto/s)
   assert.match(source, /\.summary-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s)
   for (const contract of ['header-menu', 'resetDiagnostic', 'showApiKey', '开始诊断', '停止诊断', '清空日志', '导出日志']) {
     assert.match(source, new RegExp(contract))
@@ -47,7 +48,7 @@ test('Android diagnostics follows the themed two-column layout and preserves eve
 
 test('scroll padding is rendered as scrollable tail content instead of a fixed Android obstruction', async () => {
   const [mainSource, diagnosticsSource] = await Promise.all([
-    readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8'),
+    readMainPageSource(),
     readFile(new URL('../pages/android-diagnostics/index.vue', import.meta.url), 'utf8')
   ])
 
@@ -63,62 +64,70 @@ test('scroll padding is rendered as scrollable tail content instead of a fixed A
 	assert.match(diagnosticsSource, /class="diagnostic-scroll-tail"/)
 })
 
-test('provider management follows the white and magenta conversation style', async () => {
-	const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+test('paper provider management keeps every editor action and scrollable navigation clearance', async () => {
+	const [source, styles] = await Promise.all([
+		readMainPageSource(),
+		readFile(new URL('../src/styles/provider-redesign.css', import.meta.url), 'utf8')
+	])
 
-	assert.match(source, /class="screen-header provider-header"/)
-	assert.match(source, /class="provider-add-button" aria-label="添加接口"/)
+	assert.match(source, /class="screen-view providers-view paper-main-page"/)
+	assert.match(source, /<MainPageHeading title="接口"/)
+	assert.match(source, /class="paper-action" aria-label="添加接口"[^>]*@click="addProvider"/)
+	assert.match(source, /<scroll-view class="provider-list-scroll" scroll-x>/)
+	assert.match(source, /class="provider-card"[^>]*:aria-pressed="provider.id === ui.activeProviderId"[^>]*@click="selectProvider\(provider.id\)"/)
 	assert.match(source, /class="provider-delete"[^>]*><Trash2\s+:size="18"/)
 	assert.match(source, /接口要求时填写并保存/)
 	assert.match(source, /catch \(error\) \{ this\.connectionStatus = 'failed'; this\.handleError\(error, '获取模型列表失败'\) \}/)
-	assert.match(source, /class="provider-action-button"[^>]*><RefreshCw/)
-	assert.match(source, /class="provider-save-button"/)
-	assert.match(source, /\.providers-view\s*\{[^}]*--provider-accent:\s*#d43bc2[^}]*background:\s*#fff/s)
-	assert.match(source, /\.provider-header\s*\{[^}]*height:\s*64px[^}]*background:\s*#fff/s)
-	assert.match(source, /\.provider-card\s*\{[^}]*min-height:\s*78px[^}]*border:\s*0[^}]*background:\s*transparent/s)
-	assert.match(source, /\.provider-editor\s*\{[^}]*border-top:\s*8px solid #f4f4f6/s)
+	assert.match(source, /class="provider-fetch-models"[^>]*:disabled="providerBusy"[^>]*@click="fetchProviderModels"/)
+	assert.match(source, /class="provider-action-button"[^>]*:disabled="providerBusy"[^>]*@click="testConnection"/)
+	assert.match(source, /class="provider-save-button"[^>]*:disabled="providerBusy"[^>]*@click="saveProvider"/)
+	assert.match(source, /class="provider-avatar-selector"[^>]*@click="openProviderAvatarMenu"/)
+	for (const field of ['name', 'baseUrl', 'apiKey', 'defaultModel']) {
+		assert.match(source, new RegExp(`v-model="providerForm\\.${field}"`))
+	}
+	assert.match(styles, /\.providers-view\s*\{[^}]*--provider-accent:\s*var\(--paper-accent/s)
+	assert.match(styles, /\.providers-view \.provider-list\s*\{[^}]*display:\s*flex[^}]*width:\s*max-content/s)
 	assert.match(source, /\.provider-form-actions\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s)
-	assert.match(source, /\.provider-save-button\s*\{[^}]*height:\s*46px[^}]*background:\s*var\(--provider-accent\)/s)
-	assert.match(source, /class="provider-navigation-fade"/)
-	assert.match(source, /\.provider-navigation-fade\s*\{[^}]*position:\s*absolute[^}]*bottom:\s*0[^}]*height:\s*96px[^}]*background:\s*#fff[^}]*pointer-events:\s*none/s)
-	assert.match(source, /\.provider-screen \.navigation-scroll-tail\s*\{[^}]*height:\s*104px/s)
+	assert.doesNotMatch(source, /class="provider-navigation-fade"/)
+	assert.match(styles, /\.providers-view \.provider-screen \.navigation-scroll-tail\s*\{[^}]*height:\s*calc\([^;]*safe-area-inset-bottom/s)
 })
 
-test('home follows the compact conversation list and floating navigation reference', async () => {
-	const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+test('paper home keeps searchable conversation actions and all five navigation destinations', async () => {
+	const [source, styles, heading] = await Promise.all([
+		readMainPageSource(),
+		readFile(new URL('../src/styles/main-pages.css', import.meta.url), 'utf8'),
+		readFile(new URL('../src/components/main-page-heading.vue', import.meta.url), 'utf8')
+	])
 
-	assert.match(source, /<text class="screen-title">织语<\/text>/)
-	assert.match(source, /aria-label="搜索会话"[^\n]*<Search\s+:size="26"/)
-	assert.match(source, /aria-label="更多会话操作"[^\n]*<MoreVertical\s+:size="25"/)
+	assert.match(heading, /class="paper-brand"><text>织语<\/text>/)
+	assert.match(source, /<MainPageHeading title="会话"/)
+	assert.match(source, /<input v-model="searchQuery"[^>]*aria-label="搜索会话"/)
+	assert.match(source, /aria-label="更多会话操作"[^>]*:aria-expanded="homeMenuOpen"[^>]*@click="toggleHomeMenu"/)
 	assert.match(source, /class="conversation-avatar"><ProviderLogo class="conversation-avatar-logo provider-logo"[^\n]*mode="aspectFill"/)
 	assert.match(source, /class="row-time"[^\n]*@click\.stop="manageConversation\(conversation\)"/)
 	assert.match(source, /class="home-action-menu"/)
 	assert.match(source, />新建会话<\/text>/)
 	assert.match(source, />刷新会话<\/text>/)
+	assert.match(source, /class="conversation-create-group" @click="createGroupConversationFromMenu"/)
 	assert.doesNotMatch(source, /class="floating-add"/)
 
-	assert.match(source, /\.conversations-header\s*\{[^}]*height:\s*64px[^}]*background:\s*#fff/s)
-	assert.match(source, /\.conversation-row\s*\{[^}]*min-height:\s*78px[^}]*background:\s*#fff/s)
-	assert.match(source, /\.conversation-avatar\s*\{[^}]*width:\s*52px[^}]*height:\s*52px[^}]*border-radius:\s*50%[^}]*overflow:\s*hidden/s)
-	assert.match(source, /\.conversation-avatar-logo\s*\{[^}]*width:\s*52px[^}]*height:\s*52px[^}]*padding:\s*0[^}]*background:\s*transparent/s)
-	assert.match(source, /\.bottom-nav\s*\{[^}]*position:\s*absolute[^}]*left:\s*16px[^}]*right:\s*16px[^}]*height:\s*68px[^}]*border-radius:\s*34px/s)
+	assert.match(styles, /\.app-shell \.bottom-nav\s*\{[^}]*left:\s*0;\s*right:\s*0;\s*bottom:\s*0[^}]*safe-area-inset-bottom/s)
 	assert.match(source, /\.bottom-nav\s*\{[^}]*grid-template-columns:\s*repeat\(5,\s*1fr\)/s)
-	assert.match(source, /class="nav-indicator"[^>]*activeNavigationIndex \* 100/)
-	assert.match(source, /activeNavigationIndex\(\)\s*\{[^}]*findIndex/s)
-	assert.match(source, /\.nav-indicator\s*\{[^}]*width:\s*calc\(20% - 3\.6px\)[^}]*background:\s*#fff0fb[^}]*transition:\s*transform 140ms/s)
-	assert.match(source, /\.nav-item\.active\s*\{[^}]*color:\s*#d43bc2/s)
+	assert.match(source, /v-for="item in navigationItems"[^>]*:data-tab="item.id"[^>]*:aria-current="ui.activeTab === item.id \? 'page' : undefined"[^>]*@click="goToTab\(item.id\)"/)
+	assert.match(styles, /\.app-shell \.bottom-nav \.nav-item\.active\s*\{[^}]*background:\s*var\(--paper-soft\)/s)
 	assert.doesNotMatch(source, /class="gesture-handle"/)
 })
 
 test('story tab exposes isolated character-card import and start-story entry points', async () => {
-	const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+	const source = await readMainPageSource()
 
-	assert.match(source, /v-show="ui\.screen === 'stories'" class="screen-view stories-view primary-tab-view"/)
+	assert.match(source, /v-show="ui\.screen === 'stories'" class="screen-view stories-view primary-tab-view paper-main-page"/)
 	assert.match(source, /@click="openStoryCharacterCardPicker\('gallery'\)"/)
 	assert.match(source, /@click="openStoryCharacterCardPicker\('file'\)"/)
 	assert.match(source, /v-for="character in renderedStoryCharacters"/)
 	assert.match(source, /@click="startStoryFromCharacter\(character\)"/)
-	assert.match(source, /v-for="conversation in renderedStoryConversations"/)
+	assert.match(source, /v-for="\(conversation, index\) in renderedStoryConversations"/)
+	assert.match(source, /v-memo="\[conversation, index\]"/)
 	assert.match(source, /@click="openChat\(conversation\.id\)"/)
 	assert.match(source, /const conversations = this\.conversationItems\.filter\(item => item\?\.conversationKind !== 'story'\)/)
 	assert.match(source, /storyConversations\(\)\s*\{[^}]*conversationKind === 'story'/s)
@@ -129,23 +138,27 @@ test('story tab exposes isolated character-card import and start-story entry poi
 	assert.match(source, /:hidden-scopes="\['story'\]"/)
 })
 
-test('page and bottom navigation transitions are animated with reduced-motion support', async () => {
-	const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+test('chat motion is retained and new navigation feedback respects reduced motion', async () => {
+	const [source, styles] = await Promise.all([
+		readMainPageSource(),
+		readFile(new URL('../src/styles/main-pages.css', import.meta.url), 'utf8')
+	])
 
 	assert.match(source, /\.screen-view\s*\{[^}]*animation:\s*page-switch-in 220ms/s)
 	assert.match(source, /\.chat-toolbar,\s*\.chat-scroll,\s*\.composer\s*\{[^}]*animation:\s*page-switch-in 220ms/s)
-	assert.match(source, /\.bottom-nav\s*\{[^}]*animation:\s*bottom-nav-enter 260ms/s)
 	assert.match(source, /@keyframes page-switch-in/)
-	assert.match(source, /@keyframes bottom-nav-enter/)
 	assert.match(source, /@media \(prefers-reduced-motion:\s*reduce\)/)
+	assert.match(styles, /\.app-shell \.bottom-nav\s*\{[^}]*animation:\s*none/s)
+	assert.match(styles, /\.app-shell \.bottom-nav \.nav-item\s*\{[^}]*transition:\s*background-color 140ms ease, color 140ms ease/s)
+	assert.match(styles, /@media \(prefers-reduced-motion:\s*reduce\)\s*\{\s*\.app-shell \.bottom-nav \.nav-item\s*\{\s*transition:\s*none/s)
 })
 
 test('new user and assistant message surfaces pop in once without replaying during streaming', async () => {
-	const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+	const source = await readMainPageSource()
 
 	assert.match(source, /class="user-message-stack" :class="\{ 'message-pop': animatedMessageIds\.includes\(message\.id\) \}" @animationend="finishMessageAnimation\(message\.id\)"/)
 	assert.match(source, /class="assistant-message-stack" :class="\{ 'message-pop': animatedMessageIds\.includes\(message\.id\) \}" @animationend="finishMessageAnimation\(message\.id\)"/)
-	assert.match(source, /this\.animatedMessageIds = \[\][^]*const \[page, savedStoryPosition, savedStoryBookmarks\] = await Promise\.all\(\[[^]*this\.readChatMessagePage\(conversationId\)/)
+	assert.match(source, /this\.animatedMessageIds = \[\][^]*let \[page, savedStoryPosition, savedStoryBookmarks\] = await Promise\.all\(\[[^]*this\.readChatMessagePage\(conversationId\)/)
 	assert.match(source, /if \(index === -1\) \{\s*this\.animatedMessageIds\.push\(next\.id\)[^]*this\.messageItems\.push\(next\)/s)
 	assert.match(source, /\.user-message-stack\.message-pop\s*\{[^}]*animation:\s*user-message-pop-in 260ms/s)
 	assert.match(source, /\.assistant-message-stack\.message-pop\s*\{[^}]*animation:\s*assistant-message-pop-in 260ms/s)
@@ -155,7 +168,7 @@ test('new user and assistant message surfaces pop in once without replaying duri
 })
 
 test('large chats render a bounded page and throttle streaming work', async () => {
-	const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+	const source = await readMainPageSource()
 
 	assert.match(source, /const CHAT_MESSAGE_PAGE_SIZE = 60/)
 	assert.match(source, /const CHAT_VIRTUAL_MAX_ITEMS = 48/)
@@ -175,7 +188,8 @@ test('large chats render a bounded page and throttle streaming work', async () =
 	assert.match(source, /STREAMING_RENDER_INTERVAL = 40/)
 	assert.match(source, /message\.status === 'generating' && !statusParsingStarted/)
 	assert.match(source, /if \(this\.chatScrollTimer\) return/)
-	assert.match(source, /const CHAT_AUTO_FOLLOW_THRESHOLD = 32/)
+	assert.match(source, /@touchmove\.passive="onChatTouchMove"/)
+	assert.match(source, /@wheel\.passive="onChatWheel"/)
 	assert.match(source, /cancelPendingChatScroll\(\)/)
 	assert.match(source, /if \(!force && !this\.chatVirtualPinnedToBottom\) return/)
 	assert.match(source, /revision !== this\.chatScrollRevision \|\| !this\.chatVirtualPinnedToBottom/)
@@ -184,16 +198,16 @@ test('large chats render a bounded page and throttle streaming work', async () =
 
 test('primary tabs stay mounted and reuse bounded cached lists', async () => {
 	const [source, contacts, providerLogo] = await Promise.all([
-		readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8'),
+		readMainPageSource(),
 		readFile(new URL('../src/components/character-contacts.vue', import.meta.url), 'utf8'),
 		readFile(new URL('../src/components/provider-logo.js', import.meta.url), 'utf8')
 	])
 	const goToTab = source.match(/goToTab\(tab\)\s*\{([^]*?)\n\t\t\t\},/)?.[1] || ''
 	const backToConversations = source.match(/backToConversations\(\)\s*\{([^]*?)\n\t\t\t\},/)?.[1] || ''
 
-	assert.match(source, /v-show="ui\.screen === 'conversations'" class="screen-view conversations-view primary-tab-view"/)
+	assert.match(source, /v-show="ui\.screen === 'conversations'" class="screen-view conversations-view primary-tab-view paper-main-page"/)
 	assert.match(source, /<CharacterContacts\s+v-show="ui\.screen === 'contacts'"\s+class="primary-tab-view"/)
-	assert.match(source, /v-show="ui\.screen === 'stories'" class="screen-view stories-view primary-tab-view"/)
+	assert.match(source, /v-show="ui\.screen === 'stories'" class="screen-view stories-view primary-tab-view paper-main-page"/)
 	assert.match(source, /const PRIMARY_LIST_BATCH_SIZE = 16/)
 	assert.match(source, /v-for="conversation in renderedConversations"/)
 	assert.match(source, /v-memo="\[conversation\]"/)
@@ -214,7 +228,7 @@ test('primary tabs stay mounted and reuse bounded cached lists', async () => {
 })
 
 test('provider model selection and chat auto-scroll use App-compatible controls', async () => {
-	const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+	const source = await readMainPageSource()
 
 	assert.match(source, /<picker class="select-field-picker"[^>]*:range="providerModelOptions"[^>]*@change="selectProviderModel"/)
 	assert.match(source, /applyProviderModelSelection\(this\.providerForm, this\.providerModelOptions, event\?\.detail\?\.value\)/)
@@ -234,13 +248,19 @@ test('provider model selection and chat auto-scroll use App-compatible controls'
 	assert.match(source, /this\.chatScrollIntoView = `chat-bottom-\$\{revision\}`/)
 })
 
-test('settings overview follows the profile header and colorful single-list reference', async () => {
-	const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+test('paper settings groups the real settings and preserves profile and support actions', async () => {
+	const [source, styles, information] = await Promise.all([
+		readMainPageSource(),
+		readFile(new URL('../src/styles/settings-redesign.css', import.meta.url), 'utf8'),
+		readFile(new URL('../src/components/settings-information.vue', import.meta.url), 'utf8')
+	])
 
+	assert.match(source, /<MainPageHeading title="设置"/)
 	assert.match(source, /class="settings-profile"/)
 	assert.match(source, /class="settings-profile-avatar-wrap"[^>]*@click="openProfileAvatarMenu"/)
 	assert.match(source, /class="settings-profile-avatar provider-logo"[^>]*:src="settingsProfileAvatarSource"/)
-	assert.match(source, /class="settings-profile-camera"[^>]*>[\s\S]*<Camera\s+v-else\s+:size="19"/)
+	assert.match(source, /class="settings-profile-camera"[^>]*>[\s\S]*<Camera\s+v-else\s+:size="\d+"/)
+	assert.match(source, /class="settings-profile-account" aria-label="账号与云端" @click="openCloudModal"/)
 	assert.match(source, />从相册选择<\/text>/)
 	assert.match(source, />拍照<\/text>/)
 	assert.match(source, />恢复默认头像<\/text>/)
@@ -252,12 +272,22 @@ test('settings overview follows the profile header and colorful single-list refe
 	for (const label of ['对话设置', '账号与云端', '隐私与安全', '数据与存储', '导入与导出', '设备与诊断', '关于应用', '检查更新', '帮助与反馈']) {
 		assert.match(source, new RegExp(`>${label}<`))
 	}
-	assert.match(source, /\.settings-overview\s*\{[^}]*--settings-surface:\s*#f3f3f5/s)
-	assert.match(source, /\.settings-overview \.settings-screen\s*\{[^}]*padding:\s*0 12px/s)
-	assert.match(source, /\.settings-profile-avatar\s*\{[^}]*width:\s*90px[^}]*height:\s*90px/s)
+	for (const heading of ['对话体验', '连接与数据', '隐私与支持']) {
+		assert.match(source, new RegExp(`class="settings-group-heading">${heading}<`))
+	}
+	for (const handler of ['openConversationSettings(ui)', 'openStreamingSettings(ui)', 'openCharacterStatusSettings(ui)', 'openNetworkProxySettings(ui)', 'openCloudModal', 'showLocalDataInfo', 'openBackupMenu', 'openSettingsDetails(ui)', 'openNsfwSettings(ui)', 'openAndroidDiagnostics', 'showAboutApp', "openSettingsInformation('updates')", "openSettingsInformation('help')"]) {
+		assert.ok(source.includes(`@click="${handler}"`), `${handler} remains reachable`)
+	}
+	assert.match(source, /<SettingsInformation\s[^>]*@release="openReleasePage"[^>]*@feedback="openFeedbackPage"/)
+	assert.match(information, /@click="\$emit\('release'\)"/)
+	assert.match(information, /@click="\$emit\('feedback'\)"/)
+	assert.match(source, /openReleasePage\(\)\s*\{\s*this\.openExternalUrl\(RELEASES_URL,/)
+	assert.match(source, /openFeedbackPage\(\)\s*\{\s*this\.openExternalUrl\(FEEDBACK_URL,/)
+	assert.match(styles, /\.settings-overview\.paper-main-page\s*\{[^}]*--settings-surface:\s*var\(--paper-bg/s)
+	assert.match(styles, /\.settings-overview\.paper-main-page \.settings-profile\s*\{[^}]*flex-direction:\s*row/s)
 	assert.match(source, /\.settings-profile-avatar-wrap\s*\{[^}]*overflow:\s*visible/s)
 	assert.match(source, /\.settings-profile-camera\s*\{[^}]*right:\s*0[^}]*bottom:\s*0[^}]*z-index:\s*1/s)
-	assert.match(source, /\.settings-menu-card \.settings-row\s*\{[^}]*min-height:\s*58px[^}]*border-bottom:\s*0/s)
-	assert.match(source, /\.settings-icon-orange\s*\{\s*background:\s*#f29a18/s)
+	assert.match(styles, /\.settings-overview\.paper-main-page \.settings-icon\s*\{[^}]*background:\s*var\(--paper-soft/s)
+	assert.match(styles, /\.settings-overview\.paper-main-page \.navigation-scroll-tail\s*\{[^}]*safe-area-inset-bottom/s)
 	assert.doesNotMatch(source, /class="status-bar"/)
 })

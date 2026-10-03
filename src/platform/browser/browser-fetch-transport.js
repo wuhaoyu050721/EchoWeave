@@ -3,23 +3,27 @@ import { extractModelErrorMessage, ModelHttpError } from '../../core/model-http-
 export { ModelHttpError } from '../../core/model-http-error.js'
 
 export class BrowserFetchTransport {
-  constructor({ fetch: fetchOverride, proxyPath = '/__ai_proxy' } = {}) {
+  constructor({ fetch: fetchOverride, proxyPath = '/__ai_proxy', getProxyUrl = null } = {}) {
     const fetchFunction = fetchOverride || globalThis.fetch?.bind(globalThis)
     if (!fetchFunction) {
       throw new Error('当前环境不支持 Fetch API')
     }
     this.fetch = fetchFunction
     this.proxyPath = proxyPath
+    this.getProxyUrl = getProxyUrl
   }
 
-  async request({ url, method = 'GET', headers = {}, body, signal, onChunk, responseType = 'text' } = {}) {
+  async request({ url, method = 'GET', headers = {}, body, signal, onChunk, onHeaders, responseType = 'text' } = {}) {
     let response
     let errorBody
 
     if (this.proxyPath) {
+      const proxyUrl = String(await this.getProxyUrl?.() ?? '').trim()
+      const proxyHeaders = { ...headers, 'x-ai-target-url': url }
+      if (proxyUrl) proxyHeaders['x-ai-proxy-url'] = proxyUrl
       response = await this.fetch(this.proxyPath, {
         method,
-        headers: { ...headers, 'x-ai-target-url': url },
+        headers: proxyHeaders,
         body,
         signal
       })
@@ -35,6 +39,7 @@ export class BrowserFetchTransport {
       response = await this.fetch(url, { method, headers, body, signal })
     }
 
+    onHeaders?.({ status: response.status, headers: response.headers })
     if (!response.ok) {
       errorBody ??= await response.text()
       throw new ModelHttpError(extractModelErrorMessage(errorBody, response.status), {

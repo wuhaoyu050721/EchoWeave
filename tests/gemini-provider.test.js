@@ -284,6 +284,41 @@ test('rejects malformed Gemini model and SSE responses', async () => {
     nonSseStream.streamChat({ baseUrl: 'https://example.com/v1beta' }, {
       model: 'gemini-test', messages: [{ role: 'user', content: 'test' }]
     }),
-    /不包含有效 SSE 事件/
+    error => error.code === 'empty_response' && error.responseDiagnostics.responseFormat === 'json'
   )
+})
+
+test('rejects Gemini thought-only output and reports counts without reasoning text', async () => {
+  const payload = { candidates: [{ content: { parts: [{ thought: true, text: 'PRIVATE_THOUGHT' }] }, finishReason: 'MAX_TOKENS' }] }
+  for (const stream of [true, false]) {
+    const provider = new GeminiProvider({ transport: { request: async options => {
+      const text = JSON.stringify(payload)
+      if (stream) options.onChunk(encoder.encode(`data: ${text}\n\n`))
+      return { status: 200, text: stream ? '' : text }
+    } } })
+    await assert.rejects(provider.streamChat({ baseUrl: 'https://example.test/v1beta' }, {
+      model: 'gemini-test', messages: [{ role: 'user', content: 'continue' }], stream
+    }), error => {
+      assert.equal(error.code, 'empty_response')
+      assert.equal(error.responseDiagnostics.reasoningCharacters, 'PRIVATE_THOUGHT'.length)
+      assert.equal(error.responseDiagnostics.emptyKind, 'reasoning_only')
+      assert.equal(error.responseDiagnostics.finishReason, 'MAX_TOKENS')
+      assert.doesNotMatch(JSON.stringify(error.responseDiagnostics), /PRIVATE_THOUGHT/)
+      return true
+    })
+  }
+})
+
+test('accepts a normal Gemini JSON response to a streaming request exactly once', async () => {
+  const deltas = []
+  const provider = new GeminiProvider({ transport: { request: async ({ onChunk }) => {
+    onChunk(encoder.encode(JSON.stringify({ candidates: [{ content: { parts: [{ text: 'visible reply' }] }, finishReason: 'STOP' }] })))
+    return { status: 200, text: '' }
+  } } })
+  const result = await provider.streamChat({ baseUrl: 'https://example.test/v1beta' }, {
+    model: 'gemini-test', messages: [{ role: 'user', content: 'continue' }]
+  }, { onDelta: text => deltas.push(text) })
+  assert.deepEqual(deltas, ['visible reply'])
+  assert.equal(result.responseDiagnostics.responseFormat, 'json')
+  assert.equal(result.responseDiagnostics.payloadCount, 1)
 })

@@ -1,8 +1,11 @@
 {
   "name": "ai-chat-custom-mobile",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "scripts": {
     "dev": "vite --config vite.browser.config.js",
     "build": "vite build --config vite.browser.config.js",
@@ -13,6 +16,7 @@
     "@noble/ciphers": "^2.2.0",
     "@noble/hashes": "^2.2.0",
     "@risuai/ccardlib": "^0.4.2",
+    "undici": "^7.29.1",
     "vue": "^3.5.13"
   },
   "devDependencies": {

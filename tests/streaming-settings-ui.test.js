@@ -1,3 +1,4 @@
+import { readMainPageSource } from './helpers/read-main-page.js'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
@@ -8,7 +9,7 @@ import {
   readStreamingSegmentedDisplayEnabled
 } from '../src/core/streaming-setting.js'
 
-const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+const source = await readMainPageSource()
 
 test('settings exposes streaming as a persistent second-level toggle that defaults on', () => {
   assert.match(source, /data-testid="streaming-settings-entry"[^>]*@click="openStreamingSettings\(ui\)"/)

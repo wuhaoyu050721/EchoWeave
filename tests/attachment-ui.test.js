@@ -1,9 +1,10 @@
+import { readMainPageSource } from './helpers/read-main-page.js'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 test('chat UI exposes working attachment inputs and pending controls', async () => {
-  const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+  const source = await readMainPageSource()
 
   assert.match(source, /ref="imageAttachmentInput"[^>]+type="file"[^>]+accept="image\/\*"[^>]+multiple/)
   assert.match(source, /ref="cameraAttachmentInput"[^>]+type="file"[^>]+accept="image\/\*"[^>]+capture="environment"/)
@@ -20,7 +21,7 @@ test('chat UI exposes working attachment inputs and pending controls', async () 
 
 test('Telegram-style composer controls keep emoji, attachment, voice, and send actions functional', async () => {
   const [source, manifest] = await Promise.all([
-    readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8'),
+    readMainPageSource(),
     readFile(new URL('../manifest.json', import.meta.url), 'utf8')
   ])
 
@@ -36,7 +37,7 @@ test('Telegram-style composer controls keep emoji, attachment, voice, and send a
 })
 
 test('composer stays compact when empty and grows to five wrapped lines across browser and App runtimes', async () => {
-  const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+  const source = await readMainPageSource()
 
   assert.match(source, /<textarea ref="composerInput" class="composer-input"[^>]+rows="1"[^>]+maxlength="-1"[^>]+:style="\{ height: composerInputHeight \+ 'px' \}"[^>]+@linechange="resizeComposerInput"/)
   assert.doesNotMatch(source, /<textarea[^>]+auto-height/)
@@ -54,7 +55,7 @@ test('composer stays compact when empty and grows to five wrapped lines across b
 })
 
 test('sent attachments render image and text preview entry points', async () => {
-  const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+  const source = await readMainPageSource()
 
   assert.match(source, /message\.attachments/)
   assert.match(source, /previewImageAttachment/)
@@ -67,7 +68,7 @@ test('sent attachments render image and text preview entry points', async () => 
 })
 
 test('generated assistant images expose image mode and history rendering', async () => {
-  const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+  const source = await readMainPageSource()
 
   assert.match(source, /generation-mode-tabs/)
   assert.match(source, />生图</)
@@ -85,7 +86,7 @@ test('generated assistant images expose image mode and history rendering', async
 
 test('chat images can be saved and message text supports native long-press selection', async () => {
   const [source, manifest] = await Promise.all([
-    readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8'),
+    readMainPageSource(),
     readFile(new URL('../manifest.json', import.meta.url), 'utf8')
   ])
 

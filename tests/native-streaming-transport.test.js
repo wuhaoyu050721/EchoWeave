@@ -35,6 +35,7 @@ test('forwards native headers and decoded chunks in order', async () => {
 
   assert.deepEqual(await pending, { status: 200, headers: {}, text: '' })
   assert.equal(options.method, 'POST')
+  assert.equal(options.proxyUrl, '')
   assert.equal(options.timeout, 12000)
   assert.deepEqual(options.headers, [{ name: 'Accept', value: 'text/event-stream' }])
   assert.deepEqual(chunks, ['第一块', ' second'])

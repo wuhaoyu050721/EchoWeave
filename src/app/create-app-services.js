@@ -6,6 +6,7 @@ import { NativeBackupPicker } from '../platform/app/native-backup-picker.js'
 import { NativeCharacterCardPicker } from '../platform/app/native-character-card-picker.js'
 import { NativeWorldBookPicker } from '../platform/app/native-world-book-picker.js'
 import { NativeStreamingTransport } from '../platform/app/native-streaming-transport.js'
+import { createAndroidNetworkProxy } from '../platform/app/android-network-proxy.js'
 import { UniPushNotificationAdapter } from '../platform/app/uni-push-notification-adapter.js'
 import { UniRequestTransport } from '../platform/app/uni-request-transport.js'
 import { GeminiProvider } from '../providers/gemini-provider.js'
@@ -31,6 +32,7 @@ import { WorkspaceServiceManager } from '../workspace/workspace-service-manager.
 import { createChatInstructionResolver, createUserNameResolver } from './create-character-instructions.js'
 import { getRuntimeDiagnosticLogStore } from '../core/runtime-diagnostic-log.js'
 import { readStreamingEnabled, readStreamingSegmentedDisplayEnabled } from '../core/streaming-setting.js'
+import { readNetworkProxySetting } from '../core/network-proxy.js'
 
 function registeredNativeApis() {
   return globalThis.__aiChatNativeApis || null
@@ -85,6 +87,14 @@ function resolveNativeStreamingApi(fallback) {
     typeof fallback?.aiChatStreamRequest === 'function' &&
     typeof fallback?.aiChatStreamCancel === 'function'
   ) return fallback
+  return null
+}
+
+function resolveNativeNetworkProxyApi(fallback) {
+  const registered = registeredNativeApis()
+  if (typeof registered?.aiChatDetectHttpProxy === 'function') return registered
+  if (typeof uni !== 'undefined' && typeof uni.aiChatDetectHttpProxy === 'function') return uni
+  if (typeof fallback?.aiChatDetectHttpProxy === 'function') return fallback
   return null
 }
 
@@ -195,10 +205,21 @@ export async function createAppServices({
     deviceTokenStore: resolvedDeviceServices.tokenStore
   })
   const nativeStreamingApi = resolveNativeStreamingApi(uniApi)
+  const networkProxy = createAndroidNetworkProxy({
+    nativeApi: resolveNativeNetworkProxyApi(uniApi)
+  })
   const streamingTransport = nativeStreamingApi
     ? new NativeStreamingTransport({ nativeApi: nativeStreamingApi })
     : null
-  const transport = new UniRequestTransport({ uniApi, streamingTransport })
+  const transport = new UniRequestTransport({
+    uniApi,
+    streamingTransport,
+    onProxyFailure: proxyUrl => networkProxy.reportFailure(proxyUrl),
+    getProxyRoute: async () => {
+      const setting = await readNetworkProxySetting(repository)
+      return networkProxy.getProxyRoute(setting)
+    }
+  })
   const openAIProvider = new OpenAIProvider({ transport })
   const geminiProvider = new GeminiProvider({ transport })
   const providerRouter = new ProviderRouter({ providers: [openAIProvider, geminiProvider] })
@@ -249,6 +270,7 @@ export async function createAppServices({
     deviceServices: resolvedDeviceServices,
     deviceTokenMigration,
     transport,
+    networkProxy,
     openAIProvider,
     geminiProvider,
     providerRouter,

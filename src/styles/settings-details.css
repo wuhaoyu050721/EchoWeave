@@ -1,0 +1,206 @@
+/* Shared settings surfaces; deliberately scoped away from chat and the reader. */
+.app-shell .themed-settings-details {
+	--settings-detail-accent: #7850a0;
+	--settings-detail-accent-soft: #eee8f4;
+	background: #f8f7f4;
+	color: #25232a;
+}
+
+.app-shell .themed-settings-header {
+	flex: 0 0 auto;
+	grid-template-columns: 44px minmax(0, 1fr);
+	gap: 9px;
+	height: 86px;
+	min-height: 86px;
+	padding: 19px 20px 16px 12px;
+	border-bottom: 1px solid #e5e0e7;
+	background: #f8f7f4;
+}
+.app-shell .themed-settings-header .header-back {
+	width: 44px;
+	height: 44px;
+	margin: 0;
+	border-radius: 50%;
+	background: #eee8f4;
+	color: #7850a0;
+}
+.app-shell .themed-settings-header .screen-title {
+	font-size: 24px;
+	font-weight: 750;
+	line-height: 34px;
+	text-align: left;
+	letter-spacing: -.4px;
+	color: #25232a;
+}
+.app-shell .themed-settings-header .settings-detail-header-space { display: none; }
+.app-shell .themed-settings-scroll {
+	min-height: 0;
+	padding: 0 20px;
+	background: #f8f7f4;
+	overscroll-behavior: contain;
+}
+.app-shell .themed-settings-details .settings-detail-summary {
+	grid-template-columns: 42px minmax(0, 1fr) auto;
+	gap: 12px;
+	min-height: 104px;
+	margin: 24px 0 0;
+	padding: 17px 14px;
+	border: 1px solid #e5e0e7;
+	border-radius: 20px;
+	background: #f0ebf3;
+}
+.app-shell .themed-settings-details .settings-detail-summary-icon {
+	border-radius: 50%;
+	background: #e7deee;
+}
+.app-shell .themed-settings-details .settings-detail-summary-copy > text:first-child {
+	font-size: 16px;
+	line-height: 25px;
+	font-weight: 650;
+	white-space: normal;
+	color: #25232a;
+}
+.app-shell .themed-settings-details .settings-detail-summary-copy > text:last-child {
+	font-size: 13px;
+	line-height: 22px;
+	white-space: normal;
+	overflow-wrap: anywhere;
+	color: #706775;
+}
+.app-shell .themed-settings-details .settings-detail-state {
+	padding: 5px 7px;
+	border-radius: 20px;
+	background: rgba(255,255,255,.7);
+	font-size: 11px;
+	color: #706775;
+}
+.app-shell .themed-settings-details .settings-detail-state.enabled { color: #7850a0; }
+.app-shell .themed-settings-details .settings-section-label {
+	display: block;
+	margin: 25px 0 11px;
+	font-size: 13px;
+	line-height: 20px;
+	font-weight: 600;
+	color: #706775;
+}
+.app-shell .themed-settings-details .settings-card {
+	overflow: hidden;
+	border: 1px solid #e5e0e7;
+	border-radius: 18px;
+	background: #fff;
+	box-shadow: none;
+}
+.app-shell .themed-settings-details .settings-row {
+	gap: 11px;
+	min-height: 88px;
+	padding: 16px 14px;
+	border-color: #e5e0e7;
+	background: transparent;
+}
+.app-shell .themed-settings-details .settings-row .settings-copy { min-width: 0; gap: 5px; }
+.app-shell .themed-settings-details .settings-row .settings-copy text:first-child {
+	font-size: 15px;
+	line-height: 23px;
+	font-weight: 650;
+	color: #25232a;
+}
+.app-shell .themed-settings-details .settings-row .settings-copy text:last-child {
+	font-size: 13px;
+	line-height: 22px;
+	color: #706775;
+	overflow-wrap: anywhere;
+}
+.app-shell .themed-settings-details .settings-detail-row-icon,
+.app-shell .themed-settings-details .settings-icon {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 34px;
+	height: 34px;
+	flex: 0 0 auto;
+	border-radius: 12px;
+	background: #eee8f4;
+	color: #7850a0;
+}
+.app-shell .themed-settings-details .toggle { width: 44px; min-width: 44px; height: 26px; background: #d9d4de; }
+.app-shell .themed-settings-details .toggle.enabled { background: #7850a0; }
+.app-shell .themed-settings-details .toggle-thumb { top: 2px; left: 2px; width: 22px; height: 22px; }
+.app-shell .themed-settings-details .toggle.enabled .toggle-thumb { transform: translateX(18px); }
+.app-shell .themed-settings-details .settings-context-note {
+	display: flex;
+	align-items: flex-start;
+	gap: 10px;
+	margin-top: 20px;
+	padding: 0 2px;
+	font-size: 13px;
+	line-height: 23px;
+	color: #706775;
+}
+.app-shell .themed-settings-details .settings-context-note > .app-icon { flex: 0 0 auto; margin-top: 2px; color: #7850a0; }
+.app-shell .themed-settings-details .settings-save-hint { display: block; margin-top: 15px; font-size: 12px; line-height: 22px; color: #706775; }
+.app-shell .themed-settings-details .system-prompt-editor { border-color: #e5e0e7; border-radius: 18px; background: #fff; }
+.app-shell .themed-settings-details .system-prompt-editor-heading { height: 48px; border-color: #e5e0e7; padding: 0 16px; }
+.app-shell .themed-settings-details .system-prompt-editor-heading > text:first-child { color: #25232a; font-size: 14px; }
+.app-shell .themed-settings-details .system-prompt-editor-heading > text:last-child { color: #706775; font-size: 12px; }
+.app-shell .themed-settings-details .system-prompt-editor textarea { height: 210px; min-height: 210px; padding: 16px; font-size: 15px; line-height: 26px; background: #fff; color: #25232a; }
+.app-shell .themed-settings-details .system-prompt-editor-footer { min-height: 52px; height: auto; padding: 4px 10px 4px 16px; border-color: #e5e0e7; font-size: 12px; }
+.app-shell .themed-settings-details .system-prompt-editor-footer > view { color: #706775; }
+.app-shell .themed-settings-details .system-prompt-editor-footer > button { height: 44px; padding: 0 10px; border-radius: 10px; color: #93475f; }
+.app-shell .themed-settings-details .system-prompt-save-button,
+.app-shell .themed-settings-details .network-proxy-save-button {
+	min-height: 50px;
+	border-radius: 14px;
+	background: #7850a0;
+	box-shadow: none;
+	font-size: 15px;
+	font-weight: 650;
+}
+.app-shell .themed-settings-details .proxy-manual-card,
+.app-shell .themed-settings-details .security-pin-card { padding: 17px 16px; }
+.app-shell .themed-settings-details .proxy-url-field { padding: 0; gap: 10px; }
+.app-shell .themed-settings-details .proxy-url-field > text:first-child,
+.app-shell .themed-settings-details .security-pin-field > text { color: #25232a; font-size: 14px; line-height: 22px; }
+.app-shell .themed-settings-details .proxy-url-field input,
+.app-shell .themed-settings-details .security-pin-field input {
+	height: 48px;
+	min-height: 48px;
+	border: 1px solid #e5e0e7;
+	border-radius: 12px;
+	background: #f8f7f4;
+	font-size: 15px;
+	color: #25232a;
+}
+.app-shell .themed-settings-details .proxy-url-field > text:last-child,
+.app-shell .themed-settings-details .proxy-smart-help text,
+.app-shell .themed-settings-details .proxy-tips-card text { font-size: 13px; line-height: 23px; color: #706775; }
+.app-shell .themed-settings-details .proxy-smart-help { padding: 15px 16px; gap: 10px; border-color: #e5e0e7; }
+.app-shell .themed-settings-details .proxy-smart-actions { padding: 0 16px 16px; }
+.app-shell .themed-settings-details .proxy-detect-button { min-height: 44px; height: auto; border-color: #e5e0e7; border-radius: 12px; background: #eee8f4; color: #7850a0; }
+.app-shell .themed-settings-details .proxy-tips-card { padding: 16px; gap: 12px; }
+.app-shell .themed-settings-details .security-pin-card { gap: 18px; }
+.app-shell .themed-settings-details .security-pin-field { gap: 9px; }
+.app-shell .themed-settings-details .security-pin-error,
+.app-shell .themed-settings-details .network-proxy-error { color: #a2344e; font-size: 13px; line-height: 22px; }
+.app-shell .themed-settings-details .settings-secondary-command { height: auto; min-height: 48px; padding: 10px; border-color: #e5e0e7; border-radius: 14px; background: #eee8f4; color: #7850a0; font-size: 14px; }
+.app-shell .themed-settings-details .settings-page-intro { display: flex; flex-direction: column; gap: 8px; margin-top: 24px; }
+.app-shell .themed-settings-details .settings-page-intro > text:first-child { font-size: 18px; line-height: 28px; font-weight: 650; }
+.app-shell .themed-settings-details .settings-page-intro > text:last-child { color: #706775; font-size: 14px; line-height: 24px; }
+.app-shell .themed-settings-details .navigation-scroll-tail { height: calc(100px + env(safe-area-inset-bottom, 0px)); }
+.app-shell .themed-settings-details button { transition: background-color 140ms ease, opacity 140ms ease; }
+.app-shell .themed-settings-details .toggle-thumb { transition: transform 180ms ease; }
+.app-shell .themed-settings-details button:disabled { opacity: .6; }
+.app-shell .themed-settings-details .settings-row:not(:disabled):active { background: #f4eff7; }
+.app-shell .themed-settings-details button:focus-visible { outline: 2px solid #7850a0; outline-offset: -3px; }
+.app-shell .themed-settings-details input:focus { outline: 2px solid #7850a0; outline-offset: -2px; border-color: #7850a0; }
+.app-shell .themed-settings-details .system-prompt-editor:focus-within { border-color: #7850a0; }
+@media (max-width: 360px) {
+	.app-shell .themed-settings-scroll { padding: 0 16px; }
+	.app-shell .themed-settings-details .settings-detail-summary { grid-template-columns: 36px minmax(0, 1fr) auto; padding: 16px 12px; gap: 9px; }
+	.app-shell .themed-settings-details .settings-detail-summary-icon { width: 36px; height: 36px; }
+	.app-shell .themed-settings-details .settings-row { padding: 15px 12px; gap: 9px; }
+	.app-shell .themed-settings-details .settings-detail-row-icon { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+	.app-shell .themed-settings-details button,
+	.app-shell .themed-settings-details .toggle-thumb { transition: none; }
+}

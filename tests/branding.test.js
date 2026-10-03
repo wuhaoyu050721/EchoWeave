@@ -1,3 +1,4 @@
+import { readMainPageSource } from './helpers/read-main-page.js'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
@@ -12,22 +13,32 @@ function pngDimensions(buffer) {
 }
 
 test('织语 branding is wired to the package, pages, and fallback avatars', async () => {
-  const [manifest, pages, preview, mainPage, contacts, packageSource] = await Promise.all([
+  const [manifest, pages, preview, mainPage, contacts, packageSource, heading, information] = await Promise.all([
     readFile(new URL('../manifest.json', import.meta.url), 'utf8'),
     readFile(new URL('../pages.json', import.meta.url), 'utf8'),
     readFile(new URL('../preview/index.html', import.meta.url), 'utf8'),
-    readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8'),
+    readMainPageSource(),
     readFile(new URL('../src/components/character-contacts.vue', import.meta.url), 'utf8'),
-    readFile(new URL('../package.json', import.meta.url), 'utf8')
+    readFile(new URL('../package.json', import.meta.url), 'utf8'),
+    readFile(new URL('../src/components/main-page-heading.vue', import.meta.url), 'utf8'),
+    readFile(new URL('../src/components/settings-information.vue', import.meta.url), 'utf8')
   ])
 
   assert.match(manifest, /"name"\s*:\s*"织语"/)
   assert.match(pages, /"navigationBarTitleText"\s*:\s*"织语"/)
   assert.match(preview, /<title>织语<\/title>/)
-  assert.match(mainPage, /class="screen-title">织语<\/text>/)
+  assert.match(heading, /class="paper-brand"><text>织语<\/text><text>EchoWeave<\/text>/)
+  assert.match(mainPage, /import MainPageHeading from '..\/..\/src\/components\/main-page-heading.vue'/)
+  for (const title of ['会话', '故事', '接口', '设置']) {
+    assert.match(mainPage, new RegExp(`<MainPageHeading title="${title}"`))
+  }
+  assert.match(contacts, /<MainPageHeading title="联系人"/)
   assert.equal(APP_VERSION, JSON.parse(packageSource).version)
   assert.match(mainPage, /版本 \{\{ appVersion \}\}/)
-  assert.match(mainPage, /版本 \$\{APP_VERSION\}/)
+  assert.match(mainPage, /appVersion:\s*APP_VERSION/)
+  assert.match(mainPage, /<SettingsInformation\s[^>]*:version="appVersion"/)
+  assert.match(information, /<text>应用版本<\/text><text>\{\{ version \|\| '未提供' \}\}<\/text>/)
+  assert.match(information, /class="updates-version">\{\{ version \|\| '未提供' \}\}/)
   assert.doesNotMatch(mainPage, /版本 1\.0\.1/)
   for (const source of [mainPage, contacts]) {
     assert.match(source, /\/static\/zhiyu-logo\.png/)

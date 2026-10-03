@@ -3,6 +3,7 @@ import {
   assertWorkspaceId,
   browserDatabaseNameForWorkspace
 } from '../../workspace/workspace-id.js'
+import { selectAnchoredMessageWindow } from '../../core/message-window.js'
 
 function requestToPromise(request) {
   return new Promise((resolve, reject) => {
@@ -325,6 +326,43 @@ export class IndexedDbRepository {
       messages: descending.slice(0, pageLimit).reverse(),
       hasMore: descending.length > pageLimit
     }
+  }
+
+  async listMessageWindow(conversationId, { anchorMessageId, limit = 60 } = {}) {
+    if (!anchorMessageId) return { messages: [], hasMore: false, hasNewer: false, anchorFound: false }
+    const anchor = await this.getMessage(anchorMessageId)
+    if (!anchor || anchor.deletedAt || anchor.conversationId !== conversationId) {
+      return { messages: [], hasMore: false, hasNewer: false, anchorFound: false }
+    }
+    const pageLimit = normalizeMessagePageLimit(limit)
+    const sequence = Number(anchor.sequence) || 0
+    if (!this.keyRange) {
+      const messages = await this.listMessages(conversationId)
+      return selectAnchoredMessageWindow(
+        messages.filter(message => (Number(message.sequence) || 0) < sequence).reverse(),
+        messages.filter(message => (Number(message.sequence) || 0) >= sequence),
+        pageLimit
+      )
+    }
+    const readSide = (older) => {
+      const index = this.#transaction('messages').objectStore('messages').index('conversationSequence')
+      const range = older
+        ? this.keyRange.bound([conversationId, Number.MIN_SAFE_INTEGER], [conversationId, sequence], false, true)
+        : this.keyRange.bound([conversationId, sequence], [conversationId, Number.MAX_SAFE_INTEGER])
+      const request = index.openCursor(range, older ? 'prev' : 'next')
+      return new Promise((resolve, reject) => {
+        const values = []
+        request.addEventListener('success', () => {
+          const cursor = request.result
+          if (!cursor || values.length > pageLimit) { resolve(values); return }
+          if (!cursor.value.deletedAt) values.push(cursor.value)
+          cursor.continue()
+        })
+        request.addEventListener('error', () => reject(request.error), { once: true })
+      })
+    }
+    const [older, newer] = await Promise.all([readSide(true), readSide(false)])
+    return selectAnchoredMessageWindow(older, newer, pageLimit)
   }
 
   async listLatestMessages(conversationIds = []) {

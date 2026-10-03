@@ -142,6 +142,23 @@ test('rejects malformed model responses', async () => {
   await assert.rejects(provider.listModels({ baseUrl: 'https://example.com/v1' }), /模型列表/)
 })
 
+test('rejects empty non-streaming completions with response metadata', async () => {
+  const provider = new OpenAIProvider({ transport: { request: async () => ({
+    status: 200, headers: { 'content-type': 'application/json' },
+    text: JSON.stringify({ choices: [{ message: { content: null, reasoning_content: 'PRIVATE_REASONING' }, finish_reason: 'length' }] })
+  }) } })
+  await assert.rejects(provider.streamChat({ baseUrl: 'https://example.test/v1' }, {
+    model: 'model', stream: false, messages: [{ role: 'user', content: 'continue' }]
+  }), error => {
+    assert.equal(error.code, 'empty_response')
+    assert.equal(error.responseDiagnostics.emptyKind, 'reasoning_only')
+    assert.equal(error.responseDiagnostics.responseFormat, 'json')
+    assert.equal(error.responseDiagnostics.status, 200)
+    assert.doesNotMatch(JSON.stringify(error.responseDiagnostics), /PRIVATE_REASONING/)
+    return true
+  })
+})
+
 test('serializes image and text attachments as ordered content parts', () => {
   const messages = serializeOpenAIMessages([{
     role: 'user',

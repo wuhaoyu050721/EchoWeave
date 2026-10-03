@@ -19,7 +19,8 @@ import {
 	onAiChatStreamEvent,
 	offAiChatStreamEvent,
 	aiChatStreamRequest,
-	aiChatStreamCancel
+	aiChatStreamCancel,
+	aiChatDetectHttpProxy
 } from './uni_modules/ai-chat-streaming'
 
 globalThis.__aiChatPackagedApp = true
@@ -33,7 +34,8 @@ globalThis.__aiChatNativeApis = {
 	onAiChatStreamEvent,
 	offAiChatStreamEvent,
 	aiChatStreamRequest,
-	aiChatStreamCancel
+	aiChatStreamCancel,
+	aiChatDetectHttpProxy
 }
 // #endif
 

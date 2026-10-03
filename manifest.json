@@ -2,8 +2,8 @@
     "name" : "织语",
     "appid" : "__UNI__019AC26",
     "description" : "本地优先的自定义 AI 角色对话应用",
-    "versionName" : "1.1.0",
-    "versionCode" : "110",
+    "versionName" : "1.1.1",
+    "versionCode" : "111",
     "transformPx" : false,
     "uniStatistics" : {
         "enable" : false

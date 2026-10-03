@@ -1,3 +1,4 @@
+import { readMainPageSource } from './helpers/read-main-page.js'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
@@ -5,7 +6,7 @@ import test from 'node:test'
 const pageUrl = new URL('../pages/index/index.vue', import.meta.url)
 
 test('backup dialog exposes local and cloud save plus file and link import', async () => {
-  const source = await readFile(pageUrl, 'utf8')
+  const source = await readMainPageSource()
 
   for (const label of ['保存到本地', '保存到云端', '从本地文件导入', '链接导入', '云端下载链接']) {
     assert.match(source, new RegExp(label))
@@ -18,7 +19,7 @@ test('backup dialog exposes local and cloud save plus file and link import', asy
 })
 
 test('cloud JSON transfer uses the configured login server and shared validated import path', async () => {
-  const source = await readFile(pageUrl, 'utf8')
+  const source = await readMainPageSource()
 
   assert.match(source, /import \{ DEFAULT_CLOUD_BASE_URL, normalizeCloudBaseUrl, resolveCloudRequestBaseUrl \}/)
   assert.match(source, /cloud\.apiClient\.uploadJsonExport\(data\)/)
@@ -30,7 +31,7 @@ test('cloud JSON transfer uses the configured login server and shared validated 
 })
 
 test('cloud download links can be copied in both App and browser runtimes', async () => {
-  const source = await readFile(pageUrl, 'utf8')
+  const source = await readMainPageSource()
 
   assert.match(source, /uniApi\?\.setClipboardData/)
   assert.match(source, /globalThis\.navigator\?\.clipboard\?\.writeText/)
@@ -38,7 +39,7 @@ test('cloud download links can be copied in both App and browser runtimes', asyn
 })
 
 test('local JSON import uses the native Android picker before the browser input fallback', async () => {
-  const source = await readFile(pageUrl, 'utf8')
+  const source = await readMainPageSource()
   const block = source.slice(source.indexOf('chooseImportFile()'), source.indexOf('async applyImportedBackup'))
 
   assert.match(block, /this\.services\?\.nativeBackupPicker/)

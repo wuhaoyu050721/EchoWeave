@@ -4,6 +4,9 @@ import Looper from 'android.os.Looper'
 import ByteArrayOutputStream from 'java.io.ByteArrayOutputStream'
 import InputStream from 'java.io.InputStream'
 import HttpURLConnection from 'java.net.HttpURLConnection'
+import InetSocketAddress from 'java.net.InetSocketAddress'
+import Proxy from 'java.net.Proxy'
+import Socket from 'java.net.Socket'
 import URL from 'java.net.URL'
 import Arrays from 'java.util.Arrays'
 import ConcurrentHashMap from 'java.util.concurrent.ConcurrentHashMap'
@@ -16,10 +19,27 @@ import {
 } from '../interface.uts'
 
 const MAX_ERROR_BODY_BYTES : Int = 1024 * 1024
+// 常见的手机本地代理「混合/HTTP」端口：Clash 与 mihomo 7890、Clash Verge 7897、v2rayNG 10809、sing-box 与 NekoBox 2080
+const SMART_PROXY_PORTS : Array<Int> = [7890, 7897, 7898, 10809, 2080]
+const SMART_PROXY_CONNECT_TIMEOUT : Int = 180
 const activeConnections = new ConcurrentHashMap<string, HttpURLConnection>()
 const cancelledRequests = new ConcurrentHashMap<string, boolean>()
 const mainHandler = new Handler(Looper.getMainLooper())
 let streamEventListener : AiChatStreamEventCallback | null = null
+
+function canConnectToLocalPort(port : Int) : boolean {
+  const socket = new Socket()
+  try {
+    socket.connect(new InetSocketAddress('127.0.0.1', port), SMART_PROXY_CONNECT_TIMEOUT)
+    return true
+  } catch (_) {
+    return false
+  } finally {
+    try {
+      socket.close()
+    } catch (_) {}
+  }
+}
 
 class CallbackRunnable extends Runnable {
   private action : () => void
@@ -99,7 +119,15 @@ class StreamRequestRunnable extends Runnable {
     let connection : HttpURLConnection | null = null
     let statusCode : number = 0
     try {
-      connection = new URL(options.url).openConnection() as HttpURLConnection
+      const targetUrl = new URL(options.url)
+      if (options.proxyUrl.length > 0) {
+        const proxyUrl = new URL(options.proxyUrl)
+        const proxyPort = proxyUrl.getPort() > 0 ? proxyUrl.getPort() : 80
+        const proxy = new Proxy(Proxy.Type.HTTP, new InetSocketAddress(proxyUrl.getHost(), proxyPort))
+        connection = targetUrl.openConnection(proxy) as HttpURLConnection
+      } else {
+        connection = targetUrl.openConnection() as HttpURLConnection
+      }
       activeConnections.put(options.requestId, connection)
       if (cancelledRequests.containsKey(options.requestId)) {
         connection.disconnect()
@@ -205,6 +233,21 @@ export function onAiChatStreamEvent(callback : AiChatStreamEventCallback) : void
 
 export function offAiChatStreamEvent() : void {
   streamEventListener = null
+}
+
+export function aiChatDetectHttpProxy() : Promise<string> {
+  return new Promise<string>((resolve) => {
+    new Thread(new CallbackRunnable(() => {
+      let detected = ''
+      for (const port of SMART_PROXY_PORTS) {
+        if (canConnectToLocalPort(port)) {
+          detected = 'http://127.0.0.1:' + port
+          break
+        }
+      }
+      postToMain(() => resolve(detected))
+    }), 'ai-chat-proxy-detect').start()
+  })
 }
 
 export function aiChatStreamRequest(options : AiChatStreamRequestOptions) : void {

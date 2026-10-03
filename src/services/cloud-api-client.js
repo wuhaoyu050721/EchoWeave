@@ -171,6 +171,7 @@ export class CloudApiClient {
 
   async logout() {
     const session = await this.tokenStore.load()
+    if (session?.access_token) this.#assertSessionScope(session)
     try {
       if (session?.access_token) {
         await this.#request('/api/v1/auth/logout', {
@@ -255,7 +256,20 @@ export class CloudApiClient {
     })
   }
 
+  async listJsonExports() {
+    const result = await this.#request('/api/v1/json-exports', { auth: true })
+    return Array.isArray(result?.exports) ? result.exports : []
+  }
+
+  async revokeJsonExport(id) {
+    const identifier = String(id ?? '')
+    if (!/^[1-9]\d*$/.test(identifier)) throw new Error('分享记录 ID 无效')
+    await this.#request(`/api/v1/json-exports/${identifier}`, { method: 'DELETE', auth: true })
+  }
+
   #refresh(session) {
+    // Check before sending a refresh token, including from a stale client.
+    this.#assertSessionScope(session)
     const key = `${sessionAccountScope(session)}\n${String(session?.refresh_token ?? '')}`
     if (this.refreshFlight?.key === key) return this.refreshFlight.promise
     const promise = this.#performRefresh(session).finally(() => {
@@ -277,7 +291,8 @@ export class CloudApiClient {
       if (!await replaceSessionIfCurrent(this.tokenStore, session, nextSession)) throw sessionChangedError()
       return nextSession
     } catch (error) {
-      if (error?.code !== 'cloud_session_changed') {
+      // A lost connection is not proof that the user's refresh token is invalid.
+      if (error?.status === 401 && error?.code !== 'cloud_session_changed') {
         await clearSessionIfCurrent(this.tokenStore, session)
       }
       throw error
@@ -293,6 +308,8 @@ export class CloudApiClient {
     timeout
   } = {}) {
     let session = auth ? (authSession || await this.tokenStore.load()) : null
+    if (auth && !session?.access_token) throw new Error('请先登录云端账号')
+    if (auth) this.#assertSessionScope(session)
     if (auth && retry && shouldRefreshBeforeTransfer(session, timeout)) {
       session = await this.#refresh(session)
     }

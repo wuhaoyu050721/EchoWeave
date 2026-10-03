@@ -1,8 +1,9 @@
+import { readMainPageSource } from './helpers/read-main-page.js'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 
-const page = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+const page = await readMainPageSource()
 const reader = await readFile(new URL('../src/components/story-reader.vue', import.meta.url), 'utf8')
 const block = await readFile(new URL('../src/components/story-reader-block.vue', import.meta.url), 'utf8')
 

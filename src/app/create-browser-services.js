@@ -22,6 +22,7 @@ import {
 import { WorkspaceServiceManager } from '../workspace/workspace-service-manager.js'
 import { createChatInstructionResolver, createUserNameResolver } from './create-character-instructions.js'
 import { getRuntimeDiagnosticLogStore } from '../core/runtime-diagnostic-log.js'
+import { readNetworkProxySetting } from '../core/network-proxy.js'
 import { readStreamingEnabled, readStreamingSegmentedDisplayEnabled } from '../core/streaming-setting.js'
 
 export function browserProxyPath(pathname = globalThis.location?.pathname) {
@@ -93,7 +94,13 @@ export async function createBrowserServices({
     vault,
     deviceTokenStore: resolvedDeviceServices.tokenStore
   })
-  const transport = new BrowserFetchTransport({ proxyPath: browserProxyPath() })
+  const transport = new BrowserFetchTransport({
+    proxyPath: browserProxyPath(),
+    getProxyUrl: async () => {
+      const setting = await readNetworkProxySetting(repository)
+      return setting.enabled ? setting.url : ''
+    }
+  })
   const openAIProvider = new OpenAIProvider({ transport })
   const geminiProvider = new GeminiProvider({ transport })
   const providerRouter = new ProviderRouter({ providers: [openAIProvider, geminiProvider] })

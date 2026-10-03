@@ -99,6 +99,11 @@ export async function readStoryReaderPosition(repository, conversationId) {
   return normalizeStoryReaderPosition(value, conversationId)
 }
 
+export function storyReaderPositionMessageId(position) {
+  const normalized = normalizeStoryReaderPosition(position)
+  return normalized?.blockId.replace(/-(?:paragraph-\d+|event|media|generating|status)$/, '') || ''
+}
+
 export function normalizeStoryReaderBookmark(value, expectedConversationId = '') {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const position = normalizeStoryReaderPosition(value.position ?? value, expectedConversationId)
@@ -273,13 +278,20 @@ export function createStoryReaderBlocks(messages = []) {
         statusKind: message.status,
         text: cleanText(message.errorMessage) || (message.status === 'interrupted' ? '本次续写已中断' : '本次续写未完成')
       }))
+    } else if (message.role === 'assistant' && message.emptyCompletedReply && !messageBlocks.length) {
+      messageBlocks.push(blockFromMessage(message, {
+        id: `${message.id}-empty-response`,
+        type: 'status',
+        statusKind: 'failed',
+        text: '这条历史回复没有可显示的正文，可查看响应详情或手动重试。'
+      }))
     }
 
     if (!messageBlocks.length) continue
     messageBlocks[0].isMessageStart = true
     const finalBlock = messageBlocks[messageBlocks.length - 1]
     finalBlock.isMessageEnd = true
-    finalBlock.showActions = message.role === 'assistant' && message.status === 'completed' && !pendingSegments
+    finalBlock.showActions = message.role === 'assistant' && message.status === 'completed' && !pendingSegments && !message.emptyCompletedReply
     blocks.push(...messageBlocks)
   }
   return blocks
@@ -439,15 +451,17 @@ function splitNarrativeForPageRemainder(block, availableWeight, { preserveTraili
   ]
 }
 
-export function paginateStoryBlocks(blocks = [], { capacity = DEFAULT_PAGE_CAPACITY } = {}) {
+function paginateStoryBlockRange(blocks = [], { capacity = DEFAULT_PAGE_CAPACITY, previous = null, start = 0 } = {}) {
   const pageCapacity = Math.max(MIN_PAGE_CAPACITY, Math.min(MAX_PAGE_CAPACITY, finiteNumber(capacity, DEFAULT_PAGE_CAPACITY)))
-  const expandedBlocks = (Array.isArray(blocks) ? blocks : [])
-    .flatMap(block => splitOversizedBlock(block, pageCapacity))
-  if (!expandedBlocks.length) return [{ id: 'story-page-empty', blocks: [], weight: 0 }]
-
-  const pages = []
-  let pageBlocks = []
-  let pageWeight = 0
+  if (!blocks.length) return { pages: [{ id: 'story-page-empty', blocks: [], weight: 0 }], checkpoints: [], reusedPageCount: 0 }
+  // Checkpoints capture the unfinished page before each original block. This
+  // lets a changed streaming tail resume without splitting settled prose again.
+  const checkpoint = previous?.checkpoints[start]
+  const pages = checkpoint ? previous.pages.slice(0, checkpoint.pageCount) : []
+  const checkpoints = checkpoint ? previous.checkpoints.slice(0, start) : []
+  const reusedPageCount = pages.length
+  let pageBlocks = checkpoint ? [...checkpoint.blocks] : []
+  let pageWeight = checkpoint?.weight || 0
   const commitPage = () => {
     if (!pageBlocks.length) return
     pages.push({
@@ -459,34 +473,119 @@ export function paginateStoryBlocks(blocks = [], { capacity = DEFAULT_PAGE_CAPAC
     pageWeight = 0
   }
 
-	for (let expandedIndex = 0; expandedIndex < expandedBlocks.length; expandedIndex += 1) {
-		const expandedBlock = expandedBlocks[expandedIndex]
-		let block = expandedBlock
-    while (block) {
-      const blockWeight = measureStoryBlock(block)
-      if (!pageBlocks.length || pageWeight + blockWeight <= pageCapacity) {
-        pageBlocks.push(block)
-        pageWeight += blockWeight
-        break
-      }
+  for (let sourceIndex = start; sourceIndex < blocks.length; sourceIndex += 1) {
+    checkpoints.push({ pageCount: pages.length, blocks: [...pageBlocks], weight: pageWeight })
+    const expandedBlocks = splitOversizedBlock(blocks[sourceIndex], pageCapacity)
+    for (let expandedIndex = 0; expandedIndex < expandedBlocks.length; expandedIndex += 1) {
+      let block = expandedBlocks[expandedIndex]
+      while (block) {
+        const blockWeight = measureStoryBlock(block)
+        if (!pageBlocks.length || pageWeight + blockWeight <= pageCapacity) {
+          pageBlocks.push(block)
+          pageWeight += blockWeight
+          break
+        }
 
-			const splitBlocks = splitNarrativeForPageRemainder(block, pageCapacity - pageWeight, {
-				preserveTrailingMinimum: expandedIndex === expandedBlocks.length - 1
-			})
-      if (!splitBlocks) {
+        const splitBlocks = splitNarrativeForPageRemainder(block, pageCapacity - pageWeight, {
+          preserveTrailingMinimum: sourceIndex === blocks.length - 1 && expandedIndex === expandedBlocks.length - 1
+        })
+        if (!splitBlocks) {
+          commitPage()
+          continue
+        }
+
+        const [leadingBlock, trailingBlock] = splitBlocks
+        pageBlocks.push(leadingBlock)
+        pageWeight += measureStoryBlock(leadingBlock)
         commitPage()
-        continue
+        block = trailingBlock
       }
-
-      const [leadingBlock, trailingBlock] = splitBlocks
-      pageBlocks.push(leadingBlock)
-      pageWeight += measureStoryBlock(leadingBlock)
-      commitPage()
-      block = trailingBlock
     }
   }
   commitPage()
-  return pages
+  return { pages, checkpoints, reusedPageCount }
+}
+
+export function paginateStoryBlocks(blocks = [], options = {}) {
+  return paginateStoryBlockRange(Array.isArray(blocks) ? blocks : [], options).pages
+}
+
+const STORY_MESSAGE_LAYOUT_FIELDS = [
+  'id', 'role', 'deletedAt', 'content', 'displayContent', 'responseDisplayMode',
+  'visibleSegmentCount', 'status', 'errorMessage', 'updatedAt', 'createdAt', 'isGreeting', 'emptyCompletedReply'
+]
+
+function shallowEqual(left, right) {
+  if (!left || !right) return left === right
+  if (typeof left !== 'object' || typeof right !== 'object') return left === right
+  const keys = Object.keys(left)
+  return keys.length === Object.keys(right).length && keys.every(key => left[key] === right[key])
+}
+
+function messageLayoutSnapshot(message = {}) {
+  return {
+    values: STORY_MESSAGE_LAYOUT_FIELDS.map(key => message[key]),
+    segments: [...(message.displaySegments || [])],
+    attachments: (message.attachments || []).filter(Boolean).map(attachment => ({ ...attachment })),
+    feedback: message.feedback && typeof message.feedback === 'object' ? { ...message.feedback } : message.feedback
+  }
+}
+
+function sameMessageLayout(left, right) {
+  return shallowEqual(left.values, right.values) && shallowEqual(left.segments, right.segments) &&
+    shallowEqual(left.feedback, right.feedback) && left.attachments.length === right.attachments.length &&
+    left.attachments.every((attachment, index) => shallowEqual(attachment, right.attachments[index]))
+}
+
+export function createStoryReaderLayoutCache() {
+  let messageEntries = new Map()
+  let previousBlocks = []
+  let previousCapacity = null
+  let pagination = null
+  return {
+    update(messages = [], { capacity = DEFAULT_PAGE_CAPACITY } = {}) {
+      const nextEntries = new Map()
+      const blocks = []
+      let builtMessages = 0
+      for (const message of messages) {
+        if (!message) continue
+        const snapshot = messageLayoutSnapshot(message)
+        const previousEntry = messageEntries.get(message.id)
+        const entry = previousEntry && sameMessageLayout(previousEntry.snapshot, snapshot)
+          ? previousEntry
+          : { snapshot, blocks: createStoryReaderBlocks([message]) }
+        if (entry !== previousEntry) builtMessages += 1
+        nextEntries.set(message.id, entry)
+        blocks.push(...entry.blocks)
+      }
+      messageEntries = nextEntries
+      let firstChanged = 0
+      while (firstChanged < blocks.length && blocks[firstChanged] === previousBlocks[firstChanged]) firstChanged += 1
+      const unchanged = firstChanged === blocks.length && blocks.length === previousBlocks.length
+      const capacityChanged = previousCapacity !== capacity
+      let start = 0
+      if (!capacityChanged && pagination && !unchanged) {
+        // Appending/removing a block changes the former final block's trailing
+        // balancing rule, so include it when resuming the tail.
+        start = Math.max(0, Math.min(firstChanged, blocks.length - 1, previousBlocks.length - 1))
+      }
+      if (!pagination || capacityChanged || !unchanged) {
+        pagination = paginateStoryBlockRange(blocks, { capacity, previous: capacityChanged ? null : pagination, start })
+      }
+      const stableBlocks = unchanged ? previousBlocks : blocks
+      previousBlocks = stableBlocks
+      previousCapacity = capacity
+      return {
+        blocks: stableBlocks,
+        pages: pagination.pages,
+        stats: {
+          builtMessages,
+          paginatedBlocks: unchanged && !capacityChanged ? 0 : blocks.length - start,
+          reusedPages: unchanged && !capacityChanged ? pagination.pages.length : pagination.reusedPageCount
+        }
+      }
+    }
+  }
 }
 
 export function storyPageCapacity({ width = 390, height = 844, reservedHeight = 250 } = {}) {

@@ -1,6 +1,7 @@
 import { createRuntimeId } from './runtime-id.js'
 import { groupParticipantKey, groupParticipantKind } from './group-chat.js'
 import { hasValidImageAttachmentSource } from './image-output.js'
+import { portableSettings } from './local-settings.js'
 
 const SENSITIVE_KEYS = new Set([
   'apiKey',
@@ -194,7 +195,7 @@ export function createBackup(data = {}, now = new Date()) {
     characters: stripSensitive(data.characters ?? []),
     worldBooks: stripSensitive(data.worldBooks ?? []),
     characterAssets: stripSensitive(data.characterAssets ?? []),
-    settings: stripSensitive(data.settings ?? {})
+    settings: stripSensitive(portableSettings(data.settings))
   }
 }
 
@@ -323,6 +324,6 @@ export function prepareImport(payload, idFactory = createRuntimeId) {
     characters: remappedCharacters,
     worldBooks: remappedWorldBooks,
     characterAssets: remappedCharacterAssets,
-    settings: stripSensitive(payload.settings)
+    settings: stripSensitive(portableSettings(payload.settings))
   }
 }

@@ -14,4 +14,7 @@ return [
     'max_auth_attempts' => 10,
     'auth_rate_limit_window' => 900,
     'sync_mutation_retention' => 15552000,
+    'json_export_ttl' => 604800, // Seven days; links expire even before cleanup runs.
+    'max_json_exports_per_user' => 20,
+    'max_json_export_total_bytes' => 524288000,
 ];

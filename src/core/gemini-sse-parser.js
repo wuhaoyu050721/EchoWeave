@@ -72,7 +72,12 @@ export class GeminiSseParser {
 
     try {
       const payload = JSON.parse(data)
-      if (payload?.error) throw new Error(String(payload.error.message || 'Gemini 流式请求失败'))
+      this.handlers.onPayload?.(payload)
+      if (payload?.error) {
+        const error = new Error('Gemini 接口在流式响应中返回了错误，请检查接口状态或输出限制')
+        error.code = 'upstream_response_error'
+        throw error
+      }
       for (const candidate of Array.isArray(payload?.candidates) ? payload.candidates : []) {
         for (const part of Array.isArray(candidate?.content?.parts) ? candidate.content.parts : []) {
           if (!part?.thought && typeof part?.text === 'string' && part.text) {
@@ -85,7 +90,8 @@ export class GeminiSseParser {
         this.handlers.onImage?.(image, payload)
       }
     } catch (error) {
-      const parserError = new Error(`无法解析 Gemini SSE 数据: ${error.message}`)
+      const parserError = new Error(error?.code === 'upstream_response_error' ? error.message : '无法解析 Gemini SSE 数据，请检查接口响应格式')
+      parserError.code = error?.code || 'invalid_sse_response'
       parserError.cause = error
       parserError.data = data
       this.handlers.onError?.(parserError)

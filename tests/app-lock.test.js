@@ -1,3 +1,4 @@
+import { readMainPageSource } from './helpers/read-main-page.js'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
@@ -25,8 +26,7 @@ test('rejects weak PIN values and never enables an incomplete legacy setting', a
 })
 
 test('settings UI gates startup and exposes real PIN controls on a second-level page', async () => {
-  const source = await import('node:fs/promises')
-    .then(fs => fs.readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8'))
+  const source = await readMainPageSource()
 
   assert.match(source, /data-testid="app-lock-entry"[^>]+openAppLockSettings\(ui\)/)
   assert.match(source, /data-testid="app-lock-settings-page"/)

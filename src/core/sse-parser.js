@@ -106,12 +106,19 @@ export class OpenAISseParser {
 
     try {
       const payload = JSON.parse(data)
+      this.handlers.onPayload?.(payload)
+      if (payload?.error) {
+        const error = new Error('接口在流式响应中返回了错误，请检查接口状态或输出限制')
+        error.code = 'upstream_response_error'
+        throw error
+      }
       const choice = payload?.choices?.[0]
-      const content = choice?.delta?.content
+      const content = choice?.delta?.content ?? choice?.message?.content ?? choice?.text ??
+        choice?.delta?.refusal ?? choice?.message?.refusal
       if (typeof content === 'string' && content) {
         this.handlers.onDelta?.(content, payload)
-      } else if (Array.isArray(content)) {
-        for (const part of content) {
+      } else if (content && typeof content === 'object') {
+        for (const part of Array.isArray(content) ? content : [content]) {
           if (typeof part?.text === 'string' && part.text) this.handlers.onDelta?.(part.text, payload)
         }
       }
@@ -122,7 +129,8 @@ export class OpenAISseParser {
         this.handlers.onImage?.(image, payload)
       }
     } catch (error) {
-      const parserError = new Error(`无法解析模型 SSE 数据: ${error.message}`)
+      const parserError = new Error(error?.code === 'upstream_response_error' ? error.message : '无法解析模型 SSE 数据，请检查接口响应格式')
+      parserError.code = error?.code || 'invalid_sse_response'
       parserError.cause = error
       parserError.data = data
       this.handlers.onError?.(parserError)

@@ -55,7 +55,7 @@
 				<Info v-else :size="23" />
 			</view>
 			<text class="app-confirm-title">{{ dialog.title }}</text>
-			<text v-if="dialog.content" class="app-confirm-copy">{{ dialog.content }}</text>
+			<text v-if="dialog.content" class="app-confirm-copy" :class="{ 'preserve-lines': dialog.preserveLineBreaks }">{{ dialog.content }}</text>
 			<label v-if="isPrompt" class="app-confirm-field">
 				<text>会话名称</text>
 				<input
@@ -71,7 +71,7 @@
 				/>
 			</label>
 			<view class="app-confirm-actions">
-				<button class="app-confirm-cancel" @click="$emit('cancel-dialog')">取消</button>
+				<button class="app-confirm-cancel" @click="$emit('cancel-dialog')">{{ dialog.cancelText || '取消' }}</button>
 				<button
 					class="app-confirm-submit"
 					:class="{ danger: isDanger }"
@@ -317,6 +317,11 @@
 		margin-top: 18px;
 		flex-direction: column;
 		gap: 7px;
+	}
+
+	.app-confirm-copy.preserve-lines {
+		white-space: pre-line;
+		text-align: left;
 	}
 
 	.app-confirm-field > text {

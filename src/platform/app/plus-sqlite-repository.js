@@ -3,6 +3,7 @@ import {
   androidDatabaseForWorkspace,
   assertWorkspaceId
 } from '../../workspace/workspace-id.js'
+import { selectAnchoredMessageWindow } from '../../core/message-window.js'
 
 const PAYLOAD_CHUNK_CHARACTERS = 256 * 1024
 const PAYLOAD_CHUNK_MARKER = '__echo_weave_chunked_payload_v1__'
@@ -605,6 +606,32 @@ export class PlusSqliteRepository {
       messages: (await this.#decodePayloadRows('messages', pageRows)).reverse(),
       hasMore: rows.length > pageLimit
     }
+  }
+
+  async listMessageWindow(conversationId, { anchorMessageId, limit = 60 } = {}) {
+    if (!anchorMessageId) return { messages: [], hasMore: false, hasNewer: false, anchorFound: false }
+    const anchor = await this.getMessage(anchorMessageId)
+    if (!anchor || anchor.deletedAt || anchor.conversationId !== conversationId) {
+      return { messages: [], hasMore: false, hasNewer: false, anchorFound: false }
+    }
+    const pageLimit = normalizeMessagePageLimit(limit)
+    const sequence = Number(anchor.sequence) || 0
+    // Read only metadata on both sides, then decode just the selected window.
+    const readSide = (older) => this.#select(
+      `SELECT id, sequence FROM messages WHERE conversation_id = ${sqlText(conversationId)} ` +
+      `AND deleted_at IS NULL AND sequence ${older ? '<' : '>='} ${sequence} ` +
+      `ORDER BY sequence ${older ? 'DESC' : 'ASC'} LIMIT ${pageLimit + 1}`
+    )
+    const [older, newer] = await Promise.all([readSide(true), readSide(false)])
+    const window = selectAnchoredMessageWindow(older, newer, pageLimit)
+    if (!window.messages.length) return { ...window, anchorFound: false }
+    const messages = []
+    for (let offset = 0; offset < window.messages.length; offset += LATEST_MESSAGE_CURSOR_BATCH_SIZE) {
+      const ids = window.messages.slice(offset, offset + LATEST_MESSAGE_CURSOR_BATCH_SIZE).map(row => sqlText(row.id)).join(', ')
+      const rows = await this.#select(`SELECT id, payload FROM messages WHERE id IN (${ids}) AND deleted_at IS NULL ORDER BY sequence ASC`)
+      messages.push(...await this.#decodePayloadRows('messages', rows))
+    }
+    return { ...window, messages, anchorFound: messages.some(message => message.id === anchorMessageId) }
   }
 
   async listLatestMessages(conversationIds = []) {

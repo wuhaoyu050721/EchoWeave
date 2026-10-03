@@ -36,7 +36,8 @@ test('converts device-bound secrets to portable records and excludes transport s
       numericSetting: { value: 5 },
       cloudDeviceId: 'device-local',
       cloudAutoBackup: true,
-      cloudConfig: { baseUrl: 'https://cloud.example.com' }
+      cloudConfig: { baseUrl: 'https://cloud.example.com' },
+      networkProxy: { enabled: true, mode: 'smart' }
     }
   }
   const repository = createRepository(data)
@@ -60,6 +61,7 @@ test('converts device-bound secrets to portable records and excludes transport s
   assert.equal(records.some(record => record.entityId === 'cloudDeviceId'), false)
   assert.equal(records.some(record => record.entityId === 'cloudAutoBackup'), false)
   assert.equal(records.some(record => record.entityId === 'cloudConfig'), false)
+  assert.equal(records.some(record => record.entityId === 'networkProxy'), false)
 })
 
 test('re-encrypts portable secrets and stores encrypted tombstones with required references', async () => {

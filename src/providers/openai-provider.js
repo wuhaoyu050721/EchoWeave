@@ -7,6 +7,7 @@ import {
 } from '../core/image-output.js'
 import { resolveChatRequestTimeout } from '../core/model-request-timeout.js'
 import { OpenAISseParser } from '../core/sse-parser.js'
+import { chatResponseError, createChatResponseObserver } from '../core/chat-response-diagnostics.js'
 
 const IMAGE_GENERATION_TIMEOUT = 5 * 60 * 1000
 const IMAGE_DOWNLOAD_TIMEOUT = 2 * 60 * 1000
@@ -50,7 +51,8 @@ function responseText(response) {
 function chatResponseText(payload) {
   const textParts = []
   for (const choice of Array.isArray(payload?.choices) ? payload.choices : []) {
-    const content = choice?.message?.content
+    const content = choice?.message?.content ?? choice?.delta?.content ?? choice?.text ??
+      choice?.message?.refusal ?? choice?.delta?.refusal
     if (typeof content === 'string') {
       textParts.push(content)
       continue
@@ -148,81 +150,112 @@ export class OpenAIProvider {
   }
 
   async streamChat(profile, request, handlers = {}) {
-    if (request.stream === false) {
+    const observer = createChatResponseObserver(this.protocolType, request.stream !== false, handlers)
+    try {
+      if (request.stream === false) {
+        const response = await this.transport.request({
+          url: buildOpenAIEndpoint(profile.baseUrl, 'chat/completions'),
+          method: 'POST',
+          headers: buildHeaders(profile.apiKey),
+          body: JSON.stringify({
+            model: request.model,
+            messages: serializeOpenAIMessages(request.messages),
+            stream: false
+          }),
+          signal: request.signal,
+          onHeaders: observer.response,
+          timeout: resolveChatRequestTimeout(profile)
+        })
+        observer.response(response)
+        observer.returnedText(responseText(response))
+        let payload
+        try {
+          payload = JSON.parse(responseText(response))
+        } catch {
+          throw chatResponseError('invalid_sse_response', '对话响应不是有效 JSON', observer.state)
+        }
+        observer.state.responseFormat = 'json'
+        observer.payload(payload)
+        if (payload?.error) throw chatResponseError('upstream_response_error', '接口返回了错误，请检查接口状态或输出限制', observer.state)
+
+        const content = chatResponseText(payload)
+        if (content) observer.delta(content, payload)
+        const finishReason = (Array.isArray(payload?.choices) ? payload.choices : [])
+          .find(choice => choice?.finish_reason)?.finish_reason ?? null
+        if (finishReason) observer.finishReason(finishReason, payload)
+        const images = await this.resolveImageOutputs(
+          extractImageOutputs(payload, { baseUrl: profile.baseUrl }),
+          request.signal
+        )
+        images.forEach(image => handlers.onImage?.(image, payload))
+        observer.done()
+        observer.assertContent(images)
+        return { finishReason, images, responseDiagnostics: observer.snapshot() }
+      }
+
+      let finishReason = null
+      let parseError = null
+      const rawImages = []
+      const parser = new OpenAISseParser({
+        imageBaseUrl: profile.baseUrl,
+        onEvent: observer.event,
+        onPayload: observer.payload,
+        onDelta: observer.delta,
+        onDone: observer.done,
+        onFinishReason: (value, payload) => {
+          finishReason = value
+          observer.finishReason(value, payload)
+        },
+        onError: (error) => {
+          parseError = error
+          handlers.onError?.(error)
+        },
+        onImage: (image) => {
+          if (rawImages.length < MAX_GENERATED_IMAGE_OUTPUTS) rawImages.push(image)
+        }
+      })
+
       const response = await this.transport.request({
         url: buildOpenAIEndpoint(profile.baseUrl, 'chat/completions'),
         method: 'POST',
-        headers: buildHeaders(profile.apiKey),
+        headers: buildHeaders(profile.apiKey, 'text/event-stream'),
         body: JSON.stringify({
           model: request.model,
           messages: serializeOpenAIMessages(request.messages),
-          stream: false
+          stream: true
         }),
         signal: request.signal,
-        timeout: resolveChatRequestTimeout(profile)
+        onHeaders: observer.response,
+        timeout: resolveChatRequestTimeout(profile),
+        onChunk: chunk => { observer.chunk(chunk); parser.feed(chunk) }
       })
-      let payload
-      try {
-        payload = JSON.parse(responseText(response))
-      } catch {
-        throw new Error('对话响应不是有效 JSON')
+      observer.response(response)
+      if (!observer.state.chunkCount && responseText(response)) {
+        const text = responseText(response)
+        observer.returnedText(text)
+        parser.feed(new TextEncoder().encode(text))
       }
-      if (payload?.error) throw new Error(String(payload.error.message || '模型请求失败'))
-
-      const content = chatResponseText(payload)
-      if (content) handlers.onDelta?.(content, payload)
-      const finishReason = (Array.isArray(payload?.choices) ? payload.choices : [])
-        .find(choice => choice?.finish_reason)?.finish_reason ?? null
-      if (finishReason) handlers.onFinishReason?.(finishReason, payload)
-      const images = await this.resolveImageOutputs(
-        extractImageOutputs(payload, { baseUrl: profile.baseUrl }),
-        request.signal
-      )
-      images.forEach(image => handlers.onImage?.(image, payload))
-      handlers.onDone?.()
-      return { finishReason, images }
-    }
-
-    let finishReason = null
-    let parseError = null
-    const rawImages = []
-    const parser = new OpenAISseParser({
-      imageBaseUrl: profile.baseUrl,
-      onDelta: handlers.onDelta,
-      onDone: handlers.onDone,
-      onFinishReason: (value, payload) => {
-        finishReason = value
-        handlers.onFinishReason?.(value, payload)
-      },
-      onError: (error) => {
-        parseError = error
-        handlers.onError?.(error)
-      },
-      onImage: (image) => {
-        if (rawImages.length < MAX_GENERATED_IMAGE_OUTPUTS) rawImages.push(image)
+      parser.finish()
+      if (parseError) {
+        throw parseError
       }
-    })
-
-    await this.transport.request({
-      url: buildOpenAIEndpoint(profile.baseUrl, 'chat/completions'),
-      method: 'POST',
-      headers: buildHeaders(profile.apiKey, 'text/event-stream'),
-      body: JSON.stringify({
-        model: request.model,
-        messages: serializeOpenAIMessages(request.messages),
-        stream: true
-      }),
-      signal: request.signal,
-      timeout: resolveChatRequestTimeout(profile),
-      onChunk: (chunk) => parser.feed(chunk)
-    })
-    parser.finish()
-    if (parseError) {
-      throw parseError
+      const fallback = observer.fallbackPayload()
+      if (fallback !== null) {
+        observer.payload(fallback)
+        if (fallback?.error) throw chatResponseError('upstream_response_error', '接口返回了错误，请检查接口状态或输出限制', observer.state)
+        const content = chatResponseText(fallback)
+        if (content) observer.delta(content, fallback)
+        finishReason = fallback?.choices?.find(choice => choice?.finish_reason)?.finish_reason ?? null
+        if (finishReason) observer.finishReason(finishReason, fallback)
+        rawImages.push(...extractImageOutputs(fallback, { baseUrl: profile.baseUrl }).slice(0, MAX_GENERATED_IMAGE_OUTPUTS))
+      }
+      const images = await this.resolveImageOutputs(rawImages, request.signal)
+      images.forEach(image => handlers.onImage?.(image))
+      observer.assertContent(images)
+      return { finishReason, images, responseDiagnostics: observer.snapshot() }
+    } catch (error) {
+      throw observer.attachError(error)
     }
-    const images = await this.resolveImageOutputs(rawImages, request.signal)
-    images.forEach(image => handlers.onImage?.(image))
-    return { finishReason, images }
   }
 
   async generateImage(profile, request = {}, handlers = {}) {

@@ -1,3 +1,4 @@
+import { readMainPageSource } from './helpers/read-main-page.js'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
@@ -5,7 +6,7 @@ import test from 'node:test'
 test('registers the diagnostics page and exposes a settings entry', async () => {
   const [pagesSource, indexSource] = await Promise.all([
     readFile(new URL('../pages.json', import.meta.url), 'utf8'),
-    readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+    readMainPageSource()
   ])
 
   assert.match(pagesSource, /pages\/android-diagnostics\/index/)
@@ -50,14 +51,18 @@ test('diagnostics page exposes OpenAI and Gemini protocol selection', async () =
   assert.match(source, /@click="selectProtocol\(protocol\.id\)"/)
 })
 
-test('diagnostics page uses the themed second-level settings layout', async () => {
+test('diagnostics page uses the paper settings palette and accessible scrollable controls', async () => {
   const source = await readFile(new URL('../pages/android-diagnostics/index.vue', import.meta.url), 'utf8')
 
   assert.match(source, /流式传输诊断/)
   assert.match(source, /class="runtime-overview"/)
   assert.match(source, /class="section-band config-section"/)
   assert.match(source, /class="secondary-actions"/)
-  assert.match(source, /--accent:\s*#d43bc2/)
-  assert.match(source, /background:\s*#f3f3f5/)
+  assert.match(source, /--accent:\s*#7850a0/)
+  assert.match(source, /\.diagnostic-shell\s*\{[^}]*background:\s*#f8f7f4/s)
+  assert.match(source, /\.diagnostic-scroll\s*\{[^}]*min-height:\s*0[^}]*overflow-y:\s*auto/s)
+  assert.match(source, /\.icon-button\s*\{[^}]*width:\s*44px[^}]*height:\s*44px/s)
+  assert.match(source, /button:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--accent\)/s)
+  assert.match(source, /@media \(prefers-reduced-motion:\s*reduce\)[^]*\.header-menu[^}]*animation:\s*none/s)
   assert.doesNotMatch(source, /#1f6fcb/)
 })

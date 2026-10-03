@@ -21,6 +21,22 @@ test('sends target through local proxy and returns response text', async () => {
   assert.equal(response.text, '{"data":[]}')
 })
 
+test('sends the configured browser proxy to the local proxy route', async () => {
+  let request
+  const transport = new BrowserFetchTransport({
+    getProxyUrl: async () => 'http://127.0.0.1:7897',
+    fetch: async (url, options) => {
+      request = { url, options }
+      return new Response('{"data":[]}', { status: 200 })
+    }
+  })
+
+  await transport.request({ url: 'https://example.com/v1/models' })
+
+  assert.equal(request.url, '/__ai_proxy')
+  assert.equal(request.options.headers['x-ai-proxy-url'], 'http://127.0.0.1:7897')
+})
+
 test('requests the target directly when the proxy is disabled', async () => {
   const requests = []
   const transport = new BrowserFetchTransport({

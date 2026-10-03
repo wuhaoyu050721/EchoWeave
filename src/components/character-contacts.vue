@@ -1,64 +1,66 @@
 <template>
-	<view class="contacts-screen">
-		<view class="contacts-header">
-			<text class="contacts-title">联系人</text>
-			<view class="contacts-header-actions">
-				<button class="contacts-world-books" :class="{ active: worldBookCount > 0 }" :aria-label="`管理世界书，当前 ${worldBookCount} 本`" @click="$emit('manage-world-books')"><view class="contacts-world-book-icon"><FileText :size="22" /></view><text v-if="worldBookCount" class="contacts-world-book-count">{{ worldBookCount > 99 ? '99+' : worldBookCount }}</text></button>
-				<button class="contacts-sort" :class="{ active: sortMode === 'recent' }" :aria-label="sortMode === 'name' ? '按导入时间排序' : '按名称排序'" @click="$emit('toggle-sort')"><Tune :size="25" /></button>
-			</view>
-		</view>
-		<view class="contacts-search">
-			<Search :size="21" />
-			<input :value="query" placeholder="搜索联系人" confirm-type="search" @input="$emit('update:query', $event.detail?.value ?? $event.target?.value ?? '')" />
-			<button v-if="query" aria-label="清空联系人搜索" @click="$emit('update:query', '')"><X :size="17" /></button>
-		</view>
-		<button class="contacts-character-maker" aria-label="点击前往制作角色卡" @click="$emit('open-character-maker')">
-			<text>想创建专属角色？</text><text class="contacts-character-maker-link">点击前往制作角色卡</text><ChevronRight :size="14" />
-		</button>
-		<scroll-view class="contacts-scroll" scroll-y @scrolltolower="$emit('load-more')">
-			<view v-if="items.length" class="contacts-list">
-				<text class="contacts-list-label">{{ sortMode === 'name' ? '按名称排序' : '按导入时间排序' }}</text>
-				<button v-for="character in items" :key="character.id" v-memo="[character]" class="contact-row" :aria-label="`查看角色卡 ${character.name}`" @click="$emit('open-character-details', character)">
-					<ProviderLogo class="contact-avatar" :src="character.avatarDataUrl || '/static/zhiyu-logo.png'" :alt="character.name" mode="aspectFill" lazy-load />
-					<view class="contact-copy">
-						<text class="contact-name">{{ character.name }}</text>
-						<text class="contact-meta">{{ characterMeta(character) }}</text>
-					</view>
-					<ChevronRight :size="18" />
+	<view class="contacts-screen paper-main-page" @keydown.esc="closeAddMenu">
+		<scroll-view class="contacts-scroll" scroll-y @scroll="closeAddMenu" @scrolltolower="$emit('load-more')">
+			<view class="contacts-page-content">
+				<MainPageHeading title="联系人" subtitle="让每个角色，都有自己的故事。">
+					<template #actions>
+						<view class="contacts-add-control" :class="{ open: addMenuOpen }">
+							<button class="contacts-add-toggle paper-action" :class="{ active: addMenuOpen }" :disabled="busy" aria-controls="contacts-add-menu" :aria-expanded="addMenuOpen" :aria-label="addMenuOpen ? '收起添加菜单' : '添加角色'" @click="toggleAddMenu">
+								<Plus class="contacts-add-toggle-icon" :size="19" /><text>添加</text>
+							</button>
+							<view v-if="addMenuOpen" id="contacts-add-menu" class="contacts-add-menu">
+								<button class="contacts-add-option" :disabled="busy" aria-label="新建自定义角色" @click="createCharacter"><PersonAdd :size="19" /><text>新建角色</text></button>
+								<button class="contacts-add-option" :disabled="busy" aria-label="从相册导入角色卡" @click="importCharacterFromGallery"><Image :size="19" /><text>相册导入</text></button>
+								<button class="contacts-add-option" :disabled="busy" aria-label="从文件管理器导入角色卡" @click="importCharacterFromFile"><FileText :size="19" /><text>文件导入</text></button>
+								<button class="contacts-add-option contacts-character-maker" :disabled="busy" aria-label="点击前往制作角色卡" @click="openCharacterMaker"><Plus :size="19" /><text>制作角色卡</text><ChevronRight :size="14" /></button>
+							</view>
+						</view>
+					</template>
+				</MainPageHeading>
+				<view class="contacts-search paper-search">
+					<Search :size="21" />
+					<input :value="query" placeholder="搜索角色" aria-label="搜索联系人" confirm-type="search" @focus="closeAddMenu" @input="$emit('update:query', $event.detail?.value ?? $event.target?.value ?? '')" />
+					<button v-if="query" aria-label="清空联系人搜索" @click="$emit('update:query', '')"><X :size="17" /></button>
+				</view>
+				<view class="contacts-section-heading paper-section-heading">
+					<text>我的角色</text>
+					<button class="contacts-sort" :class="{ active: sortMode === 'recent' }" :aria-label="sortMode === 'name' ? '按导入时间排序' : '按名称排序'" @click="$emit('toggle-sort')"><Tune :size="17" /><text>{{ sortMode === 'name' ? '按名称' : '按导入时间' }}</text><ChevronDown :size="14" /></button>
+				</view>
+				<view v-if="items.length" class="contacts-list">
+					<button v-for="character in items" :key="character.id" v-memo="[character]" class="contact-row" :aria-label="`查看角色卡 ${character.name}`" @click="$emit('open-character-details', character)">
+						<ProviderLogo class="contact-avatar" :src="character.avatarDataUrl || '/static/zhiyu-logo.png'" :alt="character.name" mode="aspectFill" lazy-load />
+						<view class="contact-copy">
+							<text class="contact-name">{{ character.name }}</text>
+							<text class="contact-meta">{{ characterMeta(character) }}</text>
+						</view>
+					</button>
+				</view>
+				<view v-else class="contacts-empty">
+					<view class="contacts-empty-icon"><Contact :size="33" /></view>
+					<text class="contacts-empty-title">{{ query ? '没有匹配的联系人' : '还没有角色联系人' }}</text>
+					<text class="contacts-empty-copy">{{ query ? '试试角色名、标签或创作者。' : '添加一个角色，让故事从这里开始。' }}</text>
+					<button v-if="query" class="contacts-empty-action" @click="$emit('update:query', '')">清空搜索</button>
+					<button v-else class="contacts-empty-action" :disabled="busy" @click="createCharacter"><Plus :size="16" /><text>新建角色</text></button>
+				</view>
+				<button class="contacts-world-books" :aria-label="`管理世界书，当前 ${worldBookCount} 本`" @click="$emit('manage-world-books')">
+					<view class="contacts-world-book-icon"><FileText :size="26" /></view>
+					<view class="contacts-world-book-copy"><view class="contacts-world-book-title"><text>世界书</text><text v-if="worldBookCount" class="contacts-world-book-count">{{ worldBookCount }} 本</text></view><text class="contacts-world-book-description">为角色补充背景与设定</text></view>
+					<ChevronRight :size="20" />
 				</button>
+				<button class="contacts-import-link" :disabled="busy" aria-label="导入角色卡" @click="importCharacterFromFile"><Import :size="17" /><text>{{ busy ? '正在导入…' : '导入角色卡' }}</text></button>
 			</view>
-			<view v-else class="contacts-empty">
-				<Contact :size="42" />
-				<text>{{ query ? '没有匹配的联系人' : '还没有角色联系人' }}</text>
-			</view>
-			<view class="contacts-tail" />
 		</scroll-view>
-		<view class="contacts-add-scrim" :class="{ visible: addMenuOpen }" aria-hidden="true" @click="closeAddMenu" />
-		<view class="contacts-add-control" :class="{ open: addMenuOpen }">
-			<view id="contacts-add-menu" class="contacts-add-menu" :aria-hidden="!addMenuOpen">
-				<button class="contacts-add-option custom" :disabled="busy" :tabindex="addMenuOpen ? 0 : -1" aria-label="新建自定义角色" @click="createCharacter">
-					<view class="contacts-add-option-icon"><PersonAdd :size="19" /></view><text>新建角色</text>
-				</button>
-				<button class="contacts-add-option gallery" :disabled="busy" :tabindex="addMenuOpen ? 0 : -1" aria-label="从相册导入角色卡" @click="importCharacterFromGallery">
-					<view class="contacts-add-option-icon"><Image :size="19" /></view><text>相册导入</text>
-				</button>
-				<button class="contacts-add-option file" :disabled="busy" :tabindex="addMenuOpen ? 0 : -1" aria-label="从文件管理器导入角色卡" @click="importCharacterFromFile">
-					<view class="contacts-add-option-icon"><FileText :size="19" /></view><text>文件导入</text>
-				</button>
-			</view>
-			<button class="contacts-add-toggle" :class="{ active: addMenuOpen }" :disabled="busy" aria-controls="contacts-add-menu" :aria-expanded="addMenuOpen" :aria-label="addMenuOpen ? '收起添加菜单' : '添加角色'" @click="toggleAddMenu">
-				<Plus class="contacts-add-toggle-icon" :size="21" /><text>添加</text>
-			</button>
-		</view>
+		<view v-if="addMenuOpen" class="contacts-add-scrim" aria-hidden="true" @click="closeAddMenu" />
 	</view>
 </template>
 
 <script>
-	import { ChevronRight, Contact, FileText, Image, PersonAdd, Plus, Search, Tune, X } from './app-icons.js'
+	import { ChevronDown, ChevronRight, Contact, FileText, Image, Import, PersonAdd, Plus, Search, Tune, X } from './app-icons.js'
+	import MainPageHeading from './main-page-heading.vue'
 	import ProviderLogo from './provider-logo.js'
 
 	export default {
-		components: { ChevronRight, Contact, FileText, Image, PersonAdd, Plus, ProviderLogo, Search, Tune, X },
+		components: { ChevronDown, ChevronRight, Contact, FileText, Image, Import, MainPageHeading, PersonAdd, Plus, ProviderLogo, Search, Tune, X },
 		props: {
 			items: { type: Array, default: () => [] },
 			query: { type: String, default: '' },
@@ -94,10 +96,16 @@
 				this.closeAddMenu()
 				this.$emit('import-character-file')
 			},
+			openCharacterMaker() {
+				this.closeAddMenu()
+				this.$emit('open-character-maker')
+			},
 			characterMeta(character) {
+				const tags = Array.isArray(character.tags) ? character.tags.map(tag => String(tag).trim()).filter(Boolean).slice(0, 2) : []
+				if (tags.length) return tags.join(' · ')
 				const entries = character.card?.data?.character_book?.entries?.length || 0
 				const creator = String(character.creator || '').trim()
-				return [entries ? `世界书 ${entries} 条` : '无内嵌世界书', creator].filter(Boolean).join(' · ')
+				return [creator, entries ? `世界书 ${entries} 条` : ''].filter(Boolean).join(' · ') || '等待与你相遇'
 			}
 		}
 	}
@@ -109,390 +117,56 @@
 		display: flex;
 		flex: 1;
 		min-height: 0;
-		flex-direction: column;
-		padding: 0 16px;
-		background: #f3f3f5;
-	}
-
-	.contacts-header {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		height: 64px;
-		padding-top: 6px;
-	}
-
-	.contacts-title {
-		font-size: 26px;
-		font-weight: 650;
-		color: #1f2023;
-	}
-
-	.contacts-sort,
-	.contacts-world-books,
-	.contacts-search button {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 40px;
-		height: 40px;
-		border-radius: 50%;
-		color: #26272b;
-	}
-
-	.contacts-sort.active {
-		color: #d43bc2;
-		background: #fff0fb;
-	}
-
-	.contacts-header-actions {
-		display: flex;
-		align-items: center;
-		gap: 4px;
-	}
-
-	.contacts-world-books {
-		position: relative;
-		overflow: visible;
-	}
-
-	.contacts-world-book-icon {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 24px;
-		height: 24px;
-		pointer-events: none;
-		transform: translate(-2px, 2px);
-	}
-
-	.contacts-world-books.active {
-		color: #d43bc2;
-	}
-
-	.contacts-world-book-count {
-		position: absolute;
-		top: -1px;
-		right: -1px;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		box-sizing: border-box;
-		min-width: 15px;
-		height: 15px;
-		padding: 0 3px;
-		border: 2px solid #f3f3f5;
-		border-radius: 8px;
-		background: #d43bc2;
-		color: #fff;
-		font-size: 9px;
-		font-weight: 700;
-		line-height: 11px;
-		pointer-events: none;
-		white-space: nowrap;
-		z-index: 1;
-	}
-
-	.contacts-search {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		height: 54px;
-		padding: 0 15px;
-		border: 1px solid #e9e7eb;
-		border-radius: 8px;
-		background: #fff;
-		box-shadow: 0 3px 12px rgba(43, 39, 47, 0.06);
-		color: #8b8c91;
-	}
-
-	.contacts-search input {
 		min-width: 0;
-		font-size: 15px;
-		color: #222328;
-		flex: 1;
-	}
-
-	.contacts-search button {
-		width: 30px;
-		height: 30px;
-	}
-
-	.contacts-character-maker {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		gap: 4px;
-		width: 100%;
-		height: 34px;
-		margin-top: 4px;
-		background: transparent;
-		color: #85838a;
-		font-size: 12px;
-		line-height: 18px;
-	}
-
-	.contacts-character-maker-link {
-		font-weight: 650;
-		color: #c03db3;
-		text-decoration: underline;
-		text-underline-offset: 2px;
-	}
-
-	.contacts-character-maker .app-icon {
-		color: #c03db3;
-		flex: 0 0 auto;
-	}
-
-	.contacts-character-maker:active {
-		opacity: 0.68;
-	}
-
-	.contacts-scroll {
-		min-height: 0;
-		padding-top: 18px;
-		flex: 1;
-	}
-
-	.contacts-list {
-		overflow: hidden;
-		border: 1px solid #ebe9ed;
-		border-radius: 8px;
-		background: #fff;
-		box-shadow: 0 4px 16px rgba(43, 39, 47, 0.05);
-	}
-
-	.contacts-list-label {
-		display: block;
-		padding: 16px 18px 8px;
-		font-size: 13px;
-		font-weight: 600;
-		color: #c03db3;
-	}
-
-	.contact-row {
-		display: flex;
-		align-items: center;
-		gap: 13px;
-		width: 100%;
-		min-height: 76px;
-		padding: 8px 15px;
-		text-align: left;
-		color: #b0adb3;
-		content-visibility: auto;
-		contain-intrinsic-size: 76px;
-	}
-
-	.contact-row:active {
-		background: #faf7fb;
-	}
-
-	.contact-avatar {
-		display: block;
-		width: 56px;
-		height: 56px;
-		overflow: hidden;
-		border-radius: 50%;
-		background: #ececf0;
-		flex: 0 0 auto;
-	}
-
-	.contact-copy {
-		display: flex;
-		min-width: 0;
-		flex: 1;
 		flex-direction: column;
-		gap: 5px;
+		padding: 0;
+		background: var(--paper-bg, #f8f7f4);
+		color: var(--paper-ink, #25232a);
 	}
 
-	.contact-name,
-	.contact-meta {
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.contact-name {
-		font-size: 16px;
-		font-weight: 620;
-		color: #24252a;
-	}
-
-	.contact-meta {
-		font-size: 12px;
-		color: #98999e;
-	}
-
-	.contacts-empty {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		min-height: 260px;
-		flex-direction: column;
-		gap: 12px;
-		color: #999aa0;
-		font-size: 14px;
-	}
-
-	.contacts-tail {
-		height: 250px;
-	}
-
-	.contacts-add-scrim {
-		position: absolute;
-		top: 0;
-		right: 0;
-		bottom: 0;
-		left: 0;
-		z-index: 5;
-		background: rgba(31, 28, 34, 0.1);
-		opacity: 0;
-		pointer-events: none;
-		transition: opacity 180ms ease;
-	}
-
-	.contacts-add-scrim.visible {
-		opacity: 1;
-		pointer-events: auto;
-	}
-
-	.contacts-add-control {
-		position: absolute;
-		right: 20px;
-		bottom: 92px;
-		z-index: 6;
-		display: flex;
-		align-items: flex-end;
-		flex-direction: column;
-		gap: 10px;
-	}
-
-	.contacts-add-menu {
-		display: flex;
-		align-items: flex-end;
-		flex-direction: column;
-		gap: 8px;
-		opacity: 0;
-		transform: translateY(14px) scale(0.98);
-		transform-origin: right bottom;
-		pointer-events: none;
-		transition: opacity 160ms ease, transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
-	}
-
-	.contacts-add-control.open .contacts-add-menu {
-		opacity: 1;
-		transform: translateY(0) scale(1);
-		pointer-events: auto;
-	}
-
-	.contacts-add-option {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		width: 148px;
-		height: 48px;
-		padding: 0 12px;
-		border: 1px solid #e4e1e6;
-		border-radius: 8px;
-		background: #fff;
-		color: #2d2e33;
-		font-size: 13px;
-		font-weight: 650;
-		box-shadow: 0 10px 26px rgba(39, 34, 43, 0.15);
-		opacity: 0;
-		transform: translateY(10px);
-		transition: opacity 150ms ease, transform 220ms cubic-bezier(0.22, 1, 0.36, 1), background 150ms ease;
-	}
-
-	.contacts-add-control.open .contacts-add-option {
-		opacity: 1;
-		transform: translateY(0);
-	}
-
-	.contacts-add-control.open .contacts-add-option:nth-child(1) {
-		transition-delay: 20ms;
-	}
-
-	.contacts-add-control.open .contacts-add-option:nth-child(2) {
-		transition-delay: 55ms;
-	}
-
-	.contacts-add-control.open .contacts-add-option:nth-child(3) {
-		transition-delay: 90ms;
-	}
-
-	.contacts-add-option-icon {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 32px;
-		height: 32px;
-		border-radius: 8px;
-		flex: 0 0 auto;
-	}
-
-	.contacts-add-option.custom .contacts-add-option-icon {
-		background: #fff0fb;
-		color: #c733b5;
-	}
-
-	.contacts-add-option.gallery .contacts-add-option-icon {
-		background: #edf6ff;
-		color: #3185cc;
-	}
-
-	.contacts-add-option.file .contacts-add-option-icon {
-		background: #fff5e9;
-		color: #d77928;
-	}
-
-	.contacts-add-toggle {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		gap: 8px;
-		width: 104px;
-		height: 50px;
-		border: 1px solid rgba(255, 255, 255, 0.35);
-		border-radius: 8px;
-		background: #d43bc2;
-		color: #fff;
-		font-size: 14px;
-		font-weight: 700;
-		box-shadow: 0 10px 26px rgba(188, 45, 173, 0.28);
-		transition: transform 180ms ease, background 180ms ease, box-shadow 180ms ease;
-	}
-
-	.contacts-add-toggle-icon {
-		transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
-	}
-
-	.contacts-add-toggle.active {
-		background: #292a2f;
-		box-shadow: 0 10px 26px rgba(32, 31, 36, 0.24);
-	}
-
-	.contacts-add-toggle.active .contacts-add-toggle-icon {
-		transform: rotate(45deg);
-	}
-
-	.contacts-add-option:active,
-	.contacts-add-toggle:active {
-		transform: scale(0.96);
-	}
-
-	.contacts-add-option:disabled,
-	.contacts-add-toggle:disabled {
-		opacity: 0.58;
-	}
-
-	@media (prefers-reduced-motion: reduce) {
-		.contacts-add-scrim,
-		.contacts-add-menu,
-		.contacts-add-option,
-		.contacts-add-toggle,
-		.contacts-add-toggle-icon {
-			transition: none;
-		}
-	}
+	.contacts-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+	.contacts-page-content { padding: 0 20px calc(88px + env(safe-area-inset-bottom)); }
+	.contacts-page-content :deep(.paper-heading) { margin-right: -20px; margin-left: -20px; }
+	.contacts-page-content :deep(.paper-heading-actions) { z-index: 21; }
+	.contacts-search { margin-bottom: 20px; }
+	.contacts-search input { min-width: 0; flex: 1; color: var(--paper-ink, #25232a); font-size: 14px; }
+	.contacts-search button { display: flex; align-items: center; justify-content: center; width: 32px; height: 36px; color: var(--paper-muted, #82798b); }
+	.contacts-section-heading { margin-bottom: 12px; }
+	.contacts-sort { display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-height: 44px; margin: -12px 0; padding: 0 0 0 8px; color: var(--paper-muted, #82798b); font-size: 12px; font-weight: 400; }
+	.contacts-sort.active { color: var(--paper-accent, #7850a0); }
+	.contacts-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px; row-gap: 20px; }
+	.contact-row { display: flex; min-width: 0; flex-direction: column; padding: 0; border-radius: 10px; background: transparent; text-align: left; content-visibility: auto; contain-intrinsic-size: auto 194px; }
+	.contact-avatar { display: block; width: 100%; height: auto; aspect-ratio: 4 / 3; overflow: hidden; border-radius: 10px; background: var(--paper-soft, #eee8f4); flex: 0 0 auto; }
+	.contact-copy { display: flex; width: 100%; min-width: 0; padding: 9px 1px 0; flex-direction: column; gap: 4px; }
+	.contact-name, .contact-meta { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.contact-name { color: var(--paper-ink, #25232a); font-size: 16px; font-weight: 650; line-height: 23px; }
+	.contact-meta { color: var(--paper-muted, #82798b); font-size: 12px; line-height: 18px; }
+	.contacts-world-books { display: flex; align-items: center; gap: 13px; width: 100%; margin-top: 18px; padding: 10px 3px; border-top: 1px solid var(--paper-line, #e7e2e9); border-bottom: 1px solid var(--paper-line, #e7e2e9); border-radius: 0; overflow: visible; color: var(--paper-muted, #82798b); text-align: left; }
+	.contacts-world-book-icon, .contacts-empty-icon { display: flex; align-items: center; justify-content: center; width: 52px; height: 52px; border-radius: 50%; background: var(--paper-soft, #eee8f4); color: var(--paper-accent, #7850a0); flex: 0 0 auto; }
+	.contacts-world-book-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 5px; }
+	.contacts-world-book-title { display: flex; align-items: center; gap: 8px; color: var(--paper-ink, #25232a); font-size: 16px; font-weight: 600; }
+	.contacts-world-book-count { color: var(--paper-accent, #7850a0); font-size: 11px; font-weight: 400; pointer-events: none; }
+	.contacts-world-book-description { font-size: 12px; line-height: 18px; }
+	.contacts-import-link, .contacts-empty-action { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; color: var(--paper-accent, #7850a0); font-size: 13px; }
+	.contacts-import-link { width: 100%; margin-top: 4px; }
+	.contacts-empty { display: flex; align-items: center; justify-content: center; min-height: 240px; padding: 16px 8px; flex-direction: column; gap: 10px; text-align: center; }
+	.contacts-empty-icon { width: 68px; height: 68px; margin-bottom: 6px; }
+	.contacts-empty-title { font-size: 15px; font-weight: 550; }
+	.contacts-empty-copy { color: var(--paper-muted, #82798b); font-size: 12px; line-height: 20px; }
+	.contacts-empty-action { padding: 0 15px; }
+	.contacts-add-scrim { position: absolute; inset: 0; z-index: 20; background: transparent; }
+	.contacts-add-control { position: relative; }
+	.contacts-add-control.open { z-index: 21; }
+	.contacts-add-toggle { gap: 5px; }
+	.contacts-add-toggle-icon { transition: transform 150ms ease; }
+	.contacts-add-toggle.active .contacts-add-toggle-icon { transform: rotate(45deg); }
+	.contacts-add-menu { position: absolute; top: calc(100% + 8px); right: 0; width: 176px; padding: 6px; border: 1px solid var(--paper-line, #e7e2e9); border-radius: 14px; background: var(--paper-bg, #f8f7f4); box-shadow: 0 9px 28px rgba(42, 31, 55, 0.12); animation: contacts-menu-enter 150ms ease both; }
+	.contacts-add-option { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 0 10px; border-radius: 8px; color: var(--paper-ink, #25232a); font-size: 13px; text-align: left; }
+	.contacts-add-option :deep(.app-icon) { color: var(--paper-accent, #7850a0); flex: 0 0 auto; }
+	.contacts-character-maker { margin-top: 4px; border-top: 1px solid var(--paper-line, #e7e2e9); border-radius: 0 0 8px 8px; }
+	.contacts-add-option:active, .contact-row:active { background: var(--paper-soft, #eee8f4); }
+	.contacts-screen button:disabled { opacity: 0.55; }
+	.contacts-screen button:focus-visible { outline: 2px solid var(--paper-accent, #7850a0); outline-offset: 3px; }
+	@keyframes contacts-menu-enter { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+	@media (prefers-reduced-motion: reduce) { .contacts-add-menu { animation: none; } .contacts-add-toggle-icon { transition: none; } }
 </style>

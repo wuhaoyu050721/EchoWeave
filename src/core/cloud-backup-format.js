@@ -1,6 +1,7 @@
 import { createRuntimeId } from './runtime-id.js'
 import { groupParticipantKey, groupParticipantKind } from './group-chat.js'
 import { hasValidImageAttachmentSource } from './image-output.js'
+import { portableSettings } from './local-settings.js'
 
 function cloneJson(value) {
   return JSON.parse(JSON.stringify(value))
@@ -214,7 +215,7 @@ export async function createCloudBackupPayload(data, vault, now = new Date()) {
     })
   }
 
-  const settings = cloneJson(normalized.settings)
+  const settings = cloneJson(portableSettings(normalized.settings))
   if (settings.systemPrompt) {
     const encryptedValue = settings.systemPrompt.encryptedValue
     settings.systemPrompt = {
@@ -335,7 +336,7 @@ export async function prepareCloudRestore(payload, {
     id: characterAssetIds.get(asset.id),
     characterId: characterIds.get(asset.characterId)
   }))
-  const settings = cloneJson(normalized.settings)
+  const settings = cloneJson(portableSettings(normalized.settings))
   if (settings.systemPrompt) {
     const value = settings.systemPrompt.value
     settings.systemPrompt = {

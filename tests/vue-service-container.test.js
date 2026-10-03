@@ -1,3 +1,4 @@
+import { readMainPageSource } from './helpers/read-main-page.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { isProxy, reactive } from 'vue'
@@ -24,7 +25,7 @@ test('keeps service class instances outside Vue reactive proxies', () => {
 })
 
 test('keeps the workspace manager outside the main page reactive state', async () => {
-  const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+  const source = await readMainPageSource()
 
   assert.match(
     source,

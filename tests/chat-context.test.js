@@ -129,3 +129,15 @@ test('trims old image messages as a whole but always keeps the newest attached m
   assert.equal(result.length, 1)
   assert.equal(result[0].attachments[0].id, 'a2')
 })
+
+test('accepts imported messages whose optional attachmentIds field is null', () => {
+  assert.deepEqual(buildChatContext({
+    messages: [
+      { ...message('1', 'user', 'question'), attachmentIds: null },
+      { ...message('2', 'assistant', 'answer'), attachmentIds: null }
+    ]
+  }), [
+    { role: 'user', content: 'question' },
+    { role: 'assistant', content: 'answer' }
+  ])
+})

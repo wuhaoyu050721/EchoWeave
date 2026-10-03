@@ -20,7 +20,9 @@ function contextMessageContent(message) {
   return extractAssistantStatus(content, { hideIncomplete: true }).content
 }
 
-export function buildChatContext({
+// Select before loading large attachment payloads. When the system prompt leaves
+// room, ignoring attachment costs yields a superset with the same newest end.
+export function selectChatContextMessages({
   messages = [],
   attachments = [],
   systemPrompt = '',
@@ -61,18 +63,28 @@ export function buildChatContext({
       break
     }
     if (exceedsBudget && selected.length === 0 && characterBudget > prompt.length) {
-      selected.push({ ...message, content })
+      selected.push(message)
       break
     }
     if (!exceedsBudget) {
-      selected.push({ ...message, content })
+      selected.push(message)
       usedCharacters += messageCost
     }
   }
 
-  const context = selected.reverse().map(({ id, role, content }) => {
-    const result = { role, content: String(content) }
-    const related = messageAttachments.get(id) ?? []
+  return selected.reverse()
+}
+
+export function buildChatContext(options = {}) {
+  const { attachments = [], systemPrompt = '', postHistoryPrompt = '', userTurnPrompt = '' } = options
+  const prompt = String(systemPrompt ?? '').trim()
+  const trailingPrompt = String(postHistoryPrompt ?? '').trim()
+  const turnPrompt = String(userTurnPrompt ?? '').trim()
+  const attachmentsById = new Map(attachments.map(attachment => [attachment.id, attachment]))
+  const context = selectChatContextMessages(options).map(message => {
+    const { role } = message
+    const result = { role, content: contextMessageContent(message) }
+    const related = (message.attachmentIds ?? []).map(id => attachmentsById.get(id)).filter(Boolean)
     if (related.length) result.attachments = related
     return result
   })

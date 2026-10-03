@@ -12,7 +12,7 @@
 		<view class="story-reader-top-chrome" data-testid="story-reader-top-chrome" :aria-hidden="!readerChromeShown">
 			<view class="story-reader-toolbar">
 				<button class="story-toolbar-button" data-testid="back-to-conversations" aria-label="返回故事列表" @click="leaveStory"><ArrowLeft :size="25" /></button>
-				<button class="story-book-identity" :disabled="generating" aria-label="选择故事模型" @click="$emit('toggle-model')">
+				<button class="story-book-identity" :disabled="generating" :aria-expanded="modelMenuOpen" aria-label="选择故事模型" @click="$emit('toggle-model')">
 					<ProviderLogo class="story-book-avatar" :src="avatarSource" :alt="readerTitle" mode="aspectFill" />
 					<view><text class="story-book-title">{{ readerTitle }}</text><text class="story-book-model">{{ modelName }}</text></view>
 				</button>
@@ -81,7 +81,7 @@
 			</button>
 			<scroll-view v-if="bookmarkItems.length" class="story-bookmark-list" scroll-y>
 				<view v-for="bookmark in bookmarkItems" :key="bookmark.id" class="story-bookmark-row">
-					<button class="story-bookmark-open" :disabled="bookmark.pageIndex < 0" :aria-label="`跳转书签 ${bookmark.locationLabel}`" @click="openBookmark(bookmark)">
+					<button class="story-bookmark-open" :disabled="loading || (generating && bookmark.pageIndex < 0)" :aria-label="`跳转书签 ${bookmark.locationLabel}`" @click="openBookmark(bookmark)">
 						<view class="story-bookmark-meta"><text>{{ bookmark.locationLabel }}</text><text>{{ formatBookmarkTime(bookmark.createdAt) }}</text></view>
 						<text class="story-bookmark-excerpt">{{ bookmark.excerpt || '故事书签' }}</text>
 					</button>
@@ -113,12 +113,14 @@
 							@copy="$emit('copy', $event)"
 							@feedback="$emit('feedback', $event)"
 							@retry="$emit('retry', $event)"
+							@response-details="$emit('response-details', $event)"
 							@continue="continueStory"
 							@stop="$emit('stop')"
 							@preview-image="$emit('preview-image', $event)"
 							@preview-text="$emit('preview-text', $event)"
 						/>
 						<view v-if="historyTrimmed && currentPageIndex === pageCount - 1" class="story-history-command is-latest">
+							<button :disabled="loading || generating" @click="loadNewerContent"><ChevronRight :size="14" /><text>{{ loading ? '加载中' : '加载后续内容' }}</text></button>
 							<button :disabled="loading || generating" @click="$emit('reload-latest')"><ChevronRight :size="14" /><text>返回最新内容</text></button>
 						</view>
 						</view>
@@ -126,7 +128,7 @@
 					<view class="story-page-controls">
 						<button :disabled="currentPageIndex <= 0" aria-label="上一页" @click="previousPage"><ChevronRight class="story-prev-icon" :size="22" /></button>
 						<text class="story-reader-page-counter" data-testid="story-page-counter">{{ currentPageNumber }} / {{ pageCount }}</text>
-						<button :disabled="currentPageIndex >= pageCount - 1" aria-label="下一页" @click="nextPage"><ChevronRight :size="22" /></button>
+						<button :disabled="currentPageIndex >= pageCount - 1 && (!historyTrimmed || loading || generating)" aria-label="下一页" @click="nextPage"><ChevronRight :size="22" /></button>
 					</view>
 				</view>
 			</template>
@@ -145,15 +147,17 @@
 						@copy="$emit('copy', $event)"
 						@feedback="$emit('feedback', $event)"
 						@retry="$emit('retry', $event)"
+						@response-details="$emit('response-details', $event)"
 						@continue="continueStory"
 						@stop="$emit('stop')"
 						@preview-image="$emit('preview-image', $event)"
 						@preview-text="$emit('preview-text', $event)"
 					/>
 					<view v-if="historyTrimmed" class="story-history-command is-latest">
+						<button :disabled="loading || generating" @click="loadNewerContent"><ChevronRight :size="14" /><text>{{ loading ? '加载中' : '加载后续内容' }}</text></button>
 						<button :disabled="loading || generating" @click="$emit('reload-latest')"><ChevronRight :size="14" /><text>返回最新内容</text></button>
 					</view>
-					<view id="story-scroll-end" class="story-scroll-tail" aria-hidden="true" />
+					<view id="story-scroll-end" class="story-scroll-tail" :style="scrollTailStyle" aria-hidden="true" />
 				</view>
 			</scroll-view>
 		</view>
@@ -180,8 +184,8 @@
 				</view>
 			</scroll-view>
 			<view class="story-composer-row">
-				<button class="story-attachment-button" :disabled="generating" aria-label="添加附件" title="添加附件" @click="$emit('toggle-attachments')"><Paperclip :size="24" /></button>
-				<textarea v-model="draftValue" class="story-direction-input" rows="1" maxlength="-1" :style="{ height: `${composerInputHeight}px` }" placeholder="输入事件走向，留空续写" placeholder-style="color:#97939a;font-size:14px" @linechange="resizeComposer" />
+				<button class="story-attachment-button" :disabled="generating" :aria-expanded="attachmentMenuOpen" aria-label="添加附件" title="添加附件" @click="$emit('toggle-attachments')"><Paperclip :size="24" /></button>
+				<textarea v-model="draftValue" class="story-direction-input" rows="1" maxlength="-1" title="Enter 换行，Ctrl / ⌘ + Enter 发送事件" :style="{ height: `${composerInputHeight}px` }" placeholder="输入事件走向，留空续写" placeholder-style="color:#97939a;font-size:14px" @focus="$emit('close-menus')" @keydown="$emit('composer-keydown', $event)" @linechange="resizeComposer" />
 				<button class="story-send-button" :disabled="!generating && !canSend" :aria-label="generating ? '停止生成' : '发送事件走向'" @click="submit"><Square v-if="generating" :size="12" fill="currentColor" /><Send v-else :size="19" /></button>
 			</view>
 		</view>
@@ -200,8 +204,8 @@
 	import { formatAttachmentSize } from '../core/attachment-policy.js'
 	import { imageAttachmentSource } from '../core/image-output.js'
 	import {
-		createStoryReaderBookmark, createStoryReaderBlocks, createStoryReaderPosition, normalizeStoryReaderBookmark,
-		normalizeStoryReaderBookmarks, normalizeStoryReaderMode, normalizeStoryReaderPosition, paginateStoryBlocks,
+		createStoryReaderBookmark, createStoryReaderLayoutCache, createStoryReaderPosition, normalizeStoryReaderBookmark,
+		normalizeStoryReaderBookmarks, normalizeStoryReaderMode, normalizeStoryReaderPosition,
 		storyBlockDomId, storyBlockSourceId, storyBlockSourceOffset, storyPageCapacity, storyPageIndexForPosition,
 		storyTextLength
 	} from '../core/story-reader.js'
@@ -244,14 +248,17 @@
 			attachmentActions: { type: Array, default: () => [] }
 		},
 		emits: [
-			'back', 'choose-attachment', 'close-menus', 'continue', 'copy', 'feedback', 'load-earlier', 'manage',
-			'open-status', 'preview-image', 'preview-text', 'reload-latest', 'remove-attachment', 'retry',
+			'back', 'choose-attachment', 'close-menus', 'composer-keydown', 'continue', 'copy', 'feedback', 'load-earlier', 'load-newer', 'load-position', 'manage',
+			'open-status', 'preview-image', 'preview-text', 'reload-latest', 'remove-attachment', 'retry', 'response-details',
 			'select-provider', 'stop', 'submit', 'toggle-attachments', 'toggle-model', 'update:bookmarks', 'update:mode',
 			'update:modelValue', 'update:readerPosition'
 		],
 		data() {
 			return {
 				iconMap,
+				layoutCache: markRaw(createStoryReaderLayoutCache()),
+				requestedPosition: null,
+				requestedNextSequence: null,
 				currentPageIndex: 0,
 				initialPagePositioned: false,
 				initialViewportMeasured: false,
@@ -281,9 +288,15 @@
 		computed: {
 			normalizedMode() { return normalizeStoryReaderMode(this.mode) },
 			readerChromeShown() { return this.readerChromeVisible || this.modelMenuOpen || this.attachmentMenuOpen || this.bookmarkPanelOpen },
+			scrollTailStyle() {
+				if (!this.readerChromeShown) return null
+				const attachmentHeight = this.pendingAttachments.length || this.attachmentProcessing ? 60 : 0
+				return { height: `calc(${this.composerInputHeight + attachmentHeight + 36}px + env(safe-area-inset-bottom))` }
+			},
 			readerTitle() { return this.providerName || this.conversation?.title || '未命名故事' },
-			storyBlocks() { return createStoryReaderBlocks(this.messages) },
-			storyPages() { return paginateStoryBlocks(this.storyBlocks, { capacity: this.pageCapacity }) },
+			storyLayout() { return this.layoutCache.update(this.messages, { capacity: this.pageCapacity }) },
+			storyBlocks() { return this.storyLayout.blocks },
+			storyPages() { return this.storyLayout.pages },
 			pageCount() { return Math.max(1, this.storyPages.length) },
 			currentPageNumber() { return Math.min(this.pageCount, this.currentPageIndex + 1) },
 			currentPage() { return this.storyPages[Math.min(this.currentPageIndex, this.pageCount - 1)] || { blocks: [] } },
@@ -296,7 +309,7 @@
 					return {
 						...bookmark,
 						pageIndex,
-						locationLabel: pageIndex >= 0 ? `第 ${pageIndex + 1} 页` : '较早内容'
+						locationLabel: pageIndex >= 0 ? `第 ${pageIndex + 1} 页` : '待加载内容'
 					}
 				})
 			},
@@ -322,6 +335,24 @@
 		},
 		watch: {
 			storyPages(nextPages, previousPages) {
+				if (this.requestedNextSequence !== null) {
+					const nextMessageIds = new Set(this.messages
+						.filter(message => Number(message.sequence) > this.requestedNextSequence)
+						.map(message => message.id))
+					const nextBlock = this.storyBlocks.find(block => nextMessageIds.has(block.messageId))
+					if (nextBlock) {
+						this.requestedPosition = this.positionForBlock(nextBlock)
+						this.requestedNextSequence = null
+					}
+				}
+				if (this.requestedPosition && storyPageIndexForPosition(nextPages, this.requestedPosition) >= 0) {
+					const position = this.requestedPosition
+					this.requestedPosition = null
+					this.rememberReadingPosition(position)
+					this.restorePagePosition(position, nextPages)
+					if (this.normalizedMode === 'scroll') this.scheduleScrollPositionRestore(position)
+					return
+				}
 				const nextHasContent = Boolean(nextPages?.some(page => page.blocks?.length))
 				const previousHasContent = Boolean(previousPages?.some(page => page.blocks?.length))
 				if (!nextHasContent) {
@@ -347,11 +378,18 @@
 				immediate: true,
 				handler(value) {
 					const position = this.positionForConversation(value)
+					if (position && this.requestedPosition) this.requestedPosition = position
 					if (!position || this.positionsEqual(position, this.readingPosition)) return
 					this.readingPosition = position
 					if (!this.storyBlocks.length) return
 					if (this.normalizedMode === 'page') this.restorePagePosition(position)
 					else this.scheduleScrollPositionRestore(position)
+				}
+			},
+			loading(value) {
+				if (!value) {
+					this.requestedPosition = null
+					this.requestedNextSequence = null
 				}
 			},
 			mode(value) {
@@ -362,6 +400,8 @@
 				else this.scheduleScrollPositionRestore(this.readingPosition)
 			},
 			'conversation.id'() {
+				this.requestedPosition = null
+				this.requestedNextSequence = null
 				clearTimeout(this.scrollPositionTimer)
 				this.scrollPositionTimer = null
 				this.cancelScrollPositionRestore()
@@ -480,8 +520,14 @@
 			openBookmark(value) {
 				const bookmark = normalizeStoryReaderBookmark(value, this.conversation?.id)
 				const pageIndex = bookmark ? storyPageIndexForPosition(this.storyPages, bookmark) : -1
-				if (!bookmark || pageIndex < 0) return
+				if (!bookmark || this.loading || (this.generating && pageIndex < 0)) return
 				this.closeBookmarkPanel()
+				if (pageIndex < 0) {
+					this.requestedPosition = bookmark
+					this.$emit('load-position', bookmark)
+					return
+				}
+				this.requestedPosition = null
 				if (this.normalizedMode === 'page') {
 					this.changePage(pageIndex, { position: bookmark })
 					return
@@ -558,7 +604,15 @@
 				})
 			},
 			previousPage() { this.changePage(this.currentPageIndex - 1) },
-			nextPage() { this.changePage(this.currentPageIndex + 1) },
+			nextPage() {
+				if (this.currentPageIndex >= this.pageCount - 1 && this.historyTrimmed) this.loadNewerContent()
+				else this.changePage(this.currentPageIndex + 1)
+			},
+			loadNewerContent() {
+				if (this.loading || this.generating || !this.historyTrimmed) return
+				this.requestedNextSequence = Number(this.messages[this.messages.length - 1]?.sequence) || 0
+				this.$emit('load-newer')
+			},
 			storyScrollTarget() {
 				const ref = Array.isArray(this.$refs.storyScroll) ? this.$refs.storyScroll[0] : this.$refs.storyScroll
 				return ref?.$el || ref || null
@@ -1480,6 +1534,7 @@
 
 	.story-history-command.is-latest {
 		margin-top: 8px;
+		gap: 8px;
 	}
 
 	.story-history-command button {

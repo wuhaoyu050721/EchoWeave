@@ -1,3 +1,4 @@
+import { readMainPageSource } from './helpers/read-main-page.js'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
@@ -19,7 +20,7 @@ test('shared dialogs render polished action, prompt, and confirmation states', a
 })
 
 test('dialog promises settle through custom controls and Android back closes the top layer', async () => {
-  const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+  const source = await readMainPageSource()
   const backBlock = source.slice(source.indexOf('handleAppBack()'), source.indexOf('toggleConversationSearch()'))
   const dialogBlock = source.slice(source.indexOf('chooseConversationAction(conversation)'), source.indexOf('async manageConversation(conversation)'))
 

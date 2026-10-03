@@ -2,6 +2,7 @@ import { GeminiSseParser } from '../core/gemini-sse-parser.js'
 import { MAX_GENERATED_IMAGE_OUTPUTS, extractImageOutputs } from '../core/image-output.js'
 import { resolveChatRequestTimeout } from '../core/model-request-timeout.js'
 import { buildGeminiEndpoint, buildGeminiModelEndpoint } from '../core/provider-url.js'
+import { chatResponseError, createChatResponseObserver } from '../core/chat-response-diagnostics.js'
 
 const IMAGE_GENERATION_TIMEOUT = 5 * 60 * 1000
 
@@ -150,78 +151,104 @@ export class GeminiProvider {
   }
 
   async streamChat(profile, request, handlers = {}) {
-    if (request.stream === false) {
+    const observer = createChatResponseObserver(this.protocolType, request.stream !== false, handlers)
+    try {
+      if (request.stream === false) {
+        const response = await this.transport.request({
+          url: buildGeminiModelEndpoint(profile.baseUrl, request.model, 'generateContent'),
+          method: 'POST',
+          headers: buildHeaders(profile.apiKey),
+          body: JSON.stringify(serializeGeminiMessages(request.messages)),
+          signal: request.signal,
+          onHeaders: observer.response,
+          timeout: resolveChatRequestTimeout(profile)
+        })
+        observer.response(response)
+        observer.returnedText(response.text)
+        let payload
+        try {
+          payload = JSON.parse(response.text)
+        } catch {
+          throw chatResponseError('invalid_sse_response', 'Gemini 对话响应不是有效 JSON', observer.state)
+        }
+        observer.state.responseFormat = 'json'
+        observer.payload(payload)
+        if (payload?.error) throw chatResponseError('upstream_response_error', 'Gemini 接口返回了错误，请检查接口状态或输出限制', observer.state)
+
+        const content = responseTextParts(payload).join('')
+        if (content) observer.delta(content, payload)
+        const finishReason = (Array.isArray(payload?.candidates) ? payload.candidates : [])
+          .find(candidate => candidate?.finishReason)?.finishReason ?? null
+        if (finishReason) observer.finishReason(finishReason, payload)
+        const images = extractImageOutputs(payload, { baseUrl: profile.baseUrl })
+        images.forEach(image => handlers.onImage?.(image, payload))
+        observer.done()
+        observer.assertContent(images)
+        return { finishReason, images, responseDiagnostics: observer.snapshot() }
+      }
+
+      let finishReason = null
+      let parseError = null
+      const images = []
+      const imageSources = new Set()
+      const addImage = (image) => {
+        const source = image?.dataUrl || image?.sourceUrl
+        if (!source || imageSources.has(source) || images.length >= MAX_GENERATED_IMAGE_OUTPUTS) return
+        imageSources.add(source)
+        images.push(image)
+        handlers.onImage?.(image)
+      }
+      const parser = new GeminiSseParser({
+        imageBaseUrl: profile.baseUrl,
+        onEvent: observer.event,
+        onPayload: observer.payload,
+        onDelta: observer.delta,
+        onDone: observer.done,
+        onFinishReason: (value, payload) => {
+          finishReason = value
+          observer.finishReason(value, payload)
+        },
+        onError: (error) => {
+          parseError = error
+          handlers.onError?.(error)
+        },
+        onImage: addImage
+      })
+
       const response = await this.transport.request({
-        url: buildGeminiModelEndpoint(profile.baseUrl, request.model, 'generateContent'),
+        url: buildGeminiModelEndpoint(profile.baseUrl, request.model, 'streamGenerateContent', 'alt=sse'),
         method: 'POST',
-        headers: buildHeaders(profile.apiKey),
+        headers: buildHeaders(profile.apiKey, 'text/event-stream'),
         body: JSON.stringify(serializeGeminiMessages(request.messages)),
         signal: request.signal,
-        timeout: resolveChatRequestTimeout(profile)
+        onHeaders: observer.response,
+        timeout: resolveChatRequestTimeout(profile),
+        onChunk: chunk => { observer.chunk(chunk); parser.feed(chunk) }
       })
-      let payload
-      try {
-        payload = JSON.parse(response.text)
-      } catch {
-        throw new Error('Gemini 对话响应不是有效 JSON')
+      observer.response(response)
+      if (!observer.state.chunkCount && typeof response?.text === 'string' && response.text) {
+        observer.returnedText(response.text)
+        parser.feed(new TextEncoder().encode(response.text))
       }
-      if (payload?.error) throw new Error(String(payload.error.message || 'Gemini 请求失败'))
-
-      const content = responseTextParts(payload).join('')
-      if (content) handlers.onDelta?.(content, payload)
-      const finishReason = (Array.isArray(payload?.candidates) ? payload.candidates : [])
-        .find(candidate => candidate?.finishReason)?.finishReason ?? null
-      if (finishReason) handlers.onFinishReason?.(finishReason, payload)
-      const images = extractImageOutputs(payload, { baseUrl: profile.baseUrl })
-      images.forEach(image => handlers.onImage?.(image, payload))
-      handlers.onDone?.()
-      return { finishReason, images }
+      parser.finish()
+      if (parseError) throw parseError
+      const fallback = observer.fallbackPayload()
+      if (fallback !== null) {
+        for (const payload of Array.isArray(fallback) ? fallback : [fallback]) {
+          observer.payload(payload)
+          if (payload?.error) throw chatResponseError('upstream_response_error', 'Gemini 接口返回了错误，请检查接口状态或输出限制', observer.state)
+          const content = responseTextParts(payload).join('')
+          if (content) observer.delta(content, payload)
+          const reason = payload?.candidates?.find(candidate => candidate?.finishReason)?.finishReason
+          if (reason) { finishReason = reason; observer.finishReason(reason, payload) }
+          extractImageOutputs(payload, { baseUrl: profile.baseUrl }).forEach(addImage)
+        }
+      }
+      observer.assertContent(images)
+      return { finishReason, images, responseDiagnostics: observer.snapshot() }
+    } catch (error) {
+      throw observer.attachError(error)
     }
-
-    let finishReason = null
-    let parseError = null
-    let eventCount = 0
-    const images = []
-    const imageSources = new Set()
-    const addImage = (image) => {
-      const source = image?.dataUrl || image?.sourceUrl
-      if (!source || imageSources.has(source) || images.length >= MAX_GENERATED_IMAGE_OUTPUTS) return
-      imageSources.add(source)
-      images.push(image)
-      handlers.onImage?.(image)
-    }
-    const parser = new GeminiSseParser({
-      imageBaseUrl: profile.baseUrl,
-      onEvent: (data) => {
-        eventCount += 1
-        handlers.onEvent?.(data)
-      },
-      onDelta: handlers.onDelta,
-      onDone: handlers.onDone,
-      onFinishReason: (value, payload) => {
-        finishReason = value
-        handlers.onFinishReason?.(value, payload)
-      },
-      onError: (error) => {
-        parseError = error
-        handlers.onError?.(error)
-      },
-      onImage: addImage
-    })
-
-    await this.transport.request({
-      url: buildGeminiModelEndpoint(profile.baseUrl, request.model, 'streamGenerateContent', 'alt=sse'),
-      method: 'POST',
-      headers: buildHeaders(profile.apiKey, 'text/event-stream'),
-      body: JSON.stringify(serializeGeminiMessages(request.messages)),
-      signal: request.signal,
-      timeout: resolveChatRequestTimeout(profile),
-      onChunk: chunk => parser.feed(chunk)
-    })
-    parser.finish()
-    if (parseError) throw parseError
-    if (!eventCount) throw new Error('Gemini 流式响应不包含有效 SSE 事件')
-    return { finishReason, images }
   }
 
   async generateImage(profile, request = {}, handlers = {}) {

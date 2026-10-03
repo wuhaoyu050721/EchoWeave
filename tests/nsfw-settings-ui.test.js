@@ -1,8 +1,9 @@
+import { readMainPageSource } from './helpers/read-main-page.js'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
-const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+const source = await readMainPageSource()
 
 test('settings exposes a persistent NSFW second-level toggle that defaults off', () => {
   assert.match(source, /data-testid="nsfw-settings-entry"[^>]*@click="openNsfwSettings\(ui\)"/)

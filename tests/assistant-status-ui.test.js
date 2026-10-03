@@ -1,9 +1,10 @@
+import { readMainPageSource } from './helpers/read-main-page.js'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 test('chat renders the latest completed assistant state as a clickable status bar', async () => {
-  const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+  const source = await readMainPageSource()
 
   assert.match(source, /v-if="latestAssistantStatus && assistantStatusOverview" class="character-status-bar"/)
   assert.match(source, /latestAssistantStatus\.summary/)
@@ -31,7 +32,7 @@ test('chat renders the latest completed assistant state as a clickable status ba
 })
 
 test('chat derives display content without changing the stored assistant response', async () => {
-  const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+  const source = await readMainPageSource()
   const decorator = source.slice(source.indexOf('decorateChatMessage(message)'), source.indexOf('async openChat(conversationId)'))
 
   assert.match(decorator, /extractStoryMemory\(rawContent, \{ hideIncomplete: message\.status === 'generating' \}\)/)

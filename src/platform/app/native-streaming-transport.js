@@ -110,6 +110,7 @@ export class NativeStreamingTransport {
 
   request({
     url,
+    proxyUrl = '',
     method = 'POST',
     headers = {},
     body = '',
@@ -198,6 +199,7 @@ export class NativeStreamingTransport {
         this.nativeApi.aiChatStreamRequest({
           requestId,
           url: String(url || ''),
+          proxyUrl: String(proxyUrl || ''),
           method: String(method || 'POST'),
           headers: Object.entries(headers).map(([name, value]) => ({ name, value: String(value) })),
           body: String(body ?? ''),

@@ -1,8 +1,9 @@
+import { readMainPageSource } from './helpers/read-main-page.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 
-const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+const source = await readMainPageSource()
 
 test('Android hardware back is wired to layered in-app navigation', () => {
   assert.match(source, /onBackPress\(\)\s*\{\s*return this\.handleAppBack\(\)\s*\}/)

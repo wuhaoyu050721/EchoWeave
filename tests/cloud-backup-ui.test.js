@@ -1,9 +1,10 @@
+import { readMainPageSource } from './helpers/read-main-page.js'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 test('settings exposes account, incremental sync, and encrypted full-backup actions', async () => {
-  const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+  const source = await readMainPageSource()
 
   for (const label of [
     '账号与云端', '用户名', '自动同步', '前台每 3 分钟增量同步',
@@ -44,7 +45,7 @@ test('settings exposes account, incremental sync, and encrypted full-backup acti
 })
 
 test('incremental sync follows foreground and network lifecycle', async () => {
-  const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+  const source = await readMainPageSource()
   const lifecycle = source.slice(source.indexOf('onShow()'), source.indexOf('methods:'))
   const networkListener = source.slice(
     source.indexOf('\n\t\t\tbindNetworkSyncListener() {'),
@@ -58,7 +59,7 @@ test('incremental sync follows foreground and network lifecycle', async () => {
 })
 
 test('waits for an active sync before replacing services or closing a workspace', async () => {
-  const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+  const source = await readMainPageSource()
   const stopHelper = source.slice(
     source.indexOf('async stopCloudActivityAndWait'),
     source.indexOf('\n\t\t\tbindNetworkSyncListener()')
@@ -105,7 +106,7 @@ test('waits for an active sync before replacing services or closing a workspace'
 })
 
 test('manual sync and full backup actions safely reuse the encrypted sync password after restart', async () => {
-  const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+  const source = await readMainPageSource()
   const credentialBlock = source.slice(source.indexOf('async prepareIncrementalSyncCredential'), source.indexOf('async uploadCloudBackup()'))
   const syncBlock = source.slice(source.indexOf('async syncCloudNow()'), source.indexOf('async restoreCloudBackup()'))
   const uploadBlock = source.slice(source.indexOf('async uploadCloudBackup()'), source.indexOf('async toggleAutoBackup()'))

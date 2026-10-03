@@ -1,0 +1,547 @@
+/* Account and transfer sheets. Keep these rules out of chat and confirmation dialogs. */
+.app-shell .cloud-modal-backdrop,
+.app-shell .backup-modal-backdrop {
+	align-items: flex-end;
+	padding: max(20px, var(--status-bar-height, 0px)) 0 0;
+	background: rgba(37, 35, 42, 0.34);
+}
+
+.app-shell .cloud-modal,
+.app-shell .backup-transfer-modal {
+	display: flex;
+	flex-direction: column;
+	width: 100%;
+	max-width: 520px;
+	max-height: 100%;
+	min-height: 0;
+	margin: 0 auto;
+	padding: 0;
+	overflow: hidden;
+	border: 1px solid #e5e0e7;
+	border-bottom: 0;
+	border-radius: 26px 26px 0 0;
+	background: #f8f7f4;
+	box-shadow: 0 -10px 40px rgba(37, 35, 42, 0.12);
+	color: #25232a;
+}
+
+.app-shell .cloud-modal-heading,
+.app-shell .backup-transfer-modal .modal-heading {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	min-height: 90px;
+	padding: 17px 16px 15px 20px;
+	border-bottom: 1px solid #e5e0e7;
+	background: #f8f7f4;
+	flex: 0 0 auto;
+}
+
+.app-shell .cloud-modal-heading .settings-copy,
+.app-shell .backup-transfer-modal .backup-heading-copy {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	min-width: 0;
+	gap: 4px;
+}
+
+.app-shell .cloud-modal-heading .settings-copy > text:first-child,
+.app-shell .backup-transfer-modal .backup-heading-copy > text:first-child {
+	font-size: 22px;
+	line-height: 30px;
+	font-weight: 750;
+	color: #25232a;
+}
+
+.app-shell .cloud-modal-heading .settings-copy > text:last-child,
+.app-shell .backup-transfer-modal .backup-heading-copy > text:last-child {
+	font-size: 12px;
+	line-height: 18px;
+	font-weight: 400;
+	color: #706775;
+	overflow-wrap: anywhere;
+}
+
+.app-shell .cloud-modal-heading .cloud-status-icon {
+	width: 44px;
+	height: 44px;
+	border: 0;
+	border-radius: 15px;
+	background: #eee8f4;
+	color: #7850a0;
+}
+
+.app-shell .cloud-modal-heading > button,
+.app-shell .backup-transfer-modal .modal-heading > button {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 44px;
+	height: 44px;
+	min-width: 44px;
+	padding: 0;
+	border: 0;
+	border-radius: 50%;
+	background: #eee8f4;
+	color: #7850a0;
+	flex: 0 0 auto;
+}
+
+.app-shell .cloud-modal-content,
+.app-shell .backup-transfer-content {
+	display: block;
+	flex: 1 1 auto;
+	min-height: 0;
+	max-height: min(74vh, 690px);
+	padding: 20px 20px max(24px, env(safe-area-inset-bottom));
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	-webkit-overflow-scrolling: touch;
+}
+
+.app-shell .cloud-modal .cloud-sheet-intro {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 12px;
+	margin-bottom: 22px;
+	font-size: 13px;
+	line-height: 21px;
+	color: #706775;
+}
+
+.app-shell .cloud-modal .enabled-status {
+	min-height: 22px;
+	color: #50745c;
+	font-size: 11px;
+	white-space: nowrap;
+}
+
+.app-shell .cloud-modal .enabled-status i { background: #50745c; }
+
+.app-shell .cloud-modal .cloud-section-label,
+.app-shell .backup-transfer-modal .backup-section-label {
+	display: block;
+	margin: 0 0 14px;
+	padding: 0;
+	border: 0;
+	font-size: 13px;
+	line-height: 20px;
+	font-weight: 700;
+	color: #706775;
+}
+
+.app-shell .cloud-modal .cloud-sheet-section + .cloud-sheet-section,
+.app-shell .backup-transfer-modal .backup-import-section,
+.app-shell .backup-transfer-modal .json-share-management {
+	margin-top: 26px;
+	padding-top: 22px;
+	border-top: 1px solid #e5e0e7;
+}
+
+.app-shell .cloud-modal .cloud-field {
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+	gap: 8px;
+	margin-bottom: 16px;
+	font-size: 13px;
+	line-height: 20px;
+	font-weight: 600;
+	color: #25232a;
+}
+
+.app-shell .cloud-modal .cloud-field input,
+.app-shell .cloud-modal .cloud-field .password-field,
+.app-shell .cloud-modal .cloud-field .cloud-username-editor,
+.app-shell .backup-transfer-modal .backup-link-field input,
+.app-shell .backup-transfer-modal .backup-url-import input {
+	width: 100%;
+	min-width: 0;
+	height: 48px;
+	min-height: 48px;
+	padding: 0 13px;
+	border: 1px solid #e5e0e7;
+	border-radius: 13px;
+	background: #fff;
+	color: #25232a;
+	font-size: 14px;
+	line-height: normal;
+	font-weight: 400;
+	box-shadow: none;
+}
+
+.app-shell .cloud-modal .cloud-field input:disabled {
+	background: #f0eeed;
+	color: #706775;
+	-webkit-text-fill-color: #706775;
+	opacity: 1;
+}
+
+.app-shell .cloud-modal .cloud-field .cloud-username-editor {
+	padding-right: 3px;
+}
+
+.app-shell .cloud-modal .cloud-field .password-field input,
+.app-shell .cloud-modal .cloud-field .cloud-username-editor input {
+	height: 44px;
+	min-height: 44px;
+	padding: 0;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	outline: none;
+	flex: 1;
+}
+
+.app-shell .cloud-modal .cloud-field .password-field > .app-icon {
+	margin-left: 10px;
+	color: #706775;
+	flex: 0 0 auto;
+}
+
+.app-shell .cloud-modal .cloud-username-editor button {
+	height: 44px;
+	min-width: 58px;
+	padding: 0 13px;
+	border: 0;
+	border-radius: 10px;
+	background: #eee8f4;
+	color: #7850a0;
+	font-size: 13px;
+	font-weight: 650;
+}
+
+.app-shell .cloud-modal .cloud-actions {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 10px;
+	margin-top: 22px;
+}
+
+.app-shell .cloud-modal .cloud-actions button,
+.app-shell .cloud-modal .cloud-sheet-account-actions button {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	min-height: 48px;
+	height: auto;
+	padding: 12px;
+	border: 1px solid transparent;
+	border-radius: 14px;
+	font-size: 14px;
+	line-height: 22px;
+	font-weight: 650;
+}
+
+.app-shell .cloud-modal .cloud-actions .primary-button {
+	background: #7850a0;
+	color: #fff;
+}
+
+.app-shell .cloud-modal .cloud-actions .secondary-button {
+	border-color: #e5e0e7;
+	background: #fff;
+	color: #7850a0;
+}
+
+.app-shell .cloud-modal .cloud-actions .cloud-sync-now { grid-column: 1 / -1; }
+
+.app-shell .cloud-modal .cloud-encryption-note {
+	display: block;
+	margin: -4px 0 18px;
+	font-size: 12px;
+	line-height: 21px;
+	color: #706775;
+}
+
+.app-shell .cloud-modal .cloud-auto-row {
+	min-height: 74px;
+	margin: 0;
+	padding: 14px;
+	border: 1px solid #e5e0e7;
+	border-radius: 15px;
+	background: #fff;
+	color: #25232a;
+}
+
+.app-shell .cloud-modal .cloud-auto-row > view {
+	min-width: 0;
+	gap: 5px;
+	font-size: 14px;
+	line-height: 21px;
+}
+
+.app-shell .cloud-modal .cloud-auto-row > view text:last-child {
+	font-size: 12px;
+	line-height: 20px;
+	color: #706775;
+	overflow-wrap: anywhere;
+}
+
+.app-shell .cloud-modal .cloud-auto-row > .app-icon { color: #7850a0; }
+
+.app-shell .cloud-modal .cloud-sheet-account-actions {
+	display: grid;
+	gap: 10px;
+	margin-top: 24px;
+	padding-top: 20px;
+	border-top: 1px solid #e5e0e7;
+}
+
+.app-shell .cloud-modal .cloud-sheet-account-actions .danger-button {
+	border-color: #eddcdf;
+	background: #fff7f6;
+	color: #a14f5e;
+}
+
+.app-shell .cloud-modal .cloud-sheet-account-actions .logout-button {
+	border-color: #e5e0e7;
+	background: #fff;
+	color: #706775;
+}
+
+.app-shell .backup-transfer-modal .backup-choice-grid {
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 12px;
+}
+
+.app-shell .backup-transfer-modal .backup-choice {
+	align-items: flex-start;
+	flex-direction: column;
+	gap: 12px;
+	height: auto;
+	min-height: 132px;
+	padding: 16px;
+	border: 1px solid #e5e0e7;
+	border-radius: 17px;
+	background: #fff;
+}
+
+.app-shell .backup-transfer-modal .backup-choice-icon {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 40px;
+	height: 40px;
+	border-radius: 12px;
+	background: #eee8f4;
+	color: #7850a0;
+	flex: 0 0 auto;
+}
+
+.app-shell .backup-transfer-modal .backup-choice > view:last-child,
+.app-shell .backup-transfer-modal .backup-local-import > view:not(.backup-choice-icon) {
+	gap: 4px;
+}
+
+.app-shell .backup-transfer-modal .backup-choice > view:last-child text:first-child,
+.app-shell .backup-transfer-modal .backup-local-import > view:not(.backup-choice-icon) text:first-child {
+	font-size: 14px;
+	line-height: 22px;
+	color: #25232a;
+}
+
+.app-shell .backup-transfer-modal .backup-choice > view:last-child text:last-child,
+.app-shell .backup-transfer-modal .backup-local-import > view:not(.backup-choice-icon) text:last-child {
+	font-size: 12px;
+	line-height: 19px;
+	color: #706775;
+	white-space: normal;
+	overflow: visible;
+}
+
+.app-shell .backup-transfer-modal .backup-share-notice {
+	display: block;
+	margin-top: 16px;
+	padding: 13px 14px;
+	border: 1px solid #e5e0e7;
+	border-radius: 14px;
+	background: #f1edf4;
+	color: #665570;
+	font-size: 12px;
+	line-height: 21px;
+}
+
+.app-shell .backup-transfer-modal .backup-transfer-status {
+	gap: 9px;
+	margin-top: 14px;
+	padding: 12px;
+	border-color: #e5e0e7;
+	border-radius: 13px;
+	background: #eee8f4;
+	color: #7850a0;
+}
+
+.app-shell .backup-transfer-modal .backup-transfer-status text {
+	font-size: 12px;
+	line-height: 20px;
+}
+
+.app-shell .backup-transfer-modal .backup-transfer-status > .app-icon { flex: 0 0 auto; }
+
+.app-shell .backup-transfer-modal .backup-link-result {
+	margin-top: 18px;
+	padding-top: 16px;
+	border-color: #e5e0e7;
+}
+
+.app-shell .backup-transfer-modal .backup-link-result > text {
+	margin-bottom: 10px;
+	font-size: 12px;
+	line-height: 20px;
+	color: #706775;
+}
+
+.app-shell .backup-transfer-modal .backup-link-field button {
+	width: 48px;
+	height: 48px;
+	border: 0;
+	border-radius: 13px;
+	background: #eee8f4;
+	color: #7850a0;
+}
+
+.app-shell .backup-transfer-modal .json-share-heading { margin-bottom: 8px; }
+.app-shell .backup-transfer-modal .json-share-heading .backup-section-label { margin: 0; }
+
+.app-shell .backup-transfer-modal .json-share-heading button,
+.app-shell .backup-transfer-modal .json-share-row button {
+	min-width: 58px;
+	min-height: 44px;
+	padding: 10px 12px;
+	border: 0;
+	border-radius: 12px;
+	background: #eee8f4;
+	color: #7850a0;
+	font-size: 12px;
+	line-height: 20px;
+}
+
+.app-shell .backup-transfer-modal .json-share-row {
+	padding: 14px 0;
+	border-color: #e5e0e7;
+}
+
+.app-shell .backup-transfer-modal .json-share-row > view {
+	gap: 6px;
+	font-size: 13px;
+	line-height: 20px;
+}
+
+.app-shell .backup-transfer-modal .json-share-row > view > text:last-child,
+.app-shell .backup-transfer-modal .json-share-empty {
+	font-size: 12px;
+	line-height: 20px;
+	color: #706775;
+}
+
+.app-shell .backup-transfer-modal .json-share-empty { display: block; padding: 8px 0; }
+
+.app-shell .backup-transfer-modal .json-share-row button {
+	background: #f8e9e9;
+	color: #a14f5e;
+}
+
+.app-shell .backup-transfer-modal .json-share-error {
+	font-size: 13px;
+	line-height: 21px;
+	color: #a14f5e;
+	overflow-wrap: anywhere;
+}
+
+.app-shell .backup-transfer-modal .backup-local-import {
+	gap: 12px;
+	height: auto;
+	min-height: 80px;
+	padding: 14px;
+	border: 1px solid #e5e0e7;
+	border-radius: 16px;
+	background: #fff;
+	color: #7850a0;
+}
+
+.app-shell .backup-transfer-modal .backup-local-import > .app-icon { flex: 0 0 auto; }
+
+.app-shell .backup-transfer-modal .backup-link-label {
+	display: block;
+	margin: 20px 0 10px;
+	font-size: 12px;
+	line-height: 20px;
+	color: #706775;
+}
+
+.app-shell .backup-transfer-modal .backup-url-import {
+	flex-direction: column;
+	align-items: stretch;
+	gap: 10px;
+	margin-top: 0;
+}
+
+.app-shell .backup-transfer-modal .backup-url-import input { flex: 0 0 auto; }
+
+.app-shell .backup-transfer-modal .backup-url-import button {
+	display: flex;
+	width: 100%;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	min-height: 48px;
+	height: auto;
+	padding: 12px;
+	border: 0;
+	border-radius: 13px;
+	background: #7850a0;
+	color: #fff;
+	font-size: 14px;
+	line-height: 22px;
+}
+
+.app-shell .cloud-modal button,
+.app-shell .backup-transfer-modal button {
+	transition: background-color 140ms ease, opacity 140ms ease, transform 140ms ease;
+}
+
+.app-shell .cloud-modal button:active:not(:disabled),
+.app-shell .backup-transfer-modal button:active:not(:disabled) {
+	opacity: 0.8;
+	transform: scale(0.98);
+}
+
+.app-shell .cloud-modal button:disabled,
+.app-shell .backup-transfer-modal button:disabled { opacity: 0.45; }
+
+.app-shell .cloud-modal button:focus-visible,
+.app-shell .backup-transfer-modal button:focus-visible {
+	outline: 2px solid #7850a0;
+	outline-offset: 3px;
+}
+
+.app-shell .cloud-modal .cloud-field > input:focus,
+.app-shell .cloud-modal .password-field:focus-within,
+.app-shell .cloud-modal .cloud-username-editor:focus-within,
+.app-shell .backup-transfer-modal .backup-link-field input:focus,
+.app-shell .backup-transfer-modal .backup-url-import input:focus {
+	border-color: #7850a0;
+	outline: none;
+	box-shadow: 0 0 0 3px rgba(120, 80, 160, 0.09);
+}
+
+@media (max-width: 350px) {
+	.app-shell .cloud-modal-content,
+	.app-shell .backup-transfer-content { padding-left: 16px; padding-right: 16px; }
+	.app-shell .cloud-modal-heading,
+	.app-shell .backup-transfer-modal .modal-heading { padding-left: 16px; gap: 9px; }
+	.app-shell .cloud-modal-heading .settings-copy > text:first-child,
+	.app-shell .backup-transfer-modal .backup-heading-copy > text:first-child { font-size: 20px; }
+	.app-shell .backup-transfer-modal .backup-choice { padding: 13px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.app-shell .cloud-modal button,
+	.app-shell .backup-transfer-modal button { transition: none; }
+	.app-shell .cloud-modal button:active:not(:disabled),
+	.app-shell .backup-transfer-modal button:active:not(:disabled) { transform: none; }
+}

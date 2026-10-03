@@ -2,7 +2,8 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { cp } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { filterProxyRequestHeaders, validateProxyTarget } from './src/platform/browser/proxy-rules.js'
+import { fetch as undiciFetch, ProxyAgent } from 'undici'
+import { filterProxyRequestHeaders, validateProxyTarget, validateProxyUrl } from './src/platform/browser/proxy-rules.js'
 
 function browserEntryRedirectPlugin() {
   return {
@@ -24,12 +25,27 @@ function browserEntryRedirectPlugin() {
 }
 
 function aiProxyPlugin() {
+  const proxyAgents = new Map()
+
+  function getProxyAgent(value) {
+    if (!String(value ?? '').trim()) return null
+    const proxy = validateProxyUrl(value)
+    const key = proxy.href
+    if (!proxyAgents.has(key)) proxyAgents.set(key, new ProxyAgent(key))
+    return proxyAgents.get(key)
+  }
+
   return {
     name: 'local-ai-proxy',
     configureServer(server) {
+      server.httpServer?.once('close', async () => {
+        await Promise.all([...proxyAgents.values()].map(agent => agent.close()))
+        proxyAgents.clear()
+      })
       server.middlewares.use('/__ai_proxy', async (request, response) => {
         try {
           const target = validateProxyTarget(request.headers['x-ai-target-url'])
+          const dispatcher = getProxyAgent(request.headers['x-ai-proxy-url'])
           const chunks = []
           for await (const chunk of request) {
             chunks.push(chunk)
@@ -39,12 +55,13 @@ function aiProxyPlugin() {
           response.on('close', () => {
             if (!response.writableEnded) controller.abort()
           })
-          const upstream = await fetch(target, {
+          const upstream = await undiciFetch(target, {
             method: request.method,
             headers: filterProxyRequestHeaders(request.headers),
             body,
             signal: controller.signal,
-            redirect: 'follow'
+            redirect: 'follow',
+            ...(dispatcher ? { dispatcher } : {})
           })
 
           response.statusCode = upstream.status

@@ -31,6 +31,7 @@
 				<AlertCircle :size="16" />
 				<view class="story-status-copy"><text>{{ statusLabel }}</text><text>{{ block.text }}</text></view>
 				<view class="story-status-actions">
+					<button @click="$emit('response-details', block.messageId)"><text>响应详情</text></button>
 					<button v-if="canContinue" @click.stop="$emit('continue', block.messageId)"><PlayOutline :size="13" /><text>续写</text></button>
 					<button @click="$emit('retry', block.messageId)"><RotateCcw :size="13" /><text>重试</text></button>
 				</view>
@@ -65,7 +66,7 @@
 			block: { type: Object, required: true },
 			canContinue: { type: Boolean, default: false }
 		},
-		emits: ['continue', 'copy', 'feedback', 'preview-image', 'preview-text', 'retry', 'stop'],
+		emits: ['continue', 'copy', 'feedback', 'preview-image', 'preview-text', 'retry', 'stop', 'response-details'],
 		computed: {
 			domId() { return storyBlockDomId(this.block) },
 			sourceId() { return storyBlockSourceId(this.block) },

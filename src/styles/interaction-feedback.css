@@ -1,0 +1,181 @@
+/* Small, local interactions keep the chat layout and scroll position stable. */
+.app-shell .home-action-menu,
+.app-shell .story-model-popover,
+.app-shell .model-popover {
+	animation: echo-menu-from-top 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.app-shell .attachment-popover,
+.app-shell .story-attachment-popover,
+.app-shell .emoji-popover {
+	animation: echo-menu-from-bottom 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.app-shell .toast-message {
+	animation: echo-toast-in 150ms ease-out;
+}
+
+.app-shell .chat-jump-latest {
+	animation: echo-feedback-fade-in 140ms ease-out;
+	transition: opacity 120ms ease-out;
+}
+
+.app-shell .composer-action-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	line-height: 1;
+	animation: echo-composer-icon-in 120ms ease-out;
+	pointer-events: none;
+}
+
+.app-shell .model-selector.menu-active {
+	background: rgba(181, 66, 205, 0.08);
+	border-radius: 12px;
+}
+
+.app-shell .composer-emoji.active,
+.app-shell .composer-attachment.active {
+	background: #f8ecfb;
+	color: #9840ad;
+}
+
+.app-shell .story-attachment-button[aria-expanded="true"] {
+	background: #f8ecfb;
+	color: #9840ad;
+}
+
+.app-shell .row-time:active {
+	background: #f8ecfb;
+	color: #9840ad;
+}
+
+.app-shell .icon-button,
+.app-shell .model-selector,
+.app-shell .composer-emoji,
+.app-shell .composer-mention,
+.app-shell .composer-attachment,
+.app-shell .composer-stop,
+.app-shell .story-attachment-button,
+.app-shell .story-send-button,
+.app-shell .home-action-menu button,
+.app-shell .model-popover button,
+.app-shell .attachment-action,
+.app-shell .emoji-popover button,
+.app-shell .message-actions button {
+	transition: transform 120ms ease-out, opacity 120ms ease-out;
+}
+
+.app-shell .icon-button:not(:disabled):not([disabled]):active,
+.app-shell .composer-emoji:not(:disabled):not([disabled]):active,
+.app-shell .composer-mention:not(:disabled):not([disabled]):active,
+.app-shell .composer-attachment:not(:disabled):not([disabled]):active,
+.app-shell .composer-stop:not(:disabled):not([disabled]):active,
+.app-shell .story-attachment-button:not(:disabled):not([disabled]):active,
+.app-shell .story-send-button:not(:disabled):not([disabled]):active,
+.app-shell .attachment-action:not(:disabled):not([disabled]):active,
+.app-shell .emoji-popover button:not(:disabled):not([disabled]):active,
+.app-shell .message-actions button:not(:disabled):not([disabled]):active {
+	transform: scale(0.95);
+	opacity: 0.8;
+}
+
+.app-shell .model-selector:not(:disabled):not([disabled]):active,
+.app-shell .home-action-menu button:not(:disabled):not([disabled]):active,
+.app-shell .model-popover button:not(:disabled):not([disabled]):active {
+	transform: scale(0.98);
+	opacity: 0.8;
+}
+
+.app-shell .chat-jump-latest:not(:disabled):not([disabled]):active {
+	opacity: 0.8;
+}
+
+.app-shell button:not(:disabled):not([disabled]):focus-visible {
+	outline: 2px solid #b744ce;
+	outline-offset: 2px;
+}
+
+/* An inset ring highlights focus without changing the composer's dimensions. */
+.app-shell .composer:focus-within {
+	box-shadow: inset 0 0 0 1px rgba(181, 66, 205, 0.28),
+		0 0 0 3px rgba(181, 66, 205, 0.07),
+		0 4px 14px rgba(52, 74, 91, 0.16);
+}
+
+.app-shell .story-direction-input:focus {
+	border-color: #bc66cd;
+	box-shadow: 0 0 0 3px rgba(181, 66, 205, 0.07);
+}
+
+@keyframes echo-menu-from-top {
+	from { opacity: 0; transform: translateY(-4px); }
+	to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes echo-menu-from-bottom {
+	from { opacity: 0; transform: translateY(4px); }
+	to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes echo-toast-in {
+	from { opacity: 0; transform: translate(-50%, 4px); }
+	to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+@keyframes echo-composer-icon-in {
+	from { opacity: 0; transform: scale(0.88); }
+	to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes echo-feedback-fade-in {
+	from { opacity: 0; }
+	to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.app-shell .home-action-menu,
+	.app-shell .model-popover,
+	.app-shell .story-model-popover,
+	.app-shell .attachment-popover,
+	.app-shell .story-attachment-popover,
+	.app-shell .emoji-popover,
+	.app-shell .toast-message,
+	.app-shell .composer-action-icon,
+	.app-shell .chat-jump-latest {
+		animation: none;
+	}
+
+	.app-shell .icon-button,
+	.app-shell .model-selector,
+	.app-shell .composer-emoji,
+	.app-shell .composer-mention,
+	.app-shell .composer-attachment,
+	.app-shell .composer-stop,
+	.app-shell .story-attachment-button,
+	.app-shell .story-send-button,
+	.app-shell .home-action-menu button,
+	.app-shell .model-popover button,
+	.app-shell .attachment-action,
+	.app-shell .emoji-popover button,
+	.app-shell .message-actions button,
+	.app-shell .chat-jump-latest {
+		transition: none;
+	}
+
+	.app-shell .icon-button:not(:disabled):not([disabled]):active,
+	.app-shell .model-selector:not(:disabled):not([disabled]):active,
+	.app-shell .composer-emoji:not(:disabled):not([disabled]):active,
+	.app-shell .composer-mention:not(:disabled):not([disabled]):active,
+	.app-shell .composer-attachment:not(:disabled):not([disabled]):active,
+	.app-shell .composer-stop:not(:disabled):not([disabled]):active,
+	.app-shell .story-attachment-button:not(:disabled):not([disabled]):active,
+	.app-shell .story-send-button:not(:disabled):not([disabled]):active,
+	.app-shell .home-action-menu button:not(:disabled):not([disabled]):active,
+	.app-shell .model-popover button:not(:disabled):not([disabled]):active,
+	.app-shell .attachment-action:not(:disabled):not([disabled]):active,
+	.app-shell .emoji-popover button:not(:disabled):not([disabled]):active,
+	.app-shell .message-actions button:not(:disabled):not([disabled]):active {
+		transform: none;
+	}
+}

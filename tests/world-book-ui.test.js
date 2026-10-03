@@ -1,10 +1,11 @@
+import { readMainPageSource } from './helpers/read-main-page.js'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 test('contacts wires the standalone world-book manager and import preview', async () => {
   const [page, contacts, manager, appServices] = await Promise.all([
-    readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8'),
+    readMainPageSource(),
     readFile(new URL('../src/components/character-contacts.vue', import.meta.url), 'utf8'),
     readFile(new URL('../src/components/world-book-manager.vue', import.meta.url), 'utf8'),
     readFile(new URL('../src/app/create-app-services.js', import.meta.url), 'utf8')

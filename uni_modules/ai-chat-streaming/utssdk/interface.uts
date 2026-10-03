@@ -17,6 +17,7 @@ export type AiChatStreamEvent = {
 export type AiChatStreamRequestOptions = {
   requestId : string
   url : string
+  proxyUrl : string
   method : string
   headers : Array<AiChatStreamHeader>
   body : string
@@ -28,10 +29,12 @@ export type AiChatOnStreamEvent = (callback : AiChatStreamEventCallback) => void
 export type AiChatOffStreamEvent = () => void
 export type AiChatStreamRequest = (options : AiChatStreamRequestOptions) => void
 export type AiChatStreamCancel = (requestId : string) => boolean
+export type AiChatDetectHttpProxy = () => Promise<string>
 
 interface Uni {
   onAiChatStreamEvent(callback : AiChatStreamEventCallback) : void
   offAiChatStreamEvent() : void
   aiChatStreamRequest(options : AiChatStreamRequestOptions) : void
   aiChatStreamCancel(requestId : string) : boolean
+  aiChatDetectHttpProxy() : Promise<string>
 }

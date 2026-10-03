@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb'
 import { createDiagnosticLogStore } from '../src/core/diagnostic-log.js'
+import { buildChatContext } from '../src/core/chat-context.js'
 import { IndexedDbRepository } from '../src/platform/browser/indexeddb-repository.js'
 import { ChatService } from '../src/services/chat-service.js'
 
@@ -172,8 +173,12 @@ test('logs whether the character status protocol was sent and what the model ret
   assert.equal(responseLog.finishReason, 'stop')
   assert.equal(responseLog.canonicalOpenCount, 0)
   assert.equal(responseLog.statusParsed, false)
-  assert.match(responseLog.responseTail, /没有状态块/)
-  assert.doesNotMatch(JSON.stringify(logStore.exportData()), /secret/)
+  assert.equal(responseLog.responseLength, '正文回复，但没有状态块。'.length)
+  assert.equal(requestLog.latestUserLength > 0, true)
+  assert.doesNotMatch(JSON.stringify(logStore.exportData()), /secret|正文回复|固定格式|必须返回状态|本轮问题/)
+  assert.equal('responseTail' in responseLog, false)
+  assert.equal('firstSystemTail' in requestLog, false)
+  assert.equal('latestUserTail' in requestLog, false)
 })
 
 test('notifies only after a completed assistant reply is persisted', async () => {
@@ -822,8 +827,9 @@ test('marks empty network failures as failed and rejects a concurrent send', asy
 
 test('uses an explicit providerProfileId when the conversation record is missing one', async () => {
   const requests = []
-  const { service } = await setup(async (profile, request) => {
+  const { service } = await setup(async (profile, request, handlers) => {
     requests.push({ profile, request })
+    handlers.onDelta('response from explicit provider')
     return { finishReason: 'stop' }
   }, {}, { providerProfileId: null })
 
@@ -1128,4 +1134,368 @@ test('persists image callbacks before the provider request settles', { timeout: 
 
   finishProvider()
   assert.equal((await pending).status, 'completed')
+})
+
+test('a rejected streaming snapshot does not poison later snapshots or the final save', async () => {
+  const writes = []
+  let firstAttempt
+  const firstWritten = new Promise(resolve => { firstAttempt = resolve })
+  let nextAttempt
+  const nextWritten = new Promise(resolve => { nextAttempt = resolve })
+  const { repository, service } = await setup(async (profile, request, handlers) => {
+    handlers.onDelta('a'.repeat(200))
+    await firstWritten
+    await new Promise(resolve => setImmediate(resolve))
+    handlers.onDelta('b'.repeat(200))
+    await nextWritten
+    handlers.onDelta(' final')
+    return { finishReason: 'stop' }
+  })
+  const saveMessage = repository.saveMessage.bind(repository)
+  repository.saveMessage = async message => {
+    writes.push({ ...message })
+    if (writes.length === 1) {
+      firstAttempt()
+      throw new Error('temporary storage failure')
+    }
+    const result = await saveMessage(message)
+    nextAttempt()
+    return result
+  }
+
+  const result = await service.send({ conversationId: 'conversation-1', content: 'recover' })
+
+  assert.equal(writes.length, 3)
+  assert.equal(writes[1].status, 'generating')
+  assert.equal(writes[1].content, 'a'.repeat(200) + 'b'.repeat(200))
+  assert.equal(writes[2].status, 'completed')
+  assert.equal((await repository.getMessage(result.id)).content, result.content)
+  assert.equal(result.errorCode, null)
+})
+
+test('timer snapshots retry after a failure even without a new delta and cancellation saves the partial reply', async () => {
+  let tick
+  let attempts = 0
+  const { repository, service } = await setup(async (profile, request, handlers) => {
+    handlers.onDelta('partial')
+    tick()
+    await new Promise(resolve => setImmediate(resolve))
+    tick()
+    await new Promise(resolve => setImmediate(resolve))
+    service.stop()
+    throw new DOMException('Aborted', 'AbortError')
+  }, {}, {}, {
+    setIntervalFn: callback => { tick = callback; return 1 },
+    clearIntervalFn: () => {}
+  })
+  const saveMessage = repository.saveMessage.bind(repository)
+  repository.saveMessage = async message => {
+    attempts += 1
+    if (attempts === 1) throw new Error('temporary timer save failure')
+    return saveMessage(message)
+  }
+
+  const result = await service.send({ conversationId: 'conversation-1', content: 'cancel after recovery' })
+
+  assert.equal(attempts, 3)
+  assert.equal(result.status, 'cancelled')
+  assert.equal((await repository.getMessage(result.id)).status, 'cancelled')
+  assert.equal((await repository.getMessage(result.id)).content, 'partial')
+  assert.equal(service.activeRequest, null)
+})
+
+test('persistent final save failures retain the visible content, report unsaved state, and skip completion notifications', async () => {
+  const updates = []
+  const states = []
+  let notifications = 0
+  let writes = 0
+  const { repository, service } = await setup(async (profile, request, handlers) => {
+    handlers.onDelta('a'.repeat(200))
+    await new Promise(resolve => setImmediate(resolve))
+    handlers.onDelta(' complete')
+    return { finishReason: 'stop' }
+  }, {}, {}, {
+    replyNotificationService: { notifyReply: async () => { notifications += 1 } }
+  })
+  repository.saveMessage = async () => {
+    writes += 1
+    throw new Error('quota exceeded')
+  }
+
+  await assert.rejects(service.send({
+    conversationId: 'conversation-1',
+    content: 'keep my reply',
+    onMessage: message => updates.push(message),
+    onState: state => states.push(state.generating)
+  }), error => {
+    assert.equal(error.code, 'message_save_failed')
+    assert.match(error.message, /未能保存/)
+    assert.equal(error.messageSnapshot.content, 'a'.repeat(200) + ' complete')
+    return true
+  })
+
+  assert.equal(writes, 2)
+  assert.equal(updates.at(-1).status, 'interrupted')
+  assert.equal(updates.at(-1).errorCode, 'message_save_failed')
+  assert.equal(updates.at(-1).content, 'a'.repeat(200) + ' complete')
+  assert.equal(notifications, 0)
+  assert.deepEqual(states, [true, false])
+  assert.equal(service.activeRequest, null)
+})
+
+test('same-tick sends reserve the request before preparation and cannot insert duplicate pairs', async () => {
+  let calls = 0
+  const { repository, service } = await setup(async (profile, request, handlers) => {
+    calls += 1
+    handlers.onDelta('one reply')
+    return { finishReason: 'stop' }
+  })
+
+  const first = service.send({ conversationId: 'conversation-1', content: 'first' })
+  await assert.rejects(service.send({ conversationId: 'conversation-1', content: 'second' }), /仍在生成/)
+  await assert.rejects(service.retry('unknown'), /仍在生成/)
+  await first
+
+  assert.equal(calls, 1)
+  assert.deepEqual((await repository.listMessages('conversation-1')).map(message => message.role), ['user', 'assistant'])
+})
+
+test('preparation errors release the request and retries and continuations reserve before reads', async () => {
+  const { service } = await setup(async (profile, request, handlers) => {
+    handlers.onDelta('reply')
+    return { finishReason: 'stop' }
+  })
+  await assert.rejects(service.send({ conversationId: 'missing', content: 'first' }), /会话不存在/)
+  assert.equal(service.activeRequest, null)
+  const first = await service.send({ conversationId: 'conversation-1', content: 'valid' })
+  const retry = service.retry(first.id)
+  await assert.rejects(service.continueResponse(first.id), /仍在生成/)
+  const retried = await retry
+  const continued = service.continueResponse(retried.id)
+  await assert.rejects(service.retry(retried.id), /仍在生成/)
+  assert.equal((await continued).status, 'completed')
+})
+
+test('stopAndWait during preparation prevents provider calls and message creation', async () => {
+  const { repository, service } = await setup(async () => assert.fail('provider must not run'))
+  let releaseRead
+  const readGate = new Promise(resolve => { releaseRead = resolve })
+  let startedRead
+  const readStarted = new Promise(resolve => { startedRead = resolve })
+  const getConversation = repository.getConversation.bind(repository)
+  repository.getConversation = async id => {
+    startedRead()
+    await readGate
+    return getConversation(id)
+  }
+  const sending = service.send({ conversationId: 'conversation-1', content: 'cancel before persistence' })
+  const rejected = assert.rejects(sending, error => error.name === 'AbortError')
+  await readStarted
+  const stopped = service.stopAndWait()
+  releaseRead()
+
+  assert.equal(await stopped, true)
+  await rejected
+  assert.deepEqual(await repository.listMessages('conversation-1'), [])
+  assert.equal(service.activeRequest, null)
+})
+
+test('image-heavy context batches only its recent budget and preserves the exact model request', async () => {
+  let requestedMessages
+  const { repository, service } = await setup(async (profile, request) => {
+    requestedMessages = request.messages
+    return { finishReason: 'stop' }
+  })
+  const history = Array.from({ length: 120 }, (_, index) => ({
+    id: `history-image-${index}`,
+    conversationId: 'conversation-1', sequence: index + 1,
+    role: index % 2 ? 'assistant' : 'user', content: `history ${index}`,
+    status: 'completed', attachmentIds: index % 2 ? [] : [`image-${index}`]
+  }))
+  const attachments = history.filter(message => message.attachmentIds.length).map(message => ({
+    id: message.attachmentIds[0], conversationId: 'conversation-1', messageId: message.id,
+    kind: 'image', dataUrl: 'data:image/png;base64,AA=='
+  }))
+  await repository.saveMessages(history)
+  await repository.saveAttachments(attachments)
+  const batches = []
+  const getAttachments = repository.getAttachments.bind(repository)
+  repository.getAttachments = async ids => {
+    batches.push([...ids])
+    return getAttachments(ids)
+  }
+  repository.getAttachment = async () => assert.fail('prefer batch reads')
+  repository.listConversationAttachments = async () => assert.fail('avoid unbounded reads')
+
+  await service.send({ conversationId: 'conversation-1', content: 'latest turn' })
+  const expected = buildChatContext({
+    messages: [...history.slice(-80), { id: 'latest', sequence: 121, role: 'user', content: 'latest turn' }],
+    attachments, systemPrompt: '回答简洁'
+  })
+  const selectedImages = expected.flatMap(message => message.attachments || [])
+
+  assert.deepEqual(requestedMessages, expected)
+  assert.equal(selectedImages.length, 14)
+  assert.ok(batches.flat().length <= 16, `read ${batches.flat().length} image records`)
+  assert.equal(new Set(batches.flat()).size, batches.flat().length)
+  assert.ok(batches.length > 1)
+})
+
+test('attachment fallback bounds concurrency and respects missing, deleted, ordered and text costs', async () => {
+  let requestedMessages
+  const { repository, service } = await setup(async (profile, request) => {
+    requestedMessages = request.messages
+    return { finishReason: 'stop' }
+  })
+  const records = [
+    { id: 'old-image', kind: 'image', dataUrl: 'data:image/png;base64,AA==' },
+    ...Array.from({ length: 12 }, (_, index) => ({ id: `text-${index}`, kind: 'text', textContent: String(index).repeat(3000) })),
+    { id: 'deleted', kind: 'text', textContent: 'x'.repeat(100000), deletedAt: '2026-01-01' }
+  ].map(attachment => ({ ...attachment, conversationId: 'conversation-1' }))
+  const history = [
+    { id: 'old', sequence: 1, role: 'user', content: 'old image', attachmentIds: ['old-image'] },
+    { id: 'hidden', sequence: 2, role: 'assistant', content: 'failed', status: 'failed', attachmentIds: ['never-read'] },
+    { id: 'newer', sequence: 3, role: 'user', content: '', attachmentIds: ['missing', 'deleted', ...records.filter(item => item.id.startsWith('text-')).map(item => item.id).reverse()] }
+  ].map(message => ({ status: 'completed', ...message, conversationId: 'conversation-1' }))
+  await repository.saveMessages(history)
+  await repository.saveAttachments(records)
+  const getAttachment = repository.getAttachment.bind(repository)
+  let active = 0
+  let maximum = 0
+  const reads = []
+  repository.getAttachments = undefined
+  repository.getAttachment = async id => {
+    reads.push(id)
+    active += 1
+    maximum = Math.max(maximum, active)
+    await new Promise(resolve => setImmediate(resolve))
+    const attachment = await getAttachment(id)
+    active -= 1
+    return attachment
+  }
+  await service.send({ conversationId: 'conversation-1', content: 'next' })
+
+  assert.deepEqual(requestedMessages, buildChatContext({
+    messages: [...history, { id: 'latest', sequence: 4, role: 'user', content: 'next' }],
+    attachments: records.filter(record => !record.deletedAt), systemPrompt: '回答简洁'
+  }))
+  assert.equal(maximum, 4)
+  assert.equal(reads.includes('never-read'), false)
+  assert.equal(requestedMessages.flatMap(message => message.attachments || []).some(item => item.deletedAt), false)
+})
+
+test('an exhausted system-prompt budget reads no history attachments', async () => {
+  const { repository, service } = await setup(async (profile, request) => {
+    assert.equal(request.messages.length, 1)
+    assert.equal(request.messages[0].role, 'system')
+    return { finishReason: 'stop' }
+  }, {}, {}, { getSystemPrompt: async () => 'S'.repeat(60001) })
+  repository.getAttachments = async () => assert.fail('no attachment can enter this context')
+  await service.send({ conversationId: 'conversation-1', content: '', attachments: [
+    { kind: 'image', dataUrl: 'data:image/png;base64,AA==' }
+  ] })
+})
+
+test('attachment preselection preserves status-only history and the exact message-count boundary', async () => {
+  let requestedMessages
+  const { repository, service } = await setup(async (profile, request) => {
+    requestedMessages = request.messages
+    return { finishReason: 'stop' }
+  })
+  const history = Array.from({ length: 80 }, (_, index) => ({
+    id: `history-${index}`, conversationId: 'conversation-1', sequence: index + 1,
+    role: 'assistant', status: 'completed',
+    content: index % 3 ? `visible ${index}` : '<sumo_monitor><status>[位置|房间]</status></sumo_monitor>',
+    attachmentIds: []
+  }))
+  await repository.saveMessages(history)
+
+  await service.send({ conversationId: 'conversation-1', content: 'new turn' })
+
+  assert.deepEqual(requestedMessages, buildChatContext({
+    messages: [...history, { id: 'latest', sequence: 81, role: 'user', content: 'new turn' }],
+    systemPrompt: '回答简洁'
+  }))
+  assert.equal(requestedMessages.length, 41)
+  assert.ok(requestedMessages.some(message => message.role === 'assistant' && message.content === ''))
+})
+
+test('cancellation after the group pair is saved finalizes its placeholder without invoking a provider', async () => {
+  const { repository, service } = await setup(async () => assert.fail('cancelled group must not call provider'), {}, groupConversationOverrides())
+  const result = await service.send({
+    conversationId: 'conversation-1', content: 'stop early',
+    onMessage: message => {
+      if (message.role === 'user') service.stop()
+    }
+  })
+
+  assert.equal(result.status, 'cancelled')
+  const assistant = (await repository.listMessages('conversation-1')).find(message => message.role === 'assistant')
+  assert.equal(assistant.status, 'cancelled')
+})
+
+test('a rejected image callback write is handled while the provider is active and does not block later images', async () => {
+  const { repository, service } = await setup(async () => assert.fail('chat should not run'), {
+    generateImage: async (profile, request, handlers) => {
+      handlers.onImage({ b64_json: 'AA==' })
+      await new Promise(resolve => setImmediate(resolve))
+      handlers.onImage({ b64_json: 'BB==' })
+      await new Promise(resolve => setImmediate(resolve))
+      return { images: [] }
+    }
+  })
+  const saveAttachments = repository.saveAttachments.bind(repository)
+  let attempts = 0
+  repository.saveAttachments = async attachments => {
+    attempts += 1
+    if (attempts === 1) throw new Error('image storage unavailable')
+    return saveAttachments(attachments)
+  }
+  const result = await service.send({ conversationId: 'conversation-1', content: 'two images', mode: 'image' })
+
+  assert.equal(attempts, 2)
+  assert.equal(result.status, 'interrupted')
+  assert.equal(result.errorMessage, 'image storage unavailable')
+  assert.equal((await repository.listMessageAttachments(result.id))[0].dataUrl, 'data:image/png;base64,BB==')
+  assert.equal(service.activeRequest, null)
+})
+
+test('an exactly exhausted prompt budget preserves older zero-cost messages after skipping costly attachments', async () => {
+  let requestedMessages
+  const systemPrompt = 'S'.repeat(60000)
+  const { repository, service } = await setup(async (profile, request) => {
+    requestedMessages = request.messages
+    return { finishReason: 'stop' }
+  }, {}, {}, { getSystemPrompt: async () => systemPrompt })
+  const history = [
+    { id: 'old', sequence: 1, content: '<sumo_monitor><status>[位置|房间]</status></sumo_monitor>', attachmentIds: null },
+    { id: 'middle', sequence: 2, content: 'visible text', attachmentIds: [] },
+    { id: 'new', sequence: 3, content: '<sumo_monitor><status>[位置|门口]</status></sumo_monitor>', attachmentIds: ['image'] }
+  ].map(message => ({ ...message, conversationId: 'conversation-1', role: 'assistant', status: 'completed' }))
+  const attachments = [{ id: 'image', kind: 'image', dataUrl: 'data:image/png;base64,AA==' }]
+  await repository.saveMessages(history)
+  await repository.saveAttachments(attachments)
+
+  await service.send({ conversationId: 'conversation-1', content: 'continue' })
+
+  assert.deepEqual(requestedMessages, [
+    { role: 'system', content: systemPrompt },
+    { role: 'assistant', content: '' }
+  ])
+})
+
+test('stopping remains cancelled when a provider resolves gracefully after abort', async () => {
+  let notifications = 0
+  const { repository, service } = await setup(async (profile, request, handlers) => {
+    handlers.onDelta('partial text')
+    service.stop()
+    return { finishReason: 'stop' }
+  }, {}, {}, { replyNotificationService: { notifyReply: async () => { notifications += 1 } } })
+
+  const result = await service.send({ conversationId: 'conversation-1', content: 'stop gracefully' })
+
+  assert.equal(result.status, 'cancelled')
+  assert.equal((await repository.getMessage(result.id)).status, 'cancelled')
+  assert.equal(result.content, 'partial text')
+  assert.equal(notifications, 0)
 })

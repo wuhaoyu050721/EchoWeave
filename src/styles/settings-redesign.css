@@ -1,0 +1,235 @@
+.settings-overview.paper-main-page {
+	--settings-surface: var(--paper-bg, #f8f7f4);
+	background: var(--settings-surface);
+	color: var(--paper-ink, #25232a);
+}
+
+.settings-overview.paper-main-page .settings-screen {
+	padding: 0 20px;
+	background: transparent;
+}
+
+.settings-overview.paper-main-page .paper-heading {
+	margin-right: -20px;
+	margin-left: -20px;
+}
+
+.settings-overview.paper-main-page .settings-profile-actions {
+	width: auto;
+	height: auto;
+	gap: 2px;
+	margin: 0;
+}
+
+.settings-overview.paper-main-page .settings-profile-action {
+	width: 40px;
+	height: 40px;
+	background: var(--paper-soft, #eee8f4);
+	color: var(--paper-accent, #7850a0);
+}
+
+.settings-overview.paper-main-page .settings-more-action {
+	width: 32px;
+	background: transparent;
+}
+
+.settings-overview.paper-main-page .settings-profile-action:active,
+.settings-overview.paper-main-page .settings-profile-action.active {
+	background: #e6dced;
+	color: var(--paper-accent, #7850a0);
+}
+
+.settings-overview.paper-main-page .settings-search-bar {
+	height: 44px;
+	margin: 0 0 16px;
+	border: 1px solid var(--paper-line, #e4dfe7);
+	border-radius: 14px;
+	background: rgba(255, 255, 255, 0.65);
+	color: var(--paper-muted, #79717d);
+}
+
+.settings-overview.paper-main-page .settings-search-bar input {
+	color: var(--paper-ink, #25232a);
+}
+
+.settings-overview.paper-main-page .settings-search-bar:focus-within {
+	border-color: #b59bc8;
+	box-shadow: 0 0 0 2px rgba(120, 80, 160, 0.08);
+}
+
+.settings-overview.paper-main-page .settings-profile {
+	flex-direction: row;
+	gap: 14px;
+	min-height: 72px;
+	margin: 0 0 18px;
+	padding: 10px 12px;
+	border-radius: 19px;
+	background: #f0ebf3;
+}
+
+.settings-overview.paper-main-page .settings-profile-avatar-wrap,
+.settings-overview.paper-main-page .settings-profile-avatar {
+	width: 50px;
+	height: 50px;
+}
+
+.settings-overview.paper-main-page .settings-profile-avatar {
+	border-radius: 50%;
+	background: #e3d9eb;
+	box-shadow: none;
+}
+
+.settings-overview.paper-main-page .settings-profile-camera {
+	width: 21px;
+	height: 21px;
+	border-color: #f0ebf3;
+	background: var(--paper-accent, #7850a0);
+}
+
+.settings-overview.paper-main-page .settings-profile-account {
+	display: flex;
+	align-items: center;
+	gap: 9px;
+	flex: 1;
+	min-width: 0;
+	min-height: 50px;
+	padding: 0;
+	border-radius: 10px;
+	text-align: left;
+	color: var(--paper-muted, #79717d);
+}
+
+.settings-overview.paper-main-page .settings-profile-identity {
+	min-width: 0;
+	flex: 1;
+}
+
+.settings-overview.paper-main-page .settings-profile-name {
+	margin: 0;
+	font-size: 18px;
+	font-weight: 650;
+	line-height: 25px;
+	color: var(--paper-ink, #25232a);
+}
+
+.settings-overview.paper-main-page .settings-profile-subtitle {
+	margin-top: 4px;
+	font-size: 11px;
+	line-height: 18px;
+	color: var(--paper-muted, #79717d);
+}
+
+.settings-overview.paper-main-page .settings-menu-group + .settings-menu-group {
+	margin-top: 20px;
+}
+
+.settings-overview.paper-main-page .settings-group-heading {
+	display: block;
+	margin-bottom: 5px;
+	font-size: 13px;
+	font-weight: 600;
+	line-height: 22px;
+	letter-spacing: 0.5px;
+	color: var(--paper-muted, #79717d);
+}
+
+.settings-overview.paper-main-page .settings-card {
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+}
+
+.settings-overview.paper-main-page .settings-row {
+	gap: 11px;
+	min-height: 48px;
+	padding: 7px 0;
+	border-bottom: 1px solid var(--paper-line, #e4dfe7);
+	color: var(--paper-muted, #79717d);
+}
+
+.settings-overview.paper-main-page .settings-row:last-child {
+	border-bottom: 1px solid var(--paper-line, #e4dfe7);
+}
+
+.settings-overview.paper-main-page .settings-row:active {
+	background: rgba(120, 80, 160, 0.05);
+}
+
+.settings-overview.paper-main-page .settings-icon {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 32px;
+	height: 32px;
+	flex: 0 0 auto;
+	border-radius: 50%;
+	background: var(--paper-soft, #eee8f4);
+	color: var(--paper-accent, #7850a0);
+}
+
+.settings-overview.paper-main-page .settings-copy {
+	flex-direction: row;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+}
+
+.settings-overview.paper-main-page .settings-copy text:first-child {
+	flex: 0 0 auto;
+	font-size: 15px;
+	font-weight: 550;
+	line-height: 23px;
+	color: var(--paper-ink, #25232a);
+}
+
+.settings-overview.paper-main-page .settings-copy text:last-child {
+	min-width: 0;
+	font-size: 11px;
+	line-height: 18px;
+	text-align: right;
+	color: var(--paper-muted, #79717d);
+}
+
+.settings-overview.paper-main-page .settings-row > svg,
+.settings-overview.paper-main-page .settings-profile-account > svg {
+	flex: 0 0 auto;
+}
+
+.settings-overview.paper-main-page .settings-search-empty {
+	border-radius: 18px;
+	background: var(--paper-soft, #eee8f4);
+	color: var(--paper-muted, #79717d);
+}
+
+.settings-overview.paper-main-page .navigation-scroll-tail {
+	height: calc(100px + env(safe-area-inset-bottom, 0px));
+}
+
+@media (max-width: 360px) {
+	.settings-overview.paper-main-page .paper-heading {
+		margin-right: -16px;
+		margin-left: -16px;
+	}
+	.settings-overview.paper-main-page .settings-screen {
+		padding-right: 16px;
+		padding-left: 16px;
+	}
+
+	.settings-overview.paper-main-page .settings-row {
+		gap: 8px;
+	}
+
+	.settings-overview.paper-main-page .settings-copy {
+		gap: 5px;
+	}
+
+	.settings-overview.paper-main-page .settings-copy text:first-child {
+		font-size: 14px;
+	}
+
+	.settings-overview.paper-main-page .settings-profile {
+		gap: 11px;
+		padding: 12px;
+	}
+}

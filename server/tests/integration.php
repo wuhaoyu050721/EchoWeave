@@ -140,7 +140,7 @@ $jsonBackup = [
     'characters' => [],
     'worldBooks' => [],
     'characterAssets' => [],
-    'settings' => ['app' => ['appLockEnabled' => false]],
+    'settings' => ['appearance' => ['theme' => 'light']],
 ];
 [$status] = callApi($app, 'POST', '/api/v1/json-exports', ['backup' => $jsonBackup]);
 expect($status === 401, 'JSON export upload should require authentication');

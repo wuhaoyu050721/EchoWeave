@@ -195,6 +195,12 @@ export function openStreamingSettings(state) {
   state.settingsView = 'streaming'
 }
 
+export function openNetworkProxySettings(state) {
+  state.activeTab = 'settings'
+  state.screen = 'settings'
+  state.settingsView = 'network-proxy'
+}
+
 export function openCharacterStatusSettings(state) {
   state.activeTab = 'settings'
   state.screen = 'settings'

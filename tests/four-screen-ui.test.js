@@ -1,9 +1,10 @@
+import { readMainPageSource } from './helpers/read-main-page.js'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 test('main page exposes the four approved reference states', async () => {
-  const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+  const source = await readMainPageSource()
 
   for (const className of [
     'conversations-view', 'providers-view', 'provider-card', 'provider-form-card',
@@ -22,7 +23,7 @@ test('main page exposes the four approved reference states', async () => {
 })
 
 test('provider editor exposes automatic presets and App-compatible custom avatar selection', async () => {
-  const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+  const source = await readMainPageSource()
 
   assert.match(source, /class="provider-avatar-selector"/)
   assert.match(source, /v-for="preset in providerAvatarPresets"/)
@@ -35,7 +36,7 @@ test('provider editor exposes automatic presets and App-compatible custom avatar
 })
 
 test('saved provider API keys stay masked until the user explicitly reveals them', async () => {
-  const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+  const source = await readMainPageSource()
 
   assert.match(source, /SAVED_API_KEY_MASK = '••••••••••••'/)
   assert.match(source, /:type="showApiKey \? 'text' : 'password'"/)
@@ -46,7 +47,7 @@ test('saved provider API keys stay masked until the user explicitly reveals them
 })
 
 test('latest completed or interrupted assistant replies expose a continue-writing action', async () => {
-  const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+  const source = await readMainPageSource()
 
   assert.match(source, /v-if="canContinueMessage\(message\)"[^>]*data-testid="continue-writing"[^>]*@click="continueMessage\(message\.id\)"/)
   assert.match(source, /v-if="canContinueMessage\(message\)"[^>]*data-testid="continue-interrupted"[^>]*@click="continueMessage\(message\.id\)"/)

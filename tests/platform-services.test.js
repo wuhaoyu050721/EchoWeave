@@ -1,3 +1,4 @@
+import { readMainPageSource } from './helpers/read-main-page.js'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
@@ -220,6 +221,48 @@ test('App chat streams through the registered native Android transport', async (
   await services.repository.close()
 })
 
+test('App services keep a saved manual phone proxy after repeated connection refusals', async () => {
+  const proxyUrl = 'http://127.0.0.1:7890'
+  const attempts = []
+  let listener
+  const uniApi = {
+    request() { assert.fail('manual proxy requests must not fall back to uni.request') },
+    aiChatKeystoreReady: () => true,
+    aiChatKeystoreEncrypt: value => JSON.stringify({ version: 1, algorithm: 'AES-GCM', iv: 'proxy-iv', ciphertext: Buffer.from(value).toString('base64') }),
+    aiChatKeystoreDecrypt: recordJson => Buffer.from(JSON.parse(recordJson).ciphertext, 'base64').toString(),
+    aiChatDetectHttpProxy: async () => proxyUrl,
+    onAiChatStreamEvent(callback) { listener = callback },
+    aiChatStreamCancel() { return true },
+    aiChatStreamRequest(options) {
+      attempts.push(options.proxyUrl)
+      queueMicrotask(() => listener({
+        requestId: options.requestId,
+        eventType: 'failure',
+        statusCode: 0,
+        code: 'network_error',
+        message: 'Connection refused: 127.0.0.1:7890'
+      }))
+    }
+  }
+  const services = await createAppServices({ plusApi: { sqlite: createNodePlusSqlite() }, uniApi })
+  try {
+    await services.networkProxy.detect({ force: true })
+    await services.repository.setSetting('networkProxy', { enabled: true, mode: 'manual', url: proxyUrl })
+
+    for (const streaming of [false, true]) {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        await assert.rejects(services.transport.request({
+          url: 'https://example.test/v1/chat/completions', method: 'POST', body: '{}',
+          ...(streaming ? { onChunk() {} } : {})
+        }), error => error.code === 'network_error' && /Connection refused/.test(error.message))
+      }
+    }
+    assert.deepEqual(attempts, [proxyUrl, proxyUrl, proxyUrl, proxyUrl])
+  } finally {
+    await services.close()
+  }
+})
+
 test('App chat bypasses the native stream transport when streaming is disabled', async () => {
   let nativeStreamCalls = 0
   let uniRequest
@@ -334,7 +377,7 @@ test('App chat routes Gemini profiles through the native Gemini SSE protocol', a
 test('main page uses the platform service factory', async () => {
   const [mainSource, pageSource, factorySource, appFactorySource, browserFactorySource] = await Promise.all([
     readFile(new URL('../main.js', import.meta.url), 'utf8'),
-    readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8'),
+    readMainPageSource(),
     readFile(new URL('../src/app/create-platform-services.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/app/create-app-services.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/app/create-browser-services.js', import.meta.url), 'utf8')
@@ -393,7 +436,7 @@ test('Android package declares only required permissions and optional camera har
 })
 
 test('provider actions guard against an unavailable service container', async () => {
-  const pageSource = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+  const pageSource = await readMainPageSource()
 
   assert.match(pageSource, /providerBusy\(\)\s*\{\s*return !this\.ready/)
   assert.match(pageSource, /providerServiceOrThrow\(\)/)

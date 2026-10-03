@@ -1,3 +1,4 @@
+import { readMainPageSource } from './helpers/read-main-page.js'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { UniPushNotificationAdapter, REPLY_NOTIFICATION_CHANNEL_ID } from '../src/platform/app/uni-push-notification-adapter.js'
@@ -152,7 +153,7 @@ test('requests POST_NOTIFICATIONS on Android 13 and newer', async () => {
 })
 
 test('settings UI exposes Android reply notifications on a dedicated settings page', async () => {
-  const source = await import('node:fs/promises').then(fs => fs.readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8'))
+  const source = await readMainPageSource()
   const manifest = await import('node:fs/promises').then(fs => fs.readFile(new URL('../manifest.json', import.meta.url), 'utf8'))
 
   assert.match(source, /data-testid="reply-notifications-entry"/)

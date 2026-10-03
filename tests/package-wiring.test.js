@@ -4,6 +4,7 @@ import { access, readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { readMainPageSource } from './helpers/read-main-page.js'
 
 const projectRoot = fileURLToPath(new URL('../', import.meta.url))
 
@@ -195,7 +196,7 @@ test('Android package declares every directly used native capability', async () 
     readFile(path.join(projectRoot, 'manifest.json'), 'utf8'),
     readFile(path.join(projectRoot, 'src/platform/app/app-file-exporter.js'), 'utf8'),
     readFile(path.join(projectRoot, 'src/app/create-app-services.js'), 'utf8'),
-    readFile(path.join(projectRoot, 'pages/index/index.vue'), 'utf8'),
+    readMainPageSource(),
     readFile(path.join(projectRoot, 'src/platform/app/uni-push-notification-adapter.js'), 'utf8')
   ])
   const appSources = [appExporter, appServices, pageSource, notificationAdapter].join('\n')

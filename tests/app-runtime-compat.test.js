@@ -1,3 +1,4 @@
+import { readMainPageSource } from './helpers/read-main-page.js'
 import assert from 'node:assert/strict'
 import { readFile, stat } from 'node:fs/promises'
 import test from 'node:test'
@@ -5,7 +6,7 @@ import { installLegacyRuntimePolyfills } from '../src/core/legacy-runtime-polyfi
 
 test('App runtime source avoids Array.prototype.at', async () => {
   const sources = await Promise.all([
-    readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8'),
+    readMainPageSource(),
     readFile(new URL('../src/services/chat-service.js', import.meta.url), 'utf8')
   ])
 
@@ -83,7 +84,7 @@ test('legacy WebView compatibility fills only missing runtime APIs', () => {
 
 test('App pages use bundled font icons instead of runtime SVG components', async () => {
   const [mainPage, diagnosticsPage, entrySource, previewEntry, iconStyles, appIconStyles, fontStats] = await Promise.all([
-    readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8'),
+    readMainPageSource(),
     readFile(new URL('../pages/android-diagnostics/index.vue', import.meta.url), 'utf8'),
     readFile(new URL('../main.js', import.meta.url), 'utf8'),
     readFile(new URL('../preview/main.js', import.meta.url), 'utf8'),
@@ -123,7 +124,7 @@ test('App icon bundle exposes every icon used by the pages', async () => {
 
 test('provider logos use raster image assets in App views', async () => {
   const [pageSource, stateSource, logoSource] = await Promise.all([
-    readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8'),
+    readMainPageSource(),
     readFile(new URL('../src/ui-state.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/components/provider-logo.js', import.meta.url), 'utf8').catch(() => '')
   ])
@@ -148,10 +149,10 @@ test('provider logos use raster image assets in App views', async () => {
 
 test('conversation and provider management use the shared App-rendered dialog layer', async () => {
 	const [source, dialogSource] = await Promise.all([
-		readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8'),
+		readMainPageSource(),
 		readFile(new URL('../src/components/app-dialog-layer.vue', import.meta.url), 'utf8')
 	])
-	const manageBlock = source.slice(source.indexOf('chooseConversationAction(conversation)'), source.indexOf('upsertMessage(message)'))
+	const manageBlock = source.slice(source.indexOf('chooseConversationAction(conversation)'), source.indexOf('\n\t\t\tupsertMessage(message) {'))
 	const providerDeleteBlock = source.slice(source.indexOf('async deleteProvider(provider)'), source.indexOf('async selectConversationProvider(provider)'))
 
 	assert.match(source, /function getUniApi\(\)/)
@@ -168,14 +169,14 @@ test('conversation and provider management use the shared App-rendered dialog la
 })
 
 test('both settings views wire the about application action', async () => {
-  const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+  const source = await readMainPageSource()
   const matches = source.match(/@click="showAboutApp"/g) || []
 
   assert.equal(matches.length, 2)
 })
 
 test('App JSON export writes text through plus.io before the browser Blob branch', async () => {
-  const source = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+  const source = await readMainPageSource()
   const exportBlock = source.slice(source.indexOf('async exportData()'), source.indexOf('chooseImportFile()'))
 
   assert.match(exportBlock, /typeof plus !== 'undefined'/)

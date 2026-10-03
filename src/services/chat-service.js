@@ -1,4 +1,4 @@
-import { buildChatContext } from '../core/chat-context.js'
+import { buildChatContext, selectChatContextMessages } from '../core/chat-context.js'
 import { createAbortController, createAbortError } from '../core/abort-controller-polyfill.js'
 import { extractAssistantStatus } from '../core/assistant-status.js'
 import {
@@ -19,6 +19,7 @@ import { normalizeImageOutput } from '../core/image-output.js'
 import { resolveProviderAvatarSource } from '../core/provider-avatar.js'
 import { renderCharacterTemplate } from '../core/character-prompt.js'
 import { createRuntimeId } from '../core/runtime-id.js'
+import { chatResponseError, emptyChatResponseError, sanitizeResponseDiagnostics } from '../core/chat-response-diagnostics.js'
 import {
   createStoryMemoryEntry,
   extractStoryMemory,
@@ -32,11 +33,6 @@ function isAbortError(error, signal) {
 function createTitle(content) {
   const normalized = String(content).replace(/\s+/g, ' ').trim()
   return normalized.slice(0, 24) || '新对话'
-}
-
-function textTail(value, maximumLength = 1200) {
-  const text = String(value ?? '')
-  return text.slice(-Math.max(0, Number(maximumLength) || 0))
 }
 
 function isStoryConversation(conversation) {
@@ -62,6 +58,7 @@ const CONTINUE_RESPONSE_PROMPT = [
 ].join('\n')
 
 const CHAT_CONTEXT_CANDIDATE_LIMIT = 80
+const CONTEXT_ATTACHMENT_BATCH_SIZE = 4
 
 async function readMessagePage(repository, conversationId, {
   beforeSequence = null,
@@ -85,8 +82,16 @@ async function loadContextAttachments(repository, conversationId, messages) {
     messages.flatMap(message => Array.isArray(message?.attachmentIds) ? message.attachmentIds : [])
   )]
   if (!attachmentIds.length) return []
+  if (typeof repository.getAttachments === 'function') {
+    return (await repository.getAttachments(attachmentIds))
+      .filter(attachment => attachment && !attachment.deletedAt)
+  }
   if (typeof repository.getAttachment === 'function') {
-    const attachments = await Promise.all(attachmentIds.map(id => repository.getAttachment(id)))
+    const attachments = []
+    for (let offset = 0; offset < attachmentIds.length; offset += CONTEXT_ATTACHMENT_BATCH_SIZE) {
+      attachments.push(...await Promise.all(attachmentIds.slice(offset, offset + CONTEXT_ATTACHMENT_BATCH_SIZE)
+        .map(id => repository.getAttachment(id))))
+    }
     return attachments.filter(attachment => attachment && !attachment.deletedAt)
   }
   const attachments = typeof repository.listConversationAttachments === 'function'
@@ -94,6 +99,49 @@ async function loadContextAttachments(repository, conversationId, messages) {
     : []
   const selectedIds = new Set(attachmentIds)
   return attachments.filter(attachment => selectedIds.has(attachment.id) && !attachment.deletedAt)
+}
+
+async function loadChatContext(repository, conversationId, options) {
+  const { maxCharacters = 60000 } = options
+  const characterBudget = Math.max(0, Number(maxCharacters) || 0)
+  const promptLength = String(options.systemPrompt ?? '').trim().length
+  if (characterBudget === promptLength &&
+      !String(options.postHistoryPrompt ?? '').trim() && !String(options.userTurnPrompt ?? '').trim()) {
+    // With no room, the original selector can skip costly newer messages and
+    // retain an older zero-cost message. Its candidate set is not monotonic as
+    // attachment costs arrive, so preserve that rare boundary in one pass.
+    return buildChatContext({
+      ...options,
+      attachments: await loadContextAttachments(repository, conversationId, options.messages)
+    })
+  }
+  const candidates = selectChatContextMessages(options)
+  const attachmentsById = new Map()
+  const loadedAttachmentIds = new Set()
+  let selected = []
+  // Read newest first so attachments belonging to history outside the actual
+  // character budget are never loaded in bulk. One small boundary batch may be
+  // read to discover the cost of old records without stored attachment metadata.
+  for (let end = candidates.length; end > 0; end -= CONTEXT_ATTACHMENT_BATCH_SIZE) {
+    const batch = candidates.slice(Math.max(0, end - CONTEXT_ATTACHMENT_BATCH_SIZE), end)
+      .map(message => ({
+        ...message,
+        attachmentIds: (message.attachmentIds || []).filter(id => !loadedAttachmentIds.has(id))
+      }))
+    const attachments = await loadContextAttachments(repository, conversationId, batch)
+    for (const message of batch) {
+      for (const id of message.attachmentIds) loadedAttachmentIds.add(id)
+    }
+    for (const attachment of attachments) attachmentsById.set(attachment.id, attachment)
+    const loadedMessages = candidates.slice(Math.max(0, end - CONTEXT_ATTACHMENT_BATCH_SIZE))
+    selected = selectChatContextMessages({
+      ...options,
+      messages: loadedMessages,
+      attachments: [...attachmentsById.values()]
+    })
+    if (selected.length < loadedMessages.length) break
+  }
+  return buildChatContext({ ...options, messages: selected, attachments: [...attachmentsById.values()] })
 }
 
 function groupTitle(participants) {
@@ -482,30 +530,40 @@ export class ChatService {
     }
   }
 
-  #startRequest({ requestId, assistantMessageId, onState, run }) {
+  #startRequest({ onState, run }) {
+    if (this.activeRequest) throw new Error('当前回答仍在生成，请先停止生成')
     const controller = createAbortController()
     const activeRequest = {
       controller,
-      requestId,
-      assistantMessageId,
+      requestId: null,
+      assistantMessageId: null,
       completion: null
     }
     this.activeRequest = activeRequest
-    onState?.({ generating: true, requestId })
-    const completion = (async () => {
+    // Reserve synchronously, before any repository read. Deferring preparation
+    // also makes completion available to stopAndWait from the first state event.
+    const completion = Promise.resolve().then(async () => {
       try {
+        onState?.({ generating: true, requestId: activeRequest.requestId })
+        if (controller.signal.aborted) throw createAbortError()
         return await run(controller, activeRequest)
       } finally {
         if (this.activeRequest === activeRequest) this.activeRequest = null
-        onState?.({ generating: false, requestId })
+        onState?.({ generating: false, requestId: activeRequest.requestId })
       }
-    })()
+    })
     activeRequest.completion = completion
     return completion
   }
 
-  async send({ conversationId, providerProfileId = null, content, attachments = [], mode = 'chat', imageOptions = {}, onMessage, onConversation, onState } = {}) {
-    if (this.activeRequest) throw new Error('当前回答仍在生成，请先停止生成')
+  async send(options = {}) {
+    return this.#startRequest({
+      onState: options.onState,
+      run: (controller, activeRequest) => this.#prepareSend(options, controller, activeRequest)
+    })
+  }
+
+  async #prepareSend({ conversationId, providerProfileId = null, content, attachments = [], mode = 'chat', imageOptions = {}, onMessage, onConversation } = {}, controller, activeRequest) {
     const text = String(content ?? '').trim()
     const preparedAttachments = Array.isArray(attachments) ? attachments : []
     const conversation = await this.repository.getConversation(conversationId)
@@ -514,6 +572,7 @@ export class ChatService {
     if (!text && !preparedAttachments.length) throw new Error('消息不能为空')
     if (generationMode === 'image' && preparedAttachments.length) throw new Error('生图模式暂不支持输入附件')
     const { messages: existingMessages } = await readMessagePage(this.repository, conversationId)
+    if (controller.signal.aborted) throw createAbortError()
     const groupSpeakers = isGroupConversation(conversation) && generationMode === 'chat'
       ? selectGroupResponders({ conversation, messages: existingMessages, content: text })
       : []
@@ -558,48 +617,46 @@ export class ChatService {
     onMessage?.({ ...assistantMessage })
     onConversation?.({ ...updatedConversation })
 
+    activeRequest.requestId = replyBatchId || assistantMessage.requestId
+    activeRequest.assistantMessageId = assistantMessage.id
     if (groupSpeakers.length) {
-      return this.#startRequest({
-        requestId: replyBatchId,
-        assistantMessageId: assistantMessage.id,
-        onState,
-        run: (controller, activeRequest) => this.#runGroupGeneration({
-          conversation: updatedConversation,
-          userMessage,
-          firstAssistantMessage: assistantMessage,
-          existingMessages,
-          speakers: groupSpeakers,
-          baseSequence: sequence,
-          replyBatchId,
-          providerProfileId,
-          onMessage,
-          onConversation,
-          controller,
-          activeRequest
-        })
+      return this.#runGroupGeneration({
+        conversation: updatedConversation,
+        userMessage,
+        firstAssistantMessage: assistantMessage,
+        existingMessages,
+        speakers: groupSpeakers,
+        baseSequence: sequence,
+        replyBatchId,
+        providerProfileId,
+        onMessage,
+        onConversation,
+        controller,
+        activeRequest
       })
     }
 
-    return this.#startRequest({
-      requestId: assistantMessage.requestId,
-      assistantMessageId: assistantMessage.id,
-      onState,
-      run: controller => this.#runGeneration({
-        conversation: updatedConversation,
-        userMessage,
-        assistantMessage,
-        contextMessages: [...existingMessages, userMessage],
-        generationMode,
-        providerProfileId,
-        imageOptions,
-        onMessage,
-        controller
-      })
+    return this.#runGeneration({
+      conversation: updatedConversation,
+      userMessage,
+      assistantMessage,
+      contextMessages: [...existingMessages, userMessage],
+      generationMode,
+      providerProfileId,
+      imageOptions,
+      onMessage,
+      controller
     })
   }
 
-  async retry(messageId, { providerProfileId = null, onMessage, onState } = {}) {
-    if (this.activeRequest) throw new Error('当前回答仍在生成，请先停止生成')
+  async retry(messageId, options = {}) {
+    return this.#startRequest({
+      onState: options.onState,
+      run: (controller, activeRequest) => this.#prepareRetry(messageId, options, controller, activeRequest)
+    })
+  }
+
+  async #prepareRetry(messageId, { providerProfileId = null, onMessage } = {}, controller, activeRequest) {
     const previous = await this.repository.getMessage(messageId)
     if (!previous || previous.role !== 'assistant') throw new Error('只能重试助手消息')
     if (previous.isGreeting) throw new Error('角色问候语不能重试，请从联系人新建会话')
@@ -614,6 +671,7 @@ export class ChatService {
       .filter((message) => message.role === 'user' && message.sequence < previous.sequence)
     const userMessage = userMessages[userMessages.length - 1]
     if (!conversation || !userMessage) throw new Error('找不到对应的用户消息')
+    if (controller.signal.aborted) throw createAbortError()
     const timestamp = this.now()
     const assistantMessage = assistantMessageFor({
       idFactory: this.idFactory,
@@ -629,26 +687,30 @@ export class ChatService {
     })
     await this.repository.saveMessage(assistantMessage)
     onMessage?.({ ...assistantMessage })
-    return this.#startRequest({
-      requestId: assistantMessage.requestId,
-      assistantMessageId: assistantMessage.id,
-      onState,
-      run: controller => this.#runGeneration({
-        conversation,
-        userMessage,
-        assistantMessage,
-        contextMessages: messages,
-        generationMode: assistantMessage.generationMode,
-        providerProfileId,
-        imageOptions: {},
-        onMessage,
-        controller
-      })
+    activeRequest.requestId = assistantMessage.requestId
+    activeRequest.assistantMessageId = assistantMessage.id
+    return this.#runGeneration({
+      conversation,
+      userMessage,
+      assistantMessage,
+      contextMessages: messages,
+      generationMode: assistantMessage.generationMode,
+      providerProfileId,
+      imageOptions: {},
+      onMessage,
+      controller,
+      requestKind: 'retry'
     })
   }
 
-  async continueResponse(messageId, { providerProfileId = null, onMessage, onConversation, onState } = {}) {
-    if (this.activeRequest) throw new Error('当前回答仍在生成，请先停止生成')
+  async continueResponse(messageId, options = {}) {
+    return this.#startRequest({
+      onState: options.onState,
+      run: (controller, activeRequest) => this.#prepareContinuation(messageId, options, controller, activeRequest)
+    })
+  }
+
+  async #prepareContinuation(messageId, { providerProfileId = null, onMessage, onConversation } = {}, controller, activeRequest) {
     const previous = await this.repository.getMessage(messageId)
     if (!previous || previous.role !== 'assistant') throw new Error('只能续写助手消息')
     if (!['completed', 'interrupted'].includes(previous.status) || !String(previous.content ?? '').trim()) {
@@ -662,6 +724,7 @@ export class ChatService {
     const lastSequence = Number(latestMessage?.sequence) || 0
     if (!conversation) throw new Error('会话不存在')
     if (latestMessage?.id !== previous.id) throw new Error('只能从最新一条回复继续续写')
+    if (controller.signal.aborted) throw createAbortError()
 
     const timestamp = this.now()
     const assistantMessage = assistantMessageFor({
@@ -696,21 +759,19 @@ export class ChatService {
     onMessage?.({ ...assistantMessage })
     onConversation?.({ ...updatedConversation })
 
-    return this.#startRequest({
-      requestId: assistantMessage.requestId,
-      assistantMessageId: assistantMessage.id,
-      onState,
-      run: controller => this.#runGeneration({
-        conversation: updatedConversation,
-        userMessage: requestOnlyUserMessage,
-        assistantMessage,
-        contextMessages: [...messages, requestOnlyUserMessage],
-        generationMode: isStoryConversation(conversation) ? 'story' : 'chat',
-        providerProfileId,
-        imageOptions: {},
-        onMessage,
-        controller
-      })
+    activeRequest.requestId = assistantMessage.requestId
+    activeRequest.assistantMessageId = assistantMessage.id
+    return this.#runGeneration({
+      conversation: updatedConversation,
+      userMessage: requestOnlyUserMessage,
+      assistantMessage,
+      contextMessages: [...messages, requestOnlyUserMessage],
+      generationMode: isStoryConversation(conversation) ? 'story' : 'chat',
+      providerProfileId,
+      imageOptions: {},
+      onMessage,
+      controller,
+      requestKind: 'continue'
     })
   }
 
@@ -754,7 +815,7 @@ export class ChatService {
     let autoHandoffCount = 0
     let autoHandoffLimitReached = false
     while (pendingSpeakers.length && responses.length < GROUP_REPLY_CHAIN_LIMIT) {
-      if (controller.signal.aborted) break
+      if (controller.signal.aborted && responses.length) break
       const speaker = pendingSpeakers.shift()
       const speakerKey = groupParticipantKey(speaker)
       pendingSpeakerKeys.delete(speakerKey)
@@ -831,17 +892,32 @@ export class ChatService {
     }
   }
 
-  async #runGeneration({ conversation, userMessage, assistantMessage, contextMessages, generationMode = 'chat', providerProfileId = null, imageOptions = {}, onMessage, controller }) {
+  async #runGeneration({ conversation, userMessage, assistantMessage, contextMessages, generationMode = 'chat', providerProfileId = null, imageOptions = {}, onMessage, controller, requestKind = 'send' }) {
     let dirtyCharacters = 0
     let dirty = false
     let persistence = Promise.resolve()
+    let persistenceError = null
+    let responseDiagnostics = { requestKind, transportObserved: false, textDeltaCount: 0, textCharacters: 0 }
+    const visibleResponseText = () => extractAssistantStatus(
+      extractStoryMemory(assistantMessage.content).content
+    ).content.trim()
     const queuePersistence = (force = false) => {
       if (!dirty && !force) return persistence
       dirty = false
       dirtyCharacters = 0
       const snapshot = { ...assistantMessage }
       delete snapshot.attachments
-      persistence = persistence.then(() => this.repository.saveMessage(snapshot))
+      // Every queued write settles here, including timer/delta initiated writes
+      // that have no awaiting caller. A rejected write must not poison the tail.
+      persistence = persistence.then(async () => {
+        try {
+          await this.repository.saveMessage(snapshot)
+          persistenceError = null
+        } catch (error) {
+          persistenceError = error
+          dirty = true
+        }
+      })
       return persistence
     }
     const interval = this.setIntervalFn(() => {
@@ -854,6 +930,7 @@ export class ChatService {
         providerProfileId ||
         conversation.providerProfileId
       const profile = await this.providerService.getRequestProfile(requestProviderProfileId)
+      responseDiagnostics.protocolType = profile.protocolType || this.provider.protocolType || 'unknown'
       const requestModel = assistantMessage.speakerProviderProfileId
         ? assistantMessage.speakerModelName || profile.defaultModel
         : conversation.modelName || profile.defaultModel
@@ -863,6 +940,7 @@ export class ChatService {
       let result
       let callbackImageCount = 0
       let callbackImagePersistence = Promise.resolve()
+      let callbackImageError = null
       const markGeneratedImageDirty = () => {
         dirty = true
         dirtyCharacters = 200
@@ -872,6 +950,8 @@ export class ChatService {
           callbackImageCount += await this.#persistGeneratedImages(
             [image], conversation, assistantMessage, onMessage, markGeneratedImageDirty
           )
+        }).catch(error => {
+          callbackImageError = error
         })
       }
       try {
@@ -892,13 +972,11 @@ export class ChatService {
           const systemPrompt = typeof instructions === 'string' ? instructions : instructions?.systemPrompt
           const postHistoryPrompt = typeof instructions === 'string' ? '' : instructions?.postHistoryPrompt
           const userTurnPrompt = typeof instructions === 'string' ? '' : instructions?.userTurnPrompt
-          const attachments = await loadContextAttachments(this.repository, conversation.id, contextMessages)
           const visibleMessages = isGroupConversation(conversation)
             ? groupVisibleMessages(contextMessages, { userName: await this.getUserName() })
             : contextMessages
-          const requestMessages = buildChatContext({
+          const requestMessages = await loadChatContext(this.repository, conversation.id, {
             messages: visibleMessages,
-            attachments,
             systemPrompt,
             postHistoryPrompt,
             userTurnPrompt
@@ -932,14 +1010,14 @@ export class ChatService {
               systemPromptLength: String(systemPrompt ?? '').length,
               postHistoryPromptLength: String(postHistoryPrompt ?? '').length,
               userTurnPromptLength: String(userTurnPrompt ?? '').length,
-              firstSystemTail: textTail(firstSystem, 1000),
-              lastSystemTail: textTail(lastSystem, 500),
-              latestUserTail: textTail(latestUser, 1000)
+              latestUserLength: latestUser.length
             })
           }
           const streamingEnabled = await this.getStreamingEnabled()
+          responseDiagnostics.stream = streamingEnabled !== false
           const segmentedDisplayEnabled = streamingEnabled !== false &&
             await this.getStreamingSegmentedDisplayEnabled()
+          if (controller.signal.aborted) throw createAbortError()
           assistantMessage.responseDisplayMode = segmentedDisplayEnabled ? 'segmented' : 'continuous'
           result = await this.provider.streamChat(profile, {
             model: requestModel,
@@ -949,6 +1027,8 @@ export class ChatService {
           }, {
             onDelta: (delta) => {
               if (controller.signal.aborted) return
+              responseDiagnostics.textDeltaCount += 1
+              responseDiagnostics.textCharacters += String(delta || '').length
               assistantMessage.content += delta
               assistantMessage.updatedAt = this.now()
               dirty = true
@@ -961,7 +1041,9 @@ export class ChatService {
         }
       } finally {
         await callbackImagePersistence
+        if (callbackImageError) throw callbackImageError
       }
+      responseDiagnostics = { ...responseDiagnostics, ...result?.responseDiagnostics, requestKind }
       const returnedImageCount = await this.#persistGeneratedImages(
         result?.images || [],
         conversation,
@@ -970,20 +1052,46 @@ export class ChatService {
         markGeneratedImageDirty
       )
       const generatedImageCount = callbackImageCount + returnedImageCount
+      if (controller.signal.aborted) throw createAbortError()
       if (generationMode === 'image' && generatedImageCount === 0) throw new Error('生图接口没有返回图片')
-      assistantMessage.status = 'completed'
       assistantMessage.finishReason = result?.finishReason ?? null
-      } catch (error) {
-        if (isAbortError(error, controller.signal)) {
-          assistantMessage.status = 'cancelled'
-        } else {
-          assistantMessage.status = assistantMessage.content ? 'interrupted' : 'failed'
-          assistantMessage.errorCode = error?.code || 'request_failed'
-          assistantMessage.errorMessage = error?.message || '请求失败'
-        }
-      } finally {
+      if (generationMode !== 'image' && !visibleResponseText() && generatedImageCount === 0) {
+        if (!assistantMessage.content) throw emptyChatResponseError(responseDiagnostics)
+        const hiddenOnly = Boolean(String(assistantMessage.content).trim())
+        throw chatResponseError('empty_visible_response', hiddenOnly
+          ? '接口返回了状态或故事记忆信息，但没有返回可显示的回复正文，请重试或查看响应诊断'
+          : '接口只返回了空白字符，没有可显示的回复正文，请重试或查看响应诊断',
+        { ...responseDiagnostics, emptyKind: hiddenOnly ? 'hidden_only' : 'whitespace' })
+      }
+      assistantMessage.status = 'completed'
+    } catch (error) {
+      responseDiagnostics = { ...responseDiagnostics, ...error?.responseDiagnostics, requestKind }
+      if (isAbortError(error, controller.signal)) {
+        assistantMessage.status = 'cancelled'
+      } else {
+        assistantMessage.status = visibleResponseText() || assistantMessage.attachmentIds?.length ? 'interrupted' : 'failed'
+        assistantMessage.errorCode = error?.code || 'request_failed'
+        assistantMessage.errorMessage = error?.message || '请求失败'
+      }
+    } finally {
       this.clearIntervalFn(interval)
       assistantMessage.updatedAt = this.now()
+      assistantMessage.responseDiagnostics = sanitizeResponseDiagnostics({
+        ...responseDiagnostics,
+        requestKind,
+        rawCharacters: String(assistantMessage.content || '').length,
+        visibleCharacters: visibleResponseText().length,
+        imageCount: assistantMessage.attachments?.length || 0,
+        finishReason: assistantMessage.finishReason || responseDiagnostics.finishReason
+      })
+      const logResponseSummary = () => this.#addDiagnosticLog('chat_response_summary', {
+        conversationId: conversation.id,
+        messageId: assistantMessage.id,
+        requestId: assistantMessage.requestId,
+        messageStatus: assistantMessage.status,
+        errorCode: assistantMessage.errorCode || '',
+        ...assistantMessage.responseDiagnostics
+      })
       if (assistantMessage.status === 'completed' && isStoryConversation(conversation)) {
         try {
           const memoryResult = await this.#applyStoryMemory(conversation, assistantMessage)
@@ -998,6 +1106,20 @@ export class ChatService {
         }
       }
       await queuePersistence(true)
+      if (persistenceError) {
+        if (assistantMessage.status !== 'cancelled') {
+          assistantMessage.status = assistantMessage.content || assistantMessage.attachmentIds?.length ? 'interrupted' : 'failed'
+        }
+        assistantMessage.errorCode = 'message_save_failed'
+        assistantMessage.errorMessage = '回复未能保存到本机，请先复制保留内容，恢复存储空间后再试'
+        logResponseSummary()
+        onMessage?.({ ...assistantMessage })
+        const error = new Error(assistantMessage.errorMessage, { cause: persistenceError })
+        error.code = assistantMessage.errorCode
+        error.messageSnapshot = { ...assistantMessage }
+        throw error
+      }
+      logResponseSummary()
       const statusCharacterId = assistantMessage.speakerCharacterId || conversation.characterId
       if (generationMode === 'chat' && statusCharacterId) {
         const response = String(assistantMessage.content ?? '')
@@ -1008,10 +1130,9 @@ export class ChatService {
           messageId: assistantMessage.id,
           speakerCharacterId: statusCharacterId,
           messageStatus: assistantMessage.status,
-          finishReason: assistantMessage.finishReason || '',
+          finishReason: assistantMessage.responseDiagnostics?.finishReason || '',
           errorCode: assistantMessage.errorCode || '',
           responseLength: response.length,
-          responseTail: textTail(response),
           canonicalOpenCount: (response.match(/<\s*sumo_monitor\b/gi) || []).length,
           canonicalCloseCount: (response.match(/<\s*\/\s*sumo_monitor\s*>/gi) || []).length,
           statusParsed: Boolean(extracted.status),

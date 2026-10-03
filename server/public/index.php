@@ -28,7 +28,10 @@ $app = new CloudBackupApp(
     maxSyncPullBytes: (int) ($config['max_sync_pull_bytes'] ?? 50331648),
     maxAuthAttempts: (int) ($config['max_auth_attempts'] ?? 10),
     authRateLimitWindow: (int) ($config['auth_rate_limit_window'] ?? 900),
-    syncMutationRetention: (int) ($config['sync_mutation_retention'] ?? 15552000)
+    syncMutationRetention: (int) ($config['sync_mutation_retention'] ?? 15552000),
+    jsonExportTtl: (int) ($config['json_export_ttl'] ?? 604800),
+    maxJsonExportsPerUser: (int) ($config['max_json_exports_per_user'] ?? 20),
+    maxJsonExportTotalBytes: (int) ($config['max_json_export_total_bytes'] ?? 524288000)
 );
 $headers = function_exists('getallheaders') ? getallheaders() : [];
 $headers['x-client-ip'] = $_SERVER['REMOTE_ADDR'] ?? '';
@@ -59,6 +62,8 @@ if ($contentLength > $maxRequestBytes || strlen($rawPayload) > $maxRequestBytes)
 http_response_code($status);
 header('Content-Type: application/json; charset=utf-8');
 header('X-Content-Type-Options: nosniff');
+header('Cache-Control: no-store');
+header('Referrer-Policy: no-referrer');
 if ($status === 200 && $_SERVER['REQUEST_METHOD'] === 'GET' && preg_match('#^/api/v1/json-exports/[A-Za-z0-9_-]{43}$#', $path)) {
     header('Content-Disposition: attachment; filename="ai-chat-backup.json"');
 }

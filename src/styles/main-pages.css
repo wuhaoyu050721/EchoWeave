@@ -1,0 +1,124 @@
+.app-shell {
+	--paper-bg: #f8f7f4;
+	--paper-ink: #25232a;
+	--paper-muted: #706775;
+	--paper-accent: #7850a0;
+	--paper-soft: #eee8f4;
+	--paper-line: #e5e0e7;
+}
+
+.app-shell .paper-main-page {
+	background: var(--paper-bg);
+	color: var(--paper-ink);
+	font-family: "Noto Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.app-shell .paper-action {
+	display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+	min-height: 40px; min-width: 44px; padding: 0 14px; border: 0; border-radius: 22px;
+	background: var(--paper-soft); color: var(--paper-accent); font-size: 14px; line-height: 20px;
+	font-weight: 550; white-space: nowrap; box-shadow: none;
+}
+
+.app-shell .paper-action:disabled { opacity: .5; }
+.app-shell .paper-action:not(:disabled):active { opacity: .72; }
+.app-shell .paper-main-page button:focus-visible { outline: 2px solid var(--paper-accent); outline-offset: 3px; }
+.app-shell .paper-search {
+	display: flex; align-items: center; gap: 10px; min-height: 44px;
+	padding: 0 14px; border-radius: 15px; background: #efedef; color: var(--paper-muted);
+	border: 1px solid transparent; box-shadow: none;
+}
+.app-shell .paper-search:focus-within { border-color: #bd9ed1; }
+.app-shell .paper-search input { min-width: 0; flex: 1; height: 42px; padding: 0; font-size: 15px; color: var(--paper-ink); border: 0; outline: none; background: transparent; }
+.app-shell .paper-search button { display: flex; align-items: center; justify-content: center; width: 32px; height: 40px; color: var(--paper-muted); }
+.app-shell .paper-section-heading { display: flex; align-items: center; justify-content: space-between; margin: 20px 0 10px; color: var(--paper-muted); font-size: 14px; line-height: 20px; font-weight: 650; }
+.app-shell .paper-main-page input, .app-shell .paper-main-page button, .app-shell .paper-main-page textarea { font-family: inherit; }
+.app-shell .paper-main-page input::placeholder { color: var(--paper-muted); opacity: 1; }
+
+/* Match the five-page design without changing the conversation/reader canvas. */
+.app-shell .bottom-nav {
+	left: 0; right: 0; bottom: 0; width: 100%; max-width: none;
+	height: calc(78px + env(safe-area-inset-bottom, 0px)); margin: 0;
+	padding: 7px 7px calc(7px + env(safe-area-inset-bottom, 0px));
+	border: 0; border-top: 1px solid var(--paper-line); border-radius: 0;
+	background: #fdfcfc; box-shadow: none; backdrop-filter: none;
+	transform: none; animation: none; overflow: visible;
+}
+.app-shell .bottom-nav .nav-indicator { display: none; }
+.app-shell .bottom-nav .nav-item {
+	position: relative; display: flex; flex: 1; min-width: 0; height: 62px;
+	flex-direction: column; align-items: center; justify-content: center;
+	gap: 6px; margin: 0 3px; padding: 6px 0; border-radius: 27px;
+	color: #67626e; background: transparent; transition: background-color 140ms ease, color 140ms ease;
+}
+.app-shell .bottom-nav .nav-item .app-icon { transform: none; }
+.app-shell .bottom-nav .nav-item text:not(.app-icon) { font-size: 12px; line-height: 17px; font-weight: 500; }
+.app-shell .bottom-nav .nav-item.active { color: var(--paper-accent); background: var(--paper-soft); }
+@media (prefers-reduced-motion: reduce) { .app-shell .bottom-nav .nav-item { transition: none; } }
+
+.app-shell .conversations-view { --home-accent: var(--paper-accent); }
+.app-shell .conversation-list, .app-shell .stories-scroll { padding: 0; background: transparent; overflow-y: auto; }
+.app-shell .conversation-page-content, .app-shell .stories-page-content { padding: 0 20px; }
+.app-shell .conversation-search { height: 44px; margin: 0; }
+.app-shell .conversation-row { min-height: 86px; background: transparent; contain-intrinsic-size: auto 86px; }
+.app-shell .conversation-row + .conversation-row { border-top: 1px solid var(--paper-line); }
+.app-shell .conversation-open { min-height: 86px; padding: 12px 0; border-radius: 8px; }
+.app-shell .conversation-open:active { background: var(--paper-soft); }
+.app-shell .conversation-avatar, .app-shell .conversation-avatar-logo { width: 60px; height: 60px; }
+.app-shell .conversation-copy { padding: 0 50px 0 14px; }
+.app-shell .conversations-view .row-title { font-size: 17px; line-height: 25px; font-weight: 650; color: var(--paper-ink); }
+.app-shell .conversations-view .row-preview { margin-top: 5px; font-size: 14px; line-height: 21px; color: var(--paper-muted); }
+.app-shell .conversations-view .row-time { top: 13px; right: 0; height: 60px; min-width: 44px; padding: 0 0 0 5px; gap: 5px; background: transparent; color: var(--paper-muted); font-size: 11px; }
+.app-shell .conversations-view .row-time .app-icon { transform: none; }
+.app-shell .conversation-create-group { display: flex; align-items: center; justify-content: center; gap: 9px; width: 100%; min-height: 54px; margin-top: 14px; color: var(--paper-accent); font-size: 14px; }
+.app-shell .conversations-view .empty-state { min-height: 250px; gap: 14px; padding: 32px 12px; color: var(--paper-muted); }
+.app-shell .conversations-view .empty-state > .app-icon { color: #a992bb; }
+.app-shell .conversation-scroll-tail, .app-shell .stories-tail { height: calc(96px + env(safe-area-inset-bottom, 0px)); }
+.app-shell .conversations-view .home-menu-backdrop { inset: 0; }
+.app-shell .conversations-view .home-action-menu { top: 98px; right: 20px; width: 164px; border-radius: 14px; background: var(--paper-bg); border-color: var(--paper-line); box-shadow: 0 9px 28px rgba(42, 31, 55, .12); }
+.app-shell .conversations-view .home-action-menu button { min-height: 44px; }
+.app-shell .conversations-view .paper-heading-actions { z-index: 13; }
+
+.app-shell .stories-view { --story-accent: var(--paper-accent); }
+.app-shell .stories-search { height: 44px; }
+.app-shell .stories-list { overflow: visible; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.app-shell .story-progress-list { margin-bottom: 16px; }
+.app-shell .story-progress-row { position: relative; background: transparent; }
+.app-shell .story-progress-row + .story-progress-row { border-color: var(--paper-line); }
+.app-shell .story-progress-open { padding: 12px 0; border-radius: 10px; }
+.app-shell .story-progress-open:active, .app-shell .story-progress-manage:active { background: var(--paper-soft); }
+.app-shell .story-progress-name { color: var(--paper-ink); }
+.app-shell .story-progress-preview, .app-shell .story-progress-time { color: var(--paper-muted); }
+.app-shell .story-featured-card { display: block; overflow: hidden; border: 1px solid #eeeaee; border-radius: 13px; background: #fdfcfb; content-visibility: visible; }
+.app-shell .story-featured-card .story-progress-open { display: block; width: 100%; padding: 0; border-radius: 13px; }
+.app-shell .story-featured-art { display: block; width: 100%; height: 152px; object-fit: cover; }
+.app-shell .story-featured-card .story-progress-copy { gap: 4px; padding: 11px 14px 12px; }
+.app-shell .story-featured-card .story-progress-title-line { padding-right: 30px; }
+.app-shell .story-featured-card .story-progress-name { font-size: 18px; line-height: 26px; }
+.app-shell .story-featured-card .story-progress-time { display: none; }
+.app-shell .story-featured-card .story-progress-preview { font-size: 13px; line-height: 21px; }
+.app-shell .story-featured-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--paper-muted); font-size: 11px; line-height: 18px; }
+.app-shell .story-continue-pill { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 31px; padding: 0 15px; border-radius: 19px; background: var(--paper-accent); color: #fff; font-size: 12px; }
+.app-shell .story-featured-card .story-progress-manage { position: absolute; top: 154px; right: 4px; margin: 0; width: 44px; height: 44px; color: var(--paper-muted); }
+.app-shell .story-featured-card .story-progress-manage .app-icon { transform: none; }
+.app-shell .story-character-row { min-height: 80px; padding: 8px 0; gap: 13px; background: transparent; border-radius: 10px; }
+.app-shell .story-character-row:active { background: var(--paper-soft); }
+.app-shell .story-character-avatar { width: 70px; height: 70px; border-radius: 10px; }
+.app-shell .story-character-name { color: var(--paper-ink); }
+.app-shell .story-character-meta { font-size: 12px; line-height: 19px; color: var(--paper-muted); }
+.app-shell .story-start-pill { width: 68px; height: 30px; border-radius: 17px; border-color: #b798cc; background: transparent; color: var(--paper-accent); }
+.app-shell .story-start-pill .app-icon { display: none; }
+.app-shell .stories-import-grid { gap: 16px; margin-top: 18px; padding-top: 10px; border-top: 1px solid var(--paper-line); }
+.app-shell .stories-import-grid button { justify-content: center; gap: 7px; height: 44px; padding: 0; border: 0; border-radius: 10px; background: transparent; color: var(--paper-accent); box-shadow: none; }
+.app-shell .stories-import-grid button text:last-child { font-size: 13px; line-height: 20px; color: var(--paper-accent); }
+.app-shell .stories-memory-note { display: block; margin-top: 3px; color: var(--paper-muted); font-size: 11px; line-height: 18px; text-align: center; }
+.app-shell .stories-empty { padding: 18px 0 0; min-height: 280px; gap: 17px; color: var(--paper-muted); }
+.app-shell .stories-empty-art { display: block; width: 100%; height: 152px; border-radius: 13px; object-fit: cover; }
+.app-shell .stories-empty button { border: 0; border-radius: 22px; background: var(--paper-soft); color: var(--paper-accent); min-height: 44px; }
+@media (max-width: 350px) {
+	.app-shell .conversation-page-content, .app-shell .stories-page-content { padding-right: 16px; padding-left: 16px; }
+	.app-shell .conversation-avatar, .app-shell .conversation-avatar-logo { width: 52px; height: 52px; }
+	.app-shell .conversations-view .row-title { font-size: 16px; }
+	.app-shell .story-character-avatar { width: 58px; height: 58px; }
+	.app-shell .story-character-row { gap: 10px; }
+}

@@ -38,7 +38,10 @@ final class CloudBackupApp
         private int $maxSyncPullBytes = 50331648,
         private int $maxAuthAttempts = 10,
         private int $authRateLimitWindow = 900,
-        private int $syncMutationRetention = 15552000
+        private int $syncMutationRetention = 15552000,
+        private int $jsonExportTtl = 604800,
+        private int $maxJsonExportsPerUser = 20,
+        private int $maxJsonExportTotalBytes = 524288000
     )
     {
         $this->clock ??= static fn (): int => time();
@@ -91,9 +94,11 @@ final class CloudBackupApp
             checksum CHAR(64) NOT NULL,
             byte_size INTEGER NOT NULL,
             format_version INTEGER NOT NULL,
-            created_at INTEGER NOT NULL
+            created_at INTEGER NOT NULL,
+            expires_at INTEGER NOT NULL
         )');
         $pdo->exec('CREATE INDEX idx_json_exports_user_created ON json_exports (user_id, created_at)');
+        $pdo->exec('CREATE INDEX idx_json_exports_expiry ON json_exports (expires_at)');
         $pdo->exec('CREATE TABLE sync_user_state (
             user_id INTEGER PRIMARY KEY,
             current_revision INTEGER NOT NULL DEFAULT 0,
@@ -149,6 +154,9 @@ final class CloudBackupApp
             if ($method === 'GET' && preg_match('#^/api/v1/json-exports/(' . self::JSON_EXPORT_TOKEN_PATTERN . ')$#', $path, $matches)) {
                 return $this->downloadJsonExport($matches[1]);
             }
+            if ($method === 'DELETE' && preg_match('#^/api/v1/json-exports/([1-9][0-9]*)$#', $path, $matches)) {
+                return $this->revokeJsonExport($headers, $matches[1]);
+            }
 
             return match ($method . ' ' . $path) {
                 'POST /api/v1/auth/register' => $this->register($headers, $body),
@@ -157,6 +165,7 @@ final class CloudBackupApp
                 'POST /api/v1/auth/logout' => $this->logout($headers, $body),
                 'PUT /api/v1/profile' => $this->updateProfile($headers, $body),
                 'POST /api/v1/json-exports' => $this->uploadJsonExport($headers, $body),
+                'GET /api/v1/json-exports' => $this->listJsonExports($headers),
                 'PUT /api/v1/backup' => $this->uploadBackup($headers, $body),
                 'GET /api/v1/backup/meta' => $this->backupMetadata($headers),
                 'GET /api/v1/backup' => $this->downloadBackup($headers),
@@ -478,6 +487,11 @@ final class CloudBackupApp
         if (!is_array($backup)) throw new InvalidArgumentException('backup is invalid');
         $backup = $this->normalizeJsonExport($backup);
         $formatVersion = $this->validateJsonExport($backup);
+        // Also protect exports made by older clients that included device PINs.
+        foreach (['app', 'appLock', 'appLockEnabled', 'cloudDeviceId', 'cloudAutoBackup', 'cloudConfig', 'networkProxy'] as $key) {
+            unset($backup['settings'][$key]);
+        }
+        if ($backup['settings'] === []) $backup['settings'] = new stdClass();
         $json = json_encode($backup, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
         $bytes = strlen($json);
         if ($bytes > $this->maxBackupBytes) {
@@ -486,31 +500,79 @@ final class CloudBackupApp
 
         $token = $this->randomToken();
         $now = $this->now();
-        $statement = $this->pdo->prepare('INSERT INTO json_exports (user_id, token_hash, backup_json, checksum, byte_size, format_version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
-        $statement->execute([
-            $user['id'],
-            $this->tokenHash($token),
-            $json,
-            hash('sha256', $json),
-            $bytes,
-            $formatVersion,
-            $now,
-        ]);
+        $expiresAt = $now + max(1, $this->jsonExportTtl);
+        $this->pruneExpiredJsonExports();
+        $this->pdo->beginTransaction();
+        try {
+            // Serialize quota checks for concurrent uploads by the same account.
+            if ($this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
+                $this->fetchOne('SELECT id FROM users WHERE id = ? FOR UPDATE', [$user['id']]);
+            }
+            $usage = $this->fetchOne('SELECT COUNT(*) AS total, COALESCE(SUM(byte_size), 0) AS bytes FROM json_exports WHERE user_id = ?', [$user['id']]);
+            if ((int) $usage['total'] >= max(1, $this->maxJsonExportsPerUser) || (int) $usage['bytes'] + $bytes > max(1, $this->maxJsonExportTotalBytes)) {
+                throw new CloudSyncHttpException(409, 'json_export_quota_exceeded', '分享数量或总容量已达上限，请先撤销不再需要的分享');
+            }
+            $statement = $this->pdo->prepare('INSERT INTO json_exports (user_id, token_hash, backup_json, checksum, byte_size, format_version, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+            $statement->execute([
+                $user['id'], $this->tokenHash($token), $json, hash('sha256', $json),
+                $bytes, $formatVersion, $now, $expiresAt,
+            ]);
+            $id = (string) $this->pdo->lastInsertId();
+            $this->pdo->commit();
+        } catch (Throwable $error) {
+            if ($this->pdo->inTransaction()) $this->pdo->rollBack();
+            throw $error;
+        }
 
         $path = '/api/v1/json-exports/' . $token;
         return [201, ['export' => [
+            'id' => $id,
             'download_url' => $this->publicBaseUrl . $path,
             'byte_size' => $bytes,
             'format_version' => $formatVersion,
             'created_at' => $now,
+            'expires_at' => $expiresAt,
         ]]];
+    }
+
+    private function pruneExpiredJsonExports(): void
+    {
+        $statement = $this->pdo->prepare('DELETE FROM json_exports WHERE expires_at <= ?');
+        $statement->execute([$this->now()]);
+    }
+
+    private function listJsonExports(array $headers): array
+    {
+        $user = $this->authenticate($headers);
+        if (!$user) return $this->unauthorized();
+        $this->pruneExpiredJsonExports();
+        $statement = $this->pdo->prepare('SELECT id, byte_size, format_version, created_at, expires_at FROM json_exports WHERE user_id = ? ORDER BY created_at DESC, id DESC');
+        $statement->execute([$user['id']]);
+        $exports = array_map(static fn (array $row): array => [
+            'id' => (string) $row['id'],
+            'byte_size' => (int) $row['byte_size'],
+            'format_version' => (int) $row['format_version'],
+            'created_at' => (int) $row['created_at'],
+            'expires_at' => (int) $row['expires_at'],
+        ], $statement->fetchAll());
+        return [200, ['exports' => $exports]];
+    }
+
+    private function revokeJsonExport(array $headers, string $id): array
+    {
+        $user = $this->authenticate($headers);
+        if (!$user) return $this->unauthorized();
+        $statement = $this->pdo->prepare('DELETE FROM json_exports WHERE id = ? AND user_id = ?');
+        $statement->execute([$id, $user['id']]);
+        if ($statement->rowCount() !== 1) return [404, ['error' => ['code' => 'json_export_not_found', 'message' => 'JSON export not found']]];
+        return [204, []];
     }
 
     private function downloadJsonExport(string $token): array
     {
         $export = $this->fetchOne(
-            'SELECT backup_json, checksum FROM json_exports WHERE token_hash = ?',
-            [$this->tokenHash($token)]
+            'SELECT backup_json, checksum FROM json_exports WHERE token_hash = ? AND expires_at > ?',
+            [$this->tokenHash($token), $this->now()]
         );
         if (!$export) {
             return [404, ['error' => ['code' => 'json_export_not_found', 'message' => 'JSON export not found']]];
@@ -518,7 +580,9 @@ final class CloudBackupApp
         if (!hash_equals($export['checksum'], hash('sha256', $export['backup_json']))) {
             return [500, ['error' => ['code' => 'json_export_corrupt', 'message' => 'Stored JSON export failed checksum validation']]];
         }
-        return [200, json_decode($export['backup_json'], true, 512, JSON_THROW_ON_ERROR)];
+        $backup = json_decode($export['backup_json'], true, 512, JSON_THROW_ON_ERROR);
+        if (($backup['settings'] ?? null) === []) $backup['settings'] = new stdClass();
+        return [200, $backup];
     }
 
     private function validateJsonExport(array $backup): int

@@ -365,7 +365,7 @@ test('rotates tokens once after an access-token 401 and retries the request', as
   assert.equal(tokenStore.current().refresh_token, 'refresh-2')
 })
 
-test('clears the session when refresh fails', async () => {
+test('clears the session when the server rejects the refresh token with 401', async () => {
   const tokenStore = createTokenStore(createSession({ access_token: 'expired', refresh_token: 'bad-refresh' }))
   const transport = createTransport(async options => {
     const error = new Error(options.url.endsWith('/auth/refresh') ? 'refresh failed' : 'expired')
@@ -376,6 +376,47 @@ test('clears the session when refresh fails', async () => {
 
   await assert.rejects(client.getBackupMetadata(), /refresh failed/)
   assert.equal(tokenStore.current(), null)
+  assert.equal(transport.calls.length, 2)
+})
+
+for (const failure of [
+  { name: 'offline' },
+  { name: 'timeout', code: 'request_timeout' },
+  { name: 'rate limit', status: 429 },
+  { name: 'server failure', status: 503 }
+]) {
+  test(`preserves credentials after refresh ${failure.name} and succeeds on the next attempt`, async () => {
+    const session = createSession({ access_token: 'nearly-expired', refresh_token: 'valid-refresh', access_expires_at: Math.floor(Date.now() / 1000) + 5 })
+    const tokenStore = createTokenStore(session)
+    let fail = true
+    const transport = createTransport(async options => {
+      if (options.url.endsWith('/auth/refresh')) {
+        if (fail) throw Object.assign(new Error(failure.name), failure)
+        return { text: JSON.stringify({ access_token: 'renewed', refresh_token: 'rotated', access_expires_at: Math.floor(Date.now() / 1000) + 900 }) }
+      }
+      return { text: JSON.stringify({ envelope: { version: 1 } }) }
+    })
+    const client = new CloudApiClient({ baseUrl: session.cloud_base_url, tokenStore, transport })
+    await assert.rejects(client.downloadBackup())
+    assert.deepEqual(tokenStore.current(), session)
+    fail = false
+    assert.deepEqual(await client.downloadBackup(), { version: 1 })
+    assert.equal(tokenStore.current().refresh_token, 'rotated')
+    assert.equal(transport.calls.length, 3)
+  })
+}
+
+test('lists share metadata and revokes only validated identifiers with authentication', async () => {
+  const tokenStore = createTokenStore(createSession({ access_token: 'access', refresh_token: 'refresh' }))
+  const items = [{ id: '123', expires_at: 1_800_604_800, byte_size: 2048 }]
+  const transport = createTransport(async options => options.method === 'DELETE' ? { status: 204, text: '' } : { text: JSON.stringify({ exports: items }) })
+  const client = new CloudApiClient({ baseUrl: 'https://cloud.example.com', transport, tokenStore })
+  assert.deepEqual(await client.listJsonExports(), items)
+  await client.revokeJsonExport('123')
+  assert.equal(transport.calls[1].url, 'https://cloud.example.com/api/v1/json-exports/123')
+  assert.equal(transport.calls[1].method, 'DELETE')
+  assert.ok(transport.calls.every(call => call.headers.Authorization === 'Bearer access'))
+  await assert.rejects(client.revokeJsonExport('../auth/logout'), /无效/)
   assert.equal(transport.calls.length, 2)
 })
 
@@ -473,5 +514,34 @@ test('rejects unscoped legacy sessions before sending a bearer token', async () 
   const client = new CloudApiClient({ baseUrl: 'https://cloud.example.com', transport, tokenStore })
 
   await assert.rejects(client.getBackupMetadata(), error => error.code === 'cloud_session_scope_missing')
+  assert.equal(transport.calls.length, 0)
+})
+
+for (const changedServer of [false, true]) {
+  test(`stale clients cannot refresh or log out a new account (${changedServer ? 'different server' : 'same server'})`, async () => {
+    const first = createSession({ access_token: 'a-access', refresh_token: 'a-refresh' }, { id: 'account-a' })
+    const tokenStore = createTokenStore(first)
+    const transport = createTransport(async () => ({ text: JSON.stringify({ backup: { version: 1 } }) }))
+    const client = new CloudApiClient({ baseUrl: first.cloud_base_url, tokenStore, transport })
+    await client.getBackupMetadata()
+    const second = createSession({
+      access_token: 'b-access', refresh_token: 'b-refresh',
+      access_expires_at: Math.floor(Date.now() / 1000) + 5,
+      cloud_base_url: changedServer ? 'https://another-cloud.example.com' : first.cloud_base_url
+    }, { id: 'account-b' })
+    await tokenStore.save(second)
+    const expectedCode = changedServer ? 'cloud_session_server_mismatch' : 'cloud_session_changed'
+    await assert.rejects(client.downloadBackup(), error => error.code === expectedCode)
+    await assert.rejects(client.logout(), error => error.code === expectedCode)
+    assert.equal(transport.calls.length, 1, 'no new bearer or refresh token may leave the client')
+    assert.deepEqual(tokenStore.current(), second)
+  })
+}
+
+test('near-expiry legacy sessions are rejected before any refresh request', async () => {
+  const tokenStore = createTokenStore({ access_token: 'legacy', refresh_token: 'legacy-refresh', access_expires_at: 1, user: { id: 'old' } })
+  const transport = createTransport(async () => { throw new Error('must not send credentials') })
+  const client = new CloudApiClient({ baseUrl: 'https://cloud.example.com', tokenStore, transport })
+  await assert.rejects(client.downloadBackup(), error => error.code === 'cloud_session_scope_missing')
   assert.equal(transport.calls.length, 0)
 })

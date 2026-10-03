@@ -1,8 +1,9 @@
+import { readMainPageSource } from './helpers/read-main-page.js'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 
-const page = await readFile(new URL('../pages/index/index.vue', import.meta.url), 'utf8')
+const page = await readMainPageSource()
 const editor = await readFile(new URL('../src/components/group-chat-editor.vue', import.meta.url), 'utf8')
 const avatar = await readFile(new URL('../src/components/group-avatar.vue', import.meta.url), 'utf8')
 const dialog = await readFile(new URL('../src/components/app-dialog-layer.vue', import.meta.url), 'utf8')

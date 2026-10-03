@@ -1,32 +1,32 @@
 <template>
 	<view class="app-shell" :class="{ 'chat-active': ui.screen === 'chat' && !activeStoryConversation, 'story-reader-active': ui.screen === 'chat' && activeStoryConversation }">
-		<view v-show="ui.screen === 'conversations'" class="screen-view conversations-view primary-tab-view">
-				<view class="screen-header conversations-header">
-					<text class="screen-title">织语</text>
-					<view class="conversation-header-actions">
-						<button class="icon-button" :class="{ active: searchOpen }" aria-label="搜索会话" @click="toggleConversationSearch"><Search :size="26" /></button>
-						<button class="icon-button" :class="{ active: homeMenuOpen }" aria-label="更多会话操作" @click="toggleHomeMenu"><MoreVertical :size="25" /></button>
+		<view v-show="ui.screen === 'conversations'" class="screen-view conversations-view primary-tab-view paper-main-page">
+				<scroll-view class="conversation-list" scroll-y @scroll="homeMenuOpen = false" @scrolltolower="showMoreConversations">
+					<MainPageHeading title="会话" subtitle="每一次相遇，都值得继续。">
+						<template #actions><button class="paper-action" :class="{ active: homeMenuOpen }" aria-label="更多会话操作" :aria-expanded="homeMenuOpen" @click="toggleHomeMenu"><Plus :size="21" /><text>新建</text></button></template>
+					</MainPageHeading>
+					<view class="conversation-page-content">
+						<view class="paper-search conversation-search"><Search :size="21" /><input v-model="searchQuery" confirm-type="search" placeholder="搜索会话" aria-label="搜索会话" /><button v-if="searchQuery" aria-label="清空搜索" @click="searchQuery = ''"><X :size="17" /></button></view>
+						<view class="paper-section-heading"><text>{{ searchQuery ? '搜索结果' : '最近对话' }}</text></view>
+						<view v-if="!filteredConversations.length" class="empty-state"><MessageCircle :size="36" /><text>{{ searchQuery ? '没有找到相关会话' : '暂无会话' }}</text><button v-if="!searchQuery" class="paper-action" @click="createConversationFromMenu">开始新对话</button></view>
+						<view v-for="conversation in renderedConversations" :key="conversation.id" v-memo="[conversation]" class="conversation-row" :data-conversation-id="conversation.id">
+							<button class="conversation-open" :aria-label="`打开会话 ${conversation.title}`" @click="openChat(conversation.id)" @longpress.stop="manageConversation(conversation)" @contextmenu.prevent.stop="manageConversation(conversation)">
+								<GroupAvatar v-if="isGroupChat(conversation)" class="conversation-group-avatar" :participants="conversation.participants" :size="60" :name="conversation.title" />
+								<view v-else class="conversation-avatar"><ProviderLogo class="conversation-avatar-logo provider-logo" :src="conversationProviderLogo(conversation)" :alt="conversation.title" mode="aspectFill" lazy-load /></view>
+								<view class="conversation-copy"><view class="row-title-line"><text class="row-title">{{ conversation.title }}</text></view><text class="row-preview">{{ conversation.preview }}</text></view>
+							</button>
+							<button class="row-time" :aria-label="`管理会话 ${conversation.title}`" title="会话操作" @click.stop="manageConversation(conversation)"><text>{{ conversation.time }}</text><MoreVertical :size="18" /></button>
+						</view>
+						<button class="conversation-create-group" @click="createGroupConversationFromMenu"><Contact :size="24" /><text>创建群聊</text></button>
 					</view>
-				</view>
-				<view v-if="searchOpen" class="search-box conversation-search"><Search :size="18" /><input v-model="searchQuery" :focus="searchOpen" confirm-type="search" placeholder="搜索会话" /><button v-if="searchQuery" aria-label="清空搜索" @click="searchQuery = ''"><X :size="17" /></button></view>
+					<view class="conversation-scroll-tail" />
+				</scroll-view>
 				<view v-if="homeMenuOpen" class="home-menu-backdrop" @click="homeMenuOpen = false" />
 				<view v-if="homeMenuOpen" class="home-action-menu">
 					<button @click="createConversationFromMenu"><Plus :size="19" /><text>新建会话</text></button>
 					<button @click="createGroupConversationFromMenu"><Contact :size="19" /><text>新建群聊</text></button>
 					<button @click="refreshConversationsFromMenu"><RefreshCw :size="18" /><text>刷新会话</text></button>
 				</view>
-				<scroll-view class="conversation-list" scroll-y @scrolltolower="showMoreConversations">
-					<view v-if="!filteredConversations.length" class="empty-state"><text>暂无会话</text></view>
-					<view v-for="conversation in renderedConversations" :key="conversation.id" v-memo="[conversation]" class="conversation-row" :data-conversation-id="conversation.id">
-						<button class="conversation-open" :aria-label="`打开会话 ${conversation.title}`" @click="openChat(conversation.id)" @longpress.stop="manageConversation(conversation)" @contextmenu.prevent.stop="manageConversation(conversation)">
-							<GroupAvatar v-if="isGroupChat(conversation)" class="conversation-group-avatar" :participants="conversation.participants" :size="50" :name="conversation.title" />
-							<view v-else class="conversation-avatar"><ProviderLogo class="conversation-avatar-logo provider-logo" :src="conversationProviderLogo(conversation)" :alt="conversation.title" mode="aspectFill" lazy-load /></view>
-							<view class="conversation-copy"><view class="row-title-line"><text class="row-title">{{ conversation.title }}</text></view><text class="row-preview">{{ conversation.preview }}</text></view>
-						</button>
-						<button class="row-time" :aria-label="`管理会话 ${conversation.title}`" @click.stop="manageConversation(conversation)">{{ conversation.time }}</button>
-					</view>
-					<view class="conversation-scroll-tail" />
-				</scroll-view>
 		</view>
 
 		<CharacterContacts
@@ -48,41 +48,34 @@
 			@open-character-maker="openCharacterMaker"
 		/>
 
-		<view v-show="ui.screen === 'stories'" class="screen-view stories-view primary-tab-view">
-			<view class="stories-header">
-				<view>
-					<text class="stories-title">故事</text>
-					<text class="stories-subtitle">独立角色卡 · 自动维护长期记忆</text>
-				</view>
-				<button class="stories-header-import" :disabled="characterImportBusy" aria-label="从文件导入故事角色卡" @click="openStoryCharacterCardPicker('file')"><Import :size="21" /></button>
-			</view>
-			<view class="stories-control-band">
-				<view class="stories-search">
+		<view v-show="ui.screen === 'stories'" class="screen-view stories-view primary-tab-view paper-main-page">
+			<scroll-view class="stories-scroll" scroll-y @scrolltolower="showMoreStoryCharacters">
+			<MainPageHeading title="故事" subtitle="续上未完的篇章。">
+				<template #actions><button class="paper-action" :disabled="characterImportBusy" aria-label="从文件导入故事角色卡" @click="openStoryCharacterCardPicker('file')"><Import :size="20" /><text>导入</text></button></template>
+			</MainPageHeading>
+			<view class="stories-page-content">
+				<view class="stories-search paper-search">
 					<Search :size="20" />
-					<input v-model="storySearchQuery" placeholder="搜索故事或角色" confirm-type="search" />
+					<input v-model="storySearchQuery" placeholder="搜索故事或角色" aria-label="搜索故事或角色" confirm-type="search" />
 					<button v-if="storySearchQuery" aria-label="清空故事搜索" @click="storySearchQuery = ''"><X :size="17" /></button>
 				</view>
-				<view class="stories-import-grid">
-					<button :disabled="characterImportBusy" @click="openStoryCharacterCardPicker('gallery')"><Image :size="20" /><view><text>相册导入</text><text>保存为故事角色</text></view></button>
-					<button :disabled="characterImportBusy" @click="openStoryCharacterCardPicker('file')"><FileText :size="20" /><view><text>文件导入</text><text>PNG 角色卡</text></view></button>
-				</view>
-			</view>
-			<scroll-view class="stories-scroll" scroll-y @scrolltolower="showMoreStoryCharacters">
 				<view v-if="renderedStoryConversations.length" class="stories-list story-progress-list">
-					<text class="stories-list-label">继续阅读</text>
-					<view v-for="conversation in renderedStoryConversations" :key="conversation.id" v-memo="[conversation]" class="story-progress-row" :data-story-conversation-id="conversation.id">
+					<view class="paper-section-heading"><text>继续阅读</text></view>
+					<view v-for="(conversation, index) in renderedStoryConversations" :key="conversation.id" v-memo="[conversation, index]" class="story-progress-row" :class="{ 'story-featured-card': index === 0 }" :data-story-conversation-id="conversation.id">
 						<button class="story-progress-open" :aria-label="`继续故事 ${conversation.title}`" @click="openChat(conversation.id)" @longpress.stop="manageConversation(conversation)" @contextmenu.prevent.stop="manageConversation(conversation)">
-							<ProviderLogo class="story-progress-avatar" :src="conversationProviderLogo(conversation)" :alt="conversation.title" mode="aspectFill" lazy-load />
+							<AppImage v-if="index === 0" class="story-featured-art" src="/static/design/story-cover.png" alt="" mode="aspectFill" />
+							<ProviderLogo v-else class="story-progress-avatar" :src="conversationProviderLogo(conversation)" :alt="conversation.title" mode="aspectFill" lazy-load />
 							<view class="story-progress-copy">
 								<view class="story-progress-title-line"><text class="story-progress-name">{{ conversation.title }}</text><text class="story-progress-time">{{ conversation.time }}</text></view>
 								<text class="story-progress-preview">{{ conversation.preview }}</text>
+								<view v-if="index === 0" class="story-featured-footer"><text>更新于 {{ conversation.time }}</text><view class="story-continue-pill"><text>继续阅读</text><ChevronRight :size="16" /></view></view>
 							</view>
 						</button>
 						<button class="story-progress-manage" :aria-label="`管理故事 ${conversation.title}`" @click.stop="manageConversation(conversation)"><MoreVertical :size="19" /></button>
 					</view>
 				</view>
 				<view v-if="renderedStoryCharacters.length" class="stories-list">
-					<text class="stories-list-label">故事角色</text>
+					<view class="paper-section-heading"><text>故事角色</text></view>
 					<button v-for="character in renderedStoryCharacters" :key="character.id" v-memo="[character]" class="story-character-row" :aria-label="`开始故事 ${character.name}`" @click="startStoryFromCharacter(character)">
 						<ProviderLogo class="story-character-avatar" :src="character.avatarDataUrl || '/static/zhiyu-logo.png'" :alt="character.name" mode="aspectFill" lazy-load />
 						<view class="story-character-copy">
@@ -93,10 +86,16 @@
 					</button>
 				</view>
 				<view v-if="!renderedStoryConversations.length && !renderedStoryCharacters.length" class="stories-empty">
-					<FileText :size="44" />
+					<AppImage class="stories-empty-art" src="/static/design/story-cover.png" alt="" mode="aspectFill" />
 					<text>{{ storySearchQuery ? '没有匹配的故事角色' : '还没有故事角色' }}</text>
 					<button :disabled="characterImportBusy" @click="openStoryCharacterCardPicker('file')"><Import :size="17" /><text>导入故事角色卡</text></button>
 				</view>
+				<view class="stories-import-grid">
+					<button :disabled="characterImportBusy" @click="openStoryCharacterCardPicker('gallery')"><Image :size="18" /><text>相册导入</text></button>
+					<button :disabled="characterImportBusy" @click="openStoryCharacterCardPicker('file')"><FileText :size="18" /><text>文件导入</text></button>
+				</view>
+				<text class="stories-memory-note">独立角色卡 · 自动维护长期记忆</text>
+			</view>
 				<view class="stories-tail" />
 			</scroll-view>
 		</view>
@@ -165,6 +164,8 @@
 					@update:mode="saveStoryReaderMode"
 					@update:readerPosition="queueStoryReaderPositionSave"
 					@update:bookmarks="saveStoryReaderBookmarks"
+					@load-position="loadStoryReaderPosition"
+					@load-newer="loadNewerStoryMessages"
 					@load-earlier="loadEarlierMessages"
 					@reload-latest="reloadLatestMessages"
 					@toggle-attachments="toggleAttachmentMenu"
@@ -175,6 +176,8 @@
 					@stop="stopGeneration"
 					@retry="retryMessage"
 					@continue="continueMessage"
+					@composer-keydown="handleComposerKeydown"
+					@response-details="showMessageResponseDetails"
 					@copy="copyMessage"
 					@feedback="setStoryMessageFeedback"
 					@preview-image="previewImageAttachment"
@@ -187,7 +190,7 @@
 			<template v-else>
 			<view class="chat-toolbar">
 				<button class="icon-button chat-back-button" data-testid="back-to-conversations" aria-label="返回会话" @click="backToConversations"><ArrowLeft :size="26" /></button>
-				<button class="model-selector" :disabled="ui.generating" @click="toggleModelMenu">
+				<button class="model-selector" :class="{ 'menu-active': modelMenuOpen }" :disabled="ui.generating" :aria-expanded="modelMenuOpen" aria-label="选择接口与模型" @click="toggleModelMenu">
 					<GroupAvatar v-if="activeGroupConversation" class="toolbar-group-avatar" :participants="activeGroupParticipants" :size="42" :name="activeConversation.title" />
 					<ProviderLogo v-else class="toolbar-provider-logo provider-logo" :src="activeAssistantAvatar" mode="aspectFill" />
 					<view class="model-selector-copy"><text class="model-selector-title">{{ chatProviderName }}</text><text class="model-selector-subtitle">{{ chatModelName }}</text></view>
@@ -203,6 +206,7 @@
 				<view class="character-status-update" :class="{ 'has-issue': assistantStatusIssue }"><AlertCircle v-if="assistantStatusIssue" :size="11" /><Check v-else :size="11" /><text>{{ assistantStatusUpdateLabel }}</text></view>
 				<ChevronDown class="character-status-chevron" :size="15" />
 			</button>
+			<view v-if="modelMenuOpen" class="model-menu-backdrop" @click="modelMenuOpen = false" />
 			<view v-if="modelMenuOpen" class="model-popover">
 				<text class="popover-label">选择接口与模型</text>
 				<view class="generation-mode-tabs" role="tablist">
@@ -213,7 +217,7 @@
 					<text>{{ provider.name }}</text><text>{{ provider.defaultModel }}</text>
 				</button>
 			</view>
-			<scroll-view ref="chatScroll" class="chat-scroll" :class="{ 'has-character-status': latestAssistantStatus }" scroll-y :scroll-into-view="chatScrollIntoView" @scroll="onChatScroll">
+			<scroll-view ref="chatScroll" class="chat-scroll" :class="{ 'has-character-status': latestAssistantStatus }" scroll-y :scroll-into-view="chatScrollIntoView" tabindex="0" @scroll="onChatScroll" @wheel.passive="onChatWheel" @keydown="onChatScrollKeydown" @touchstart.passive="onChatTouchStart" @touchmove.passive="onChatTouchMove" @touchend="onChatTouchEnd" @touchcancel="onChatTouchEnd">
 				<view v-if="messageHistoryHasMore || (messageHistoryLoading && messageItems.length)" class="chat-history-loader">
 					<button :disabled="messageHistoryLoading || ui.generating" @click="loadEarlierMessages"><ChevronDown class="chat-history-icon" :size="15" /><text>{{ messageHistoryLoading ? '加载中…' : '加载更早消息' }}</text></button>
 				</view>
@@ -250,7 +254,7 @@
 									<text v-if="segmentIndex === 0" class="assistant-name">{{ messageAssistantName(message) }}</text>
 									<text class="message-content" selectable user-select>{{ segment }}</text>
 									<view v-if="isLastAssistantSegment(message, segmentIndex) && message.responseDisplayMode !== 'segmented' && message.status === 'generating'" class="generation-status"><view class="generation-dots"><i /><i /><i /></view><button class="stop-inline" @click="stopGeneration"><Square :size="12" fill="currentColor" /><text>停止生成</text></button></view>
-									<view v-else-if="isLastAssistantSegment(message, segmentIndex) && message.status !== 'completed' && !assistantShowsTyping(message)" class="message-status"><view class="message-status-copy"><text>{{ statusLabel(message.status) }}</text><text v-if="message.errorMessage" class="message-status-detail">{{ message.errorMessage }}</text></view><view class="message-status-actions"><button v-if="canContinueMessage(message)" class="continue-button" data-testid="continue-interrupted" aria-label="从中断处续写" @click="continueMessage(message.id)"><PlayOutline :size="13" /><text>续写</text></button><button class="retry-button" @click="retryMessage(message.id)">重试</button></view></view>
+									<view v-else-if="isLastAssistantSegment(message, segmentIndex) && message.status !== 'completed' && !assistantShowsTyping(message)" class="message-status"><view class="message-status-copy"><text>{{ statusLabel(message.status) }}</text><text v-if="message.errorMessage" class="message-status-detail">{{ message.errorMessage }}</text></view><view class="message-status-actions"><button @click="showMessageResponseDetails(message)">响应详情</button><button v-if="canContinueMessage(message)" class="continue-button" data-testid="continue-interrupted" aria-label="从中断处续写" @click="continueMessage(message.id)"><PlayOutline :size="13" /><text>续写</text></button><button class="retry-button" @click="retryMessage(message.id)">重试</button></view></view>
 									<view v-else-if="isLastAssistantSegment(message, segmentIndex) && message.status === 'completed' && !assistantHasPendingSegments(message)" class="assistant-footer"><view class="message-actions"><button aria-label="复制" @click="copyMessage(message.displayContent)"><Copy :size="16" /></button><button class="feedback-positive" :class="{ active: message.feedback === 'positive' }" :aria-pressed="message.feedback === 'positive'" aria-label="赞同" @click="setMessageFeedback(message, 'positive')"><ThumbsUp :size="16" /></button><button class="feedback-negative" :class="{ active: message.feedback === 'negative' }" :aria-pressed="message.feedback === 'negative'" aria-label="不赞同" @click="setMessageFeedback(message, 'negative')"><ThumbsDown :size="16" /></button><button v-if="!message.isGreeting" class="retry-action" @click="retryMessage(message.id)"><RotateCcw :size="14" /><text>重试</text></button><button v-if="canContinueMessage(message)" class="continue-action" data-testid="continue-writing" aria-label="继续续写" @click="continueMessage(message.id)"><PlayOutline :size="14" /><text>续写</text></button></view><text class="assistant-time">{{ formatMessageTime(message.updatedAt) }}</text></view>
 								</view>
 							</template>
@@ -258,10 +262,10 @@
 								<text v-if="!assistantVisibleSegments(message).length" class="assistant-name">{{ messageAssistantName(message) }}</text>
 								<view class="generation-status"><view class="generation-dots"><i /><i /><i /></view><button v-if="message.status === 'generating'" class="stop-inline" @click="stopGeneration"><Square :size="12" fill="currentColor" /><text>停止生成</text></button></view>
 							</view>
-							<view v-else-if="!assistantVisibleSegments(message).length && message.status !== 'completed'" class="assistant-body" :class="{ 'generating-message': message.status === 'generating' }">
+							<view v-else-if="!assistantVisibleSegments(message).length && (message.status !== 'completed' || isEmptyCompletedReply(message))" class="assistant-body" :class="{ 'generating-message': message.status === 'generating' }">
 								<text class="assistant-name">{{ messageAssistantName(message) }}</text>
 								<view v-if="message.status === 'generating'" class="generation-status"><view class="generation-dots"><i /><i /><i /></view><button class="stop-inline" @click="stopGeneration"><Square :size="12" fill="currentColor" /><text>停止生成</text></button></view>
-								<view v-else class="message-status"><view class="message-status-copy"><text>{{ statusLabel(message.status) }}</text><text v-if="message.errorMessage" class="message-status-detail">{{ message.errorMessage }}</text></view><view class="message-status-actions"><button v-if="canContinueMessage(message)" class="continue-button" data-testid="continue-interrupted" aria-label="从中断处续写" @click="continueMessage(message.id)"><PlayOutline :size="13" /><text>续写</text></button><button class="retry-button" @click="retryMessage(message.id)">重试</button></view></view>
+								<view v-else class="message-status"><view class="message-status-copy"><text>{{ message.status === 'completed' ? '未收到可显示正文' : statusLabel(message.status) }}</text><text v-if="message.errorMessage" class="message-status-detail">{{ message.errorMessage }}</text><text v-else-if="message.status === 'completed'" class="message-status-detail">这条历史回复没有可显示的正文，可查看响应详情或手动重试。</text></view><view class="message-status-actions"><button @click="showMessageResponseDetails(message)">响应详情</button><button v-if="canContinueMessage(message)" class="continue-button" data-testid="continue-interrupted" aria-label="从中断处续写" @click="continueMessage(message.id)"><PlayOutline :size="13" /><text>续写</text></button><button class="retry-button" @click="retryMessage(message.id)">重试</button></view></view>
 							</view>
 							<view v-if="message.imageAttachments.length" class="media-message assistant-image-surface">
 								<view class="sent-image-grid assistant-image-grid" :class="{ single: message.imageAttachments.length === 1 }">
@@ -281,6 +285,7 @@
 			</scroll-view>
 			<view v-if="attachmentMenuOpen || emojiMenuOpen" class="attachment-backdrop" @click="closeComposerMenus" />
 			<view class="composer" :class="{ 'menu-open': attachmentMenuOpen || emojiMenuOpen, 'has-attachments': pendingAttachments.length || attachmentProcessing, 'is-multiline': composerMultiline }">
+				<button v-if="showChatJumpLatest" class="chat-jump-latest" data-testid="chat-jump-latest" :disabled="messageHistoryLoading || (messageHistoryTrimmed && ui.generating)" @click="jumpToLatestChat"><ChevronDown :size="17" /><text>{{ messageHistoryLoading ? '加载中…' : '回到最新' }}</text></button>
 				<scroll-view v-if="groupMentionSuggestions.length" class="group-mention-popover" scroll-y>
 					<button v-for="participant in groupMentionSuggestions" :key="groupMemberKey(participant)" @click="selectGroupMention(participant)">
 						<ProviderLogo class="group-mention-avatar" :src="participant.avatarDataUrl || participant.avatarSource || '/static/zhiyu-logo.png'" :alt="participant.nameSnapshot" mode="aspectFill" />
@@ -294,7 +299,7 @@
 					<button v-for="emoji in emojiOptions" :key="emoji" :aria-label="`插入表情 ${emoji}`" @click="appendEmoji(emoji)"><text>{{ emoji }}</text></button>
 				</view>
 				<view class="composer-leading-actions" :class="{ 'has-mention': activeGroupConversation && ui.generationMode === 'chat' }">
-					<button class="composer-emoji" aria-label="选择表情" @click="toggleEmojiMenu"><AppImage class="composer-smile-icon" src="/static/chat/smile.png" alt="" mode="aspectFit" /></button>
+					<button class="composer-emoji" :class="{ active: emojiMenuOpen }" :aria-expanded="emojiMenuOpen" aria-label="选择表情" @click="toggleEmojiMenu"><AppImage class="composer-smile-icon" src="/static/chat/smile.png" alt="" mode="aspectFit" /></button>
 					<button v-if="activeGroupConversation && ui.generationMode === 'chat'" class="composer-mention" aria-label="点名群成员" @click="openGroupMention"><text>@</text></button>
 				</view>
 				<view class="composer-main">
@@ -308,11 +313,11 @@
 							<view v-if="attachmentProcessing" class="pending-processing"><RefreshCw :size="17" /><text>处理中</text></view>
 						</view>
 					</scroll-view>
-					<textarea ref="composerInput" class="composer-input" v-model="draftMessage" rows="1" maxlength="-1" :style="{ height: composerInputHeight + 'px' }" placeholder-style="color:#858d90;font-size:15.5px" :placeholder="composerPlaceholder" @focus="closeComposerMenus" @linechange="resizeComposerInput" />
+					<textarea ref="composerInput" class="composer-input" v-model="draftMessage" rows="1" maxlength="-1" title="Enter 换行，Ctrl / ⌘ + Enter 发送" :style="{ height: composerInputHeight + 'px' }" placeholder-style="color:#858d90;font-size:15.5px" :placeholder="composerPlaceholder" @focus="closeStoryMenus" @keydown="handleComposerKeydown" @linechange="resizeComposerInput" />
 				</view>
-				<button class="composer-attachment" :disabled="ui.generationMode === 'image'" aria-label="添加附件" @click="toggleAttachmentMenu"><Paperclip :size="27" /></button>
+				<button class="composer-attachment" :class="{ active: attachmentMenuOpen }" :aria-expanded="attachmentMenuOpen" :disabled="ui.generationMode === 'image'" aria-label="添加附件" @click="toggleAttachmentMenu"><Paperclip :size="27" /></button>
 				<button class="composer-stop" :disabled="!ui.generating && (attachmentProcessing || (ui.generationMode === 'image' && !canSend))" :aria-label="ui.generating ? '停止生成' : (ui.generationMode === 'image' ? '生成图片' : (canSend ? '发送消息' : '语音输入'))" @click="handleComposerAction">
-					<Square v-if="ui.generating" :size="14" fill="currentColor" /><Image v-else-if="ui.generationMode === 'image'" :size="18" /><Send v-else-if="canSend" :size="20" /><Mic v-else :size="26" />
+					<view :key="composerActionKind" class="composer-action-icon"><Square v-if="ui.generating" :size="14" fill="currentColor" /><Image v-else-if="ui.generationMode === 'image'" :size="18" /><Send v-else-if="canSend" :size="20" /><Mic v-else :size="26" /></view>
 				</button>
 				<input ref="imageAttachmentInput" class="hidden-file-input" type="file" accept="image/*" multiple @change="handleAttachmentSelection" />
 				<input ref="cameraAttachmentInput" class="hidden-file-input" type="file" accept="image/*" capture="environment" @change="handleAttachmentSelection" />
@@ -322,71 +327,91 @@
 		</template>
 
 		<template v-else-if="ui.screen === 'providers'">
-			<view class="screen-view providers-view">
-				<view class="screen-header provider-header"><text class="screen-title">接口</text><button class="provider-add-button" aria-label="添加接口" :disabled="!ready" @click="addProvider"><Plus :size="26" /></button></view>
+			<view class="screen-view providers-view paper-main-page">
 				<scroll-view class="provider-screen reference-scroll" scroll-y>
+					<MainPageHeading title="接口" subtitle="连接模型，让对话开始。"><template #actions><button class="paper-action" aria-label="添加接口" :disabled="!ready" @click="addProvider"><Plus :size="18" /><text>添加</text></button></template></MainPageHeading>
+					<view class="provider-library-heading paper-section-heading"><text>我的接口</text><text class="provider-count">{{ providerItems.length }} 个接口</text></view>
+					<scroll-view class="provider-list-scroll" scroll-x>
 					<view class="provider-list">
 						<view v-for="provider in providerItems" :key="provider.id" class="provider-row" :class="{ selected: provider.id === ui.activeProviderId }">
-							<button class="provider-card" :class="{ selected: provider.id === ui.activeProviderId }" :aria-label="`选择接口 ${provider.name}`" @click="selectProvider(provider.id)">
+							<button class="provider-card" :class="{ selected: provider.id === ui.activeProviderId }" :aria-label="`选择接口 ${provider.name}`" :aria-pressed="provider.id === ui.activeProviderId" @click="selectProvider(provider.id)">
 								<ProviderLogo class="provider-logo provider-logo-large" :src="provider.logo || '/static/providers/openai.png'" :alt="provider.name" mode="aspectFill" />
-								<view class="provider-copy"><text class="provider-name">{{ provider.name }}</text><text class="provider-url">{{ provider.baseUrl }}</text><text class="provider-model">{{ provider.defaultModel || '未设置默认模型' }}</text></view>
+								<view class="provider-copy"><text class="provider-name">{{ provider.name }}</text><text class="provider-model">{{ provider.protocolType === 'gemini' ? 'Gemini 原生' : 'OpenAI 兼容' }}</text></view>
 								<view v-if="provider.id === ui.activeProviderId" class="provider-selection"><Check :size="16" /></view>
 							</button>
 							<button v-if="provider.id !== ui.activeProviderId && providerItems.length > 1" class="provider-delete" :aria-label="`删除接口 ${provider.name}`" @click.stop="deleteProvider(provider)"><Trash2 :size="18" /></button>
 						</view>
 					</view>
+					</scroll-view>
 					<view class="provider-editor">
-						<text class="content-section-label">{{ providerForm.id ? '编辑接口' : '添加接口' }}</text>
+						<view class="provider-editor-heading"><text class="content-section-label">{{ providerForm.name || (providerForm.id ? '编辑接口' : '添加接口') }}</text><text class="provider-editor-caption">{{ providerForm.id ? '编辑接口' : '新建接口' }}</text></view>
 						<view class="provider-form provider-form-card">
+							<view class="provider-identity-fields">
 							<button class="provider-avatar-selector" :disabled="!ready || providerAvatarBusy" @click="openProviderAvatarMenu">
 								<view class="provider-avatar-preview">
 									<ProviderLogo class="provider-avatar-preview-image" :src="providerFormAvatarSource" :alt="providerForm.name || '接口头像'" mode="aspectFill" />
 									<view v-if="providerAvatarBusy" class="provider-avatar-loading"><RefreshCw class="spinning" :size="16" /></view>
 								</view>
-								<view class="provider-avatar-selector-copy"><text>接口头像</text><text>{{ providerFormAvatarDescription }}</text></view>
-								<ChevronRight :size="18" />
+								<view class="provider-avatar-selector-copy"><text>更换头像</text></view>
 							</button>
 							<label class="form-row"><text>名称</text><input v-model="providerForm.name" placeholder="接口名称" /></label>
+							</view>
 							<view class="form-row"><text>接口格式</text><view class="provider-protocol-control" role="group" aria-label="接口格式"><button v-for="protocol in providerProtocols" :key="protocol.id" class="provider-protocol-option" :class="{ active: providerForm.protocolType === protocol.id }" :disabled="providerBusy" :aria-pressed="providerForm.protocolType === protocol.id" @click="selectProviderProtocol(protocol.id)">{{ protocol.label }}</button></view></view>
 							<label class="form-row"><text>基础地址</text><input v-model="providerForm.baseUrl" :placeholder="activeProviderProtocol.defaultBaseUrl" /></label>
 							<view class="form-row"><text>API 密钥</text><view class="password-field" :class="{ 'is-saved': providerForm.hasApiKey && !providerApiKeyDirty }"><input v-model="providerForm.apiKey" :disabled="providerBusy" :type="showApiKey ? 'text' : 'password'" :placeholder="providerApiKeyPlaceholder" autocomplete="off" @input="handleProviderApiKeyInput" /><button :disabled="providerBusy" :aria-label="providerApiKeyToggleLabel" :title="providerApiKeyToggleLabel" @click.stop="toggleProviderApiKeyVisibility"><RefreshCw v-if="providerApiKeyBusy" class="spinning" :size="16" /><EyeOff v-else :size="17" /></button></view></view>
-							<view class="form-row"><text>模型选择</text><view class="select-field-wrap"><picker class="select-field-picker" mode="selector" :range="providerModelOptions" :value="providerModelIndex" :disabled="providerBusy || !providerModelOptions.length" @change="selectProviderModel"><view class="select-field"><text>{{ providerForm.defaultModel || '获取模型后选择' }}</text></view></picker><ChevronDown class="select-chevron" :size="17" /></view><view class="provider-default-model"><text class="provider-default-model-current">当前默认：{{ savedProviderDefaultModel || '未设置' }}</text><button class="provider-default-model-button" data-testid="set-default-model" :disabled="!canSetDefaultProviderModel" @click="setDefaultProviderModel"><Check :size="16" /><text>{{ providerDefaultSaving ? '设置中...' : (providerDefaultModelSaved ? '已是默认' : '设为默认') }}</text></button></view></view>
+							<view class="form-row"><view class="provider-model-heading"><text>默认模型</text><button class="provider-fetch-models" :disabled="providerBusy" @click="fetchProviderModels"><RefreshCw v-if="providerLoadingModels" class="spinning" :size="14" /><text>{{ providerLoadingModels ? '获取中...' : '获取模型列表' }}</text></button></view><view class="select-field-wrap"><picker class="select-field-picker" mode="selector" :range="providerModelOptions" :value="providerModelIndex" :disabled="providerBusy || !providerModelOptions.length" @change="selectProviderModel"><view class="select-field"><text>{{ providerForm.defaultModel || '获取模型后选择' }}</text></view></picker><ChevronDown class="select-chevron" :size="17" /></view><view class="provider-default-model"><text class="provider-default-model-current">当前默认：{{ savedProviderDefaultModel || '未设置' }}</text><button class="provider-default-model-button" data-testid="set-default-model" :disabled="!canSetDefaultProviderModel" @click="setDefaultProviderModel"><Check :size="16" /><text>{{ providerDefaultSaving ? '设置中...' : (providerDefaultModelSaved ? '已是默认' : '设为默认') }}</text></button></view></view>
 							<label class="form-row"><text>手动模型</text><input v-model="providerForm.defaultModel" :placeholder="activeProviderProtocol.modelPlaceholder" /></label>
-							<view class="provider-form-actions"><button class="provider-action-button" :disabled="providerBusy" @click="fetchProviderModels"><RefreshCw :class="{ spinning: providerLoadingModels }" :size="17" /><text>{{ providerLoadingModels ? '获取中...' : '获取模型列表' }}</text></button><button class="provider-action-button" :disabled="providerBusy" @click="testConnection"><Activity :size="17" /><text>{{ providerTesting ? '测试中...' : '测试连接' }}</text></button></view>
-							<button class="provider-save-button" :disabled="providerBusy" @click="saveProvider"><Check :size="18" /><text>{{ providerSaving ? '保存中...' : '保存' }}</text></button>
+							<text class="provider-save-note">修改后保存，即可用于新对话。</text>
+							<view class="provider-form-actions"><button class="provider-action-button" :disabled="providerBusy" @click="testConnection"><Activity :size="17" /><text>{{ providerTesting ? '测试中...' : '测试连接' }}</text></button><button class="provider-save-button" :disabled="providerBusy" @click="saveProvider"><Check :size="18" /><text>{{ providerSaving ? '保存中...' : '保存' }}</text></button></view>
 							<view v-if="connectionStatus === 'success'" class="connection-result test-success"><Check :size="15" /><text>连接成功</text></view><view v-else-if="connectionStatus === 'failed'" class="connection-result test-error"><AlertCircle :size="15" /><text>连接失败</text></view>
 						</view>
 					</view>
 					<view class="navigation-scroll-tail" />
 				</scroll-view>
-				<view class="provider-navigation-fade" aria-hidden="true" />
 			</view>
 		</template>
 
 		<template v-else-if="ui.screen === 'settings'">
-			<view v-if="ui.settingsView === 'overview'" class="screen-view settings-overview">
+			<view v-if="ui.settingsView === 'overview'" class="screen-view settings-overview paper-main-page">
 				<scroll-view class="settings-screen reference-scroll" scroll-y>
+					<MainPageHeading title="设置" subtitle="把织语，调整成你的习惯。">
+						<template #actions><view class="settings-profile-actions"><button class="settings-profile-action" :class="{ active: settingsSearchOpen }" :aria-expanded="settingsSearchOpen" aria-label="搜索设置" @click="toggleSettingsSearch"><Search :size="22" /></button><button class="settings-profile-action settings-more-action" aria-label="打开设置详情" @click="openSettingsDetails(ui)"><MoreVertical :size="21" /></button></view></template>
+					</MainPageHeading>
+					<view v-if="settingsSearchOpen" class="settings-search-bar"><Search :size="18" /><input v-model="settingsSearchQuery" :focus="settingsSearchOpen" placeholder="搜索设置" /><button v-if="settingsSearchQuery" aria-label="清空设置搜索" @click="settingsSearchQuery = ''"><X :size="17" /></button></view>
 					<view class="settings-profile">
-						<view class="settings-profile-actions"><button class="settings-profile-action" :class="{ active: settingsSearchOpen }" aria-label="搜索设置" @click="toggleSettingsSearch"><Search :size="27" /></button><button class="settings-profile-action" aria-label="打开设置详情" @click="openSettingsDetails(ui)"><MoreVertical :size="26" /></button></view>
-						<view v-if="settingsSearchOpen" class="settings-search-bar"><Search :size="18" /><input v-model="settingsSearchQuery" :focus="settingsSearchOpen" placeholder="搜索设置" /><button v-if="settingsSearchQuery" aria-label="清空设置搜索" @click="settingsSearchQuery = ''"><X :size="17" /></button></view>
-						<button class="settings-profile-avatar-wrap" :aria-label="profileAvatar ? '更换头像' : '设置头像'" :disabled="!ready || profileAvatarBusy" @click="openProfileAvatarMenu"><ProviderLogo class="settings-profile-avatar provider-logo" :src="settingsProfileAvatarSource" alt="用户头像" mode="aspectFill" /><view class="settings-profile-camera" aria-hidden="true"><RefreshCw v-if="profileAvatarBusy" class="spinning" :size="17" /><Camera v-else :size="19" /></view></button>
-						<text class="settings-profile-name">{{ settingsProfileName }}</text>
-						<text class="settings-profile-subtitle">{{ settingsProfileSubtitle }}</text>
+						<button class="settings-profile-avatar-wrap" :aria-label="profileAvatar ? '更换头像' : '设置头像'" :disabled="!ready || profileAvatarBusy" @click="openProfileAvatarMenu"><ProviderLogo class="settings-profile-avatar provider-logo" :src="settingsProfileAvatarSource" alt="用户头像" mode="aspectFill" /><view class="settings-profile-camera" aria-hidden="true"><RefreshCw v-if="profileAvatarBusy" class="spinning" :size="12" /><Camera v-else :size="13" /></view></button>
+						<button class="settings-profile-account" aria-label="账号与云端" @click="openCloudModal"><view class="settings-profile-identity"><text class="settings-profile-name">{{ settingsProfileName }}</text><text class="settings-profile-subtitle">{{ cloudConnected ? settingsProfileSubtitle : '本地模式 · 数据保存在此设备' }}</text></view><ChevronRight :size="18" /></button>
 					</view>
 
-					<view v-if="settingsSearchHasResults" class="settings-card settings-primary-card settings-menu-card">
-						<button v-if="matchesSettingsSearch('对话设置 系统提示词 全局提示词')" class="settings-row" data-testid="conversation-settings-entry" @click="openConversationSettings(ui)"><view class="settings-icon settings-icon-orange"><FileCog :size="22" /></view><view class="settings-copy"><text>对话设置</text><text>{{ systemPromptSettingLabel }}</text></view><ChevronRight :size="18" /></button>
-						<button v-if="matchesSettingsSearch('流式传输 实时回答 完整回答 非流式')" class="settings-row" data-testid="streaming-settings-entry" @click="openStreamingSettings(ui)"><view class="settings-icon settings-icon-teal"><Activity :size="22" /></view><view class="settings-copy"><text>流式传输</text><text>{{ streamingSettingLabel }}</text></view><ChevronRight :size="18" /></button>
-						<button v-if="matchesSettingsSearch('角色状态栏 返回状态 状态协议 开关')" class="settings-row" data-testid="character-status-settings-entry" @click="openCharacterStatusSettings(ui)"><view class="settings-icon settings-icon-purple"><FileText :size="22" /></view><view class="settings-copy"><text>角色状态栏</text><text>{{ characterStatusSettingLabel }}</text></view><ChevronRight :size="18" /></button>
-						<button v-if="matchesSettingsSearch('账号与云端 登录 自动备份 同步')" class="settings-row" @click="openCloudModal"><view class="settings-icon settings-icon-blue"><Cloud :size="22" /></view><view class="settings-copy"><text>账号与云端</text><text>{{ cloudConnected ? settingsProfileName : '本地模式，不会自动上传' }}</text></view></button>
-						<button v-if="matchesSettingsSearch('隐私与安全 API 密钥 应用锁 加密 通知 回复提醒')" class="settings-row" @click="openSettingsDetails(ui)"><view class="settings-icon settings-icon-green"><KeyRound :size="22" /></view><view class="settings-copy"><text>隐私与安全</text><text>API 密钥、应用锁与回复通知</text></view></button>
-						<button v-if="matchesSettingsSearch('NSFW 设置 成人 私密状态 状态栏')" class="settings-row" data-testid="nsfw-settings-entry" @click="openNsfwSettings(ui)"><view class="settings-icon settings-icon-red"><EyeOff :size="22" /></view><view class="settings-copy"><text>NSFW 设置</text><text>{{ nsfwSettingLabel }}</text></view><ChevronRight :size="18" /></button>
-						<button v-if="matchesSettingsSearch('数据与存储 本地数据库 SQLite IndexedDB')" class="settings-row" @click="showLocalDataInfo"><view class="settings-icon settings-icon-indigo"><Database :size="22" /></view><view class="settings-copy"><text>数据与存储</text><text>{{ storageLabel }} 本地优先存储</text></view></button>
-						<button v-if="matchesSettingsSearch('导入与导出 JSON 备份 恢复')" class="settings-row" @click="openBackupMenu"><view class="settings-icon settings-icon-cyan"><Import :size="22" /></view><view class="settings-copy"><text>导入与导出</text><text>本地文件与云端链接</text></view></button>
-						<button v-if="matchesSettingsSearch('设备与诊断 Android 流式 日志')" class="settings-row" @click="openAndroidDiagnostics"><view class="settings-icon settings-icon-teal"><Activity :size="22" /></view><view class="settings-copy"><text>设备与诊断</text><text>流式传输与运行日志</text></view><ChevronRight :size="18" /></button>
-						<button v-if="matchesSettingsSearch('关于应用 版本 信息')" class="settings-row" @click="showAboutApp"><view class="settings-icon settings-icon-red"><Info :size="22" /></view><view class="settings-copy"><text>关于应用</text><text>版本 {{ appVersion }} · {{ aboutLabel }}</text></view></button>
-						<button v-if="matchesSettingsSearch('检查更新 最新版本')" class="settings-row" @click="openReleasePage"><view class="settings-icon settings-icon-amber"><RefreshCw :size="22" /></view><view class="settings-copy"><text>检查更新</text><text>查看 GitHub 最新发布版本</text></view><ChevronRight :size="18" /></button>
-						<button v-if="matchesSettingsSearch('帮助与反馈 使用问题 问题反馈')" class="settings-row" @click="openFeedbackPage"><view class="settings-icon settings-icon-purple"><CircleHelp :size="22" /></view><view class="settings-copy"><text>帮助与反馈</text><text>提交问题与改进建议</text></view><ChevronRight :size="18" /></button>
+					<view v-if="settingsSearchHasResults" class="settings-menu-groups">
+						<view v-if="matchesSettingsSearch('对话设置 系统提示词 全局提示词') || matchesSettingsSearch('流式传输 实时回答 完整回答 非流式') || matchesSettingsSearch('角色状态栏 返回状态 状态协议 开关')" class="settings-menu-group">
+							<text class="settings-group-heading">对话体验</text>
+							<view class="settings-card settings-primary-card settings-menu-card">
+								<button v-if="matchesSettingsSearch('对话设置 系统提示词 全局提示词')" class="settings-row" data-testid="conversation-settings-entry" :title="systemPromptSettingLabel" @click="openConversationSettings(ui)"><view class="settings-icon"><MessageCircle :size="21" /></view><view class="settings-copy"><text>对话设置</text><text>{{ systemPromptEnabled ? '提示词已启用' : '提示词已关闭' }}</text></view><ChevronRight :size="17" /></button>
+								<button v-if="matchesSettingsSearch('流式传输 实时回答 完整回答 非流式')" class="settings-row" data-testid="streaming-settings-entry" :title="streamingSettingLabel" @click="openStreamingSettings(ui)"><view class="settings-icon"><Activity :size="21" /></view><view class="settings-copy"><text>流式传输</text><text>{{ streamingEnabled ? (streamingSegmentedDisplay ? '分段显示' : '已开启') : '已关闭' }}</text></view><ChevronRight :size="17" /></button>
+								<button v-if="matchesSettingsSearch('角色状态栏 返回状态 状态协议 开关')" class="settings-row" data-testid="character-status-settings-entry" :title="characterStatusSettingLabel" @click="openCharacterStatusSettings(ui)"><view class="settings-icon"><Contact :size="21" /></view><view class="settings-copy"><text>角色状态栏</text><text>{{ characterStatusEnabled ? '已开启' : '已关闭' }}</text></view><ChevronRight :size="17" /></button>
+							</view>
+						</view>
+						<view v-if="matchesSettingsSearch('网络代理 代理 HTTP HTTPS 浏览器 端口') || matchesSettingsSearch('账号与云端 登录 自动备份 同步') || matchesSettingsSearch('数据与存储 本地数据库 SQLite IndexedDB') || matchesSettingsSearch('导入与导出 JSON 备份 恢复')" class="settings-menu-group">
+							<text class="settings-group-heading">连接与数据</text>
+							<view class="settings-card settings-menu-card">
+								<button v-if="matchesSettingsSearch('网络代理 代理 HTTP HTTPS 浏览器 端口')" class="settings-row" data-testid="network-proxy-settings-entry" :title="networkProxySettingLabel" @click="openNetworkProxySettings(ui)"><view class="settings-icon"><Server :size="21" /></view><view class="settings-copy"><text>网络代理</text><text>{{ !networkProxyEnabled ? '已关闭' : (networkProxyIsAndroid && networkProxyIsSmart ? (networkProxyDetecting ? '检测中' : (networkProxyDetectedUrl ? '已发现端口' : '未发现代理')) : '已开启') }}</text></view><ChevronRight :size="17" /></button>
+								<button v-if="matchesSettingsSearch('账号与云端 登录 自动备份 同步')" class="settings-row" @click="openCloudModal"><view class="settings-icon"><Cloud :size="21" /></view><view class="settings-copy"><text>账号与云端</text><text>{{ cloudConnected ? '已登录' : '本地模式' }}</text></view><ChevronRight :size="17" /></button>
+								<button v-if="matchesSettingsSearch('数据与存储 本地数据库 SQLite IndexedDB')" class="settings-row" :title="storageLabel + ' 本地优先存储'" @click="showLocalDataInfo"><view class="settings-icon"><Database :size="21" /></view><view class="settings-copy"><text>数据与存储</text><text>本地优先</text></view><ChevronRight :size="17" /></button>
+								<button v-if="matchesSettingsSearch('导入与导出 JSON 备份 恢复')" class="settings-row" @click="openBackupMenu"><view class="settings-icon"><Import :size="21" /></view><view class="settings-copy"><text>导入与导出</text><text>备份与恢复</text></view><ChevronRight :size="17" /></button>
+							</view>
+						</view>
+						<view v-if="matchesSettingsSearch('隐私与安全 API 密钥 应用锁 加密 通知 回复提醒') || matchesSettingsSearch('NSFW 设置 成人 私密状态 状态栏') || matchesSettingsSearch('设备与诊断 Android 流式 日志') || matchesSettingsSearch('关于应用 版本 信息') || matchesSettingsSearch('检查更新 最新版本') || matchesSettingsSearch('帮助与反馈 使用问题 问题反馈')" class="settings-menu-group">
+							<text class="settings-group-heading">隐私与支持</text>
+							<view class="settings-card settings-menu-card">
+								<button v-if="matchesSettingsSearch('隐私与安全 API 密钥 应用锁 加密 通知 回复提醒')" class="settings-row" @click="openSettingsDetails(ui)"><view class="settings-icon"><KeyRound :size="21" /></view><view class="settings-copy"><text>隐私与安全</text><text>密钥与应用锁</text></view><ChevronRight :size="17" /></button>
+								<button v-if="matchesSettingsSearch('NSFW 设置 成人 私密状态 状态栏')" class="settings-row" data-testid="nsfw-settings-entry" :title="nsfwSettingLabel" @click="openNsfwSettings(ui)"><view class="settings-icon"><EyeOff :size="21" /></view><view class="settings-copy"><text>NSFW 设置</text><text>{{ nsfwEnabled ? '已开启' : '已关闭' }}</text></view><ChevronRight :size="17" /></button>
+								<button v-if="matchesSettingsSearch('设备与诊断 Android 流式 日志')" class="settings-row" @click="openAndroidDiagnostics"><view class="settings-icon"><Activity :size="21" /></view><view class="settings-copy"><text>设备与诊断</text><text>运行日志</text></view><ChevronRight :size="17" /></button>
+								<button v-if="matchesSettingsSearch('关于应用 版本 信息')" class="settings-row" :title="aboutLabel" @click="showAboutApp"><view class="settings-icon"><Info :size="21" /></view><view class="settings-copy"><text>关于应用</text><text>{{ appVersion }}</text></view><ChevronRight :size="17" /></button>
+								<button v-if="matchesSettingsSearch('检查更新 最新版本')" class="settings-row" @click="openSettingsInformation('updates')"><view class="settings-icon"><RefreshCw :size="21" /></view><view class="settings-copy"><text>检查更新</text><text>查看新版本</text></view><ChevronRight :size="17" /></button>
+								<button v-if="matchesSettingsSearch('帮助与反馈 使用问题 问题反馈')" class="settings-row" @click="openSettingsInformation('help')"><view class="settings-icon"><CircleHelp :size="21" /></view><view class="settings-copy"><text>帮助与反馈</text><text>问题与建议</text></view><ChevronRight :size="17" /></button>
+							</view>
+						</view>
 					</view>
 					<view v-else class="settings-search-empty"><Search :size="24" /><text>未找到相关设置</text></view>
 
@@ -407,6 +432,44 @@
 						<button class="settings-row themed-settings-row" data-testid="streaming-toggle" role="switch" :aria-checked="streamingEnabled" :disabled="streamingSaving" @click="toggleStreaming"><view class="settings-detail-row-icon streaming-row-icon"><Activity :size="19" /></view><view class="settings-copy"><text>实时显示回答</text><text>{{ streamingEnabled ? '模型返回内容时逐步显示' : '等待模型完成后一次显示' }}</text></view><view class="toggle streaming-toggle" :class="{ enabled: streamingEnabled }"><view class="toggle-thumb" /></view></button>
 						<button v-if="streamingEnabled" class="settings-row themed-settings-row" data-testid="streaming-segmented-toggle" role="switch" :aria-checked="streamingSegmentedDisplay" :disabled="streamingSegmentedSaving" @click="toggleStreamingSegmentedDisplay"><view class="settings-detail-row-icon streaming-segmented-row-icon"><MessageCircle :size="19" /></view><view class="settings-copy"><text>分段显示</text><text>完整段落逐条弹出，段落之间显示输入动画</text></view><view class="toggle streaming-toggle" :class="{ enabled: streamingSegmentedDisplay }"><view class="toggle-thumb" /></view></button>
 					</view>
+					<view class="settings-context-note"><Info :size="18" /><text>开关会自动保存，从下一次回复开始生效。分段显示只改变阅读节奏。</text></view>
+					<view class="navigation-scroll-tail" />
+				</scroll-view>
+			</view>
+
+			<view v-else-if="ui.settingsView === 'network-proxy'" class="screen-view settings-details themed-settings-details network-proxy-settings-details" data-testid="network-proxy-settings-page">
+				<view class="screen-header settings-detail-header themed-settings-header"><button class="icon-button header-back" aria-label="返回设置概览" @click="closeSettingsDetails(ui)"><ArrowLeft :size="22" /></button><text class="screen-title">网络代理</text><view class="settings-detail-header-space" /></view>
+				<scroll-view class="settings-screen reference-scroll themed-settings-scroll" scroll-y>
+					<view class="settings-detail-summary network-proxy-settings-summary">
+						<view class="settings-detail-summary-icon"><Server :size="23" /></view>
+						<view class="settings-detail-summary-copy"><text>{{ networkProxyModeLabel }}</text><text>{{ networkProxySettingLabel }}</text></view>
+						<view class="settings-detail-state" :class="{ enabled: networkProxyEnabled }"><view /><text>{{ networkProxyEnabled ? '开启' : '关闭' }}</text></view>
+					</view>
+					<text class="settings-section-label">代理设置</text>
+					<view class="settings-card themed-settings-card proxy-settings-card">
+						<button class="settings-row themed-settings-row" data-testid="network-proxy-toggle" role="switch" :aria-checked="networkProxyEnabled" :disabled="networkProxySaving" @click="toggleNetworkProxy"><view class="settings-detail-row-icon network-proxy-row-icon"><Server :size="19" /></view><view class="settings-copy"><text>{{ networkProxyIsAndroid && networkProxyIsSmart ? '智能检测' : '启用手动代理' }}</text><text>{{ networkProxyToggleLabel }}</text></view><view class="toggle network-proxy-toggle" :class="{ enabled: networkProxyEnabled }"><view class="toggle-thumb" /></view></button>
+						<view class="proxy-smart-help" data-testid="network-proxy-smart-help">
+							<text v-if="networkProxyIsAndroid" data-testid="network-proxy-status">{{ networkProxyDetectionLabel }}</text>
+							<text v-else>模型请求会通过下面的代理地址发送；关闭开关后直接连接模型接口。</text>
+							<text v-if="networkProxyIsAndroid && networkProxyIsSmart">检测最多等待 2.5 秒。发现端口不代表已连通模型；未发现时跟随系统网络，是否经过 VPN 由手机系统决定。</text>
+						</view>
+						<view v-if="networkProxyIsAndroid && networkProxyIsSmart && networkProxyEnabled" class="proxy-smart-actions"><button class="proxy-detect-button" data-testid="network-proxy-detect" :disabled="networkProxyDetecting || networkProxySaving" @click="refreshNetworkProxyDetection">{{ networkProxyDetecting ? '检测中...' : '重新检测本机代理' }}</button></view>
+						<view v-if="networkProxyIsAndroid && !networkProxyIsSmart" class="proxy-smart-actions"><button class="proxy-detect-button" data-testid="network-proxy-smart-button" :disabled="networkProxySaving" @click="useSmartNetworkProxy">改用智能检测</button></view>
+					</view>
+					<text class="settings-section-label">手动指定代理</text>
+					<view class="settings-card themed-settings-card proxy-manual-card">
+						<label class="proxy-url-field"><text>代理地址</text><input v-model="networkProxyUrl" :disabled="networkProxySaving" placeholder="http://127.0.0.1:7890" autocomplete="off" /><text>{{ networkProxyIsAndroid ? '填写手机上的 HTTP/混合代理地址。保存后直接使用此地址，不等待自动检测，也不会在连接失败后悄悄直连。' : '填写 HTTP 或 HTTPS 代理地址，保存后交由本地预览服务使用。' }} 留空保存则关闭代理。</text></label>
+					</view>
+					<text v-if="networkProxyError" class="network-proxy-error">{{ networkProxyError }}</text>
+					<button class="network-proxy-save-button" data-testid="network-proxy-save" :disabled="networkProxySaving" @click="saveNetworkProxySettings"><Check :size="18" /><text>{{ networkProxySaving ? '保存中...' : (networkProxyUrl.trim() ? '保存并使用此地址' : '保存并关闭代理') }}</text></button>
+					<template v-if="networkProxyIsAndroid">
+						<text class="settings-section-label">连不上外网时的排查顺序</text>
+						<view class="settings-card themed-settings-card proxy-tips-card" data-testid="network-proxy-tips">
+						<text>1. 使用手机本机代理时，先启动 Clash Meta 等代理软件，确认 HTTP/混合端口已开启且节点可用。</text>
+						<text>2. 如果依靠 TUN/VPN 接管系统网络，检查代理软件的「访问控制」，确认没有把织语排除在外。</text>
+							<text>3. 手动代理请确认端口为 HTTP 或混合端口；手机本机通常填写 http://127.0.0.1:7890，按代理软件的实际端口调整。开启 VPN 不代表这个端口一定已开启。</text>
+						</view>
+					</template>
 					<view class="navigation-scroll-tail" />
 				</scroll-view>
 			</view>
@@ -423,6 +486,7 @@
 					<view class="settings-card themed-settings-card">
 						<button class="settings-row themed-settings-row" data-testid="character-status-toggle" role="switch" :aria-checked="characterStatusEnabled" :disabled="characterStatusSaving" @click="toggleCharacterStatus"><view class="settings-detail-row-icon character-status-row-icon"><FileText :size="19" /></view><view class="settings-copy"><text>返回角色状态</text><text>{{ characterStatusEnabled ? '每轮请求更新并显示状态栏' : '仅请求对话正文并隐藏状态栏' }}</text></view><view class="toggle character-status-toggle" :class="{ enabled: characterStatusEnabled }"><view class="toggle-thumb" /></view></button>
 					</view>
+					<view class="settings-context-note"><Info :size="18" /><text>开关会自动保存。开启后，请求会包含角色状态要求；实际返回内容取决于模型。</text></view>
 					<view class="navigation-scroll-tail" />
 				</scroll-view>
 			</view>
@@ -437,7 +501,7 @@
 					</view>
 					<text class="settings-section-label">状态</text>
 					<view class="settings-card themed-settings-card">
-						<button class="settings-row themed-settings-row" data-testid="system-prompt-toggle" role="switch" :aria-checked="systemPromptEnabled" :disabled="systemPromptSaving" @click="systemPromptEnabled = !systemPromptEnabled"><view class="settings-detail-row-icon conversation-row-icon"><FileCog :size="19" /></view><view class="settings-copy"><text>启用系统提示词</text><text>{{ systemPromptEnabled ? '新对话默认使用当前内容' : '当前内容不会注入对话' }}</text></view><view class="toggle conversation-toggle" :class="{ enabled: systemPromptEnabled }"><view class="toggle-thumb" /></view></button>
+						<button class="settings-row themed-settings-row" data-testid="system-prompt-toggle" role="switch" :aria-checked="systemPromptEnabled" :disabled="systemPromptSaving" @click="systemPromptEnabled = !systemPromptEnabled"><view class="settings-detail-row-icon conversation-row-icon"><FileCog :size="19" /></view><view class="settings-copy"><text>启用系统提示词</text><text>{{ systemPromptEnabled ? '保存后用于后续模型请求' : '保存后不再注入这段内容' }}</text></view><view class="toggle conversation-toggle" :class="{ enabled: systemPromptEnabled }"><view class="toggle-thumb" /></view></button>
 					</view>
 					<text class="settings-section-label">内容</text>
 					<view class="system-prompt-editor" :class="{ disabled: !systemPromptEnabled }">
@@ -445,12 +509,13 @@
 						<textarea v-model="systemPrompt" :disabled="systemPromptSaving" maxlength="-1" placeholder="输入发送给模型的全局系统提示词" data-testid="system-prompt-input" />
 						<view class="system-prompt-editor-footer"><view><LockKeyhole :size="14" /><text>本地加密</text></view><button v-if="systemPrompt" :disabled="systemPromptSaving" aria-label="清空系统提示词" title="清空" @click="systemPrompt = ''"><X :size="15" /><text>清空</text></button></view>
 					</view>
+					<text class="settings-save-hint">修改内容或开关后，点击下方保存设置。</text>
 					<button class="system-prompt-save-button" :disabled="systemPromptSaving" data-testid="system-prompt-save" @click="saveSystemPrompt"><Check :size="18" /><text>{{ systemPromptSaving ? '保存中...' : '保存设置' }}</text></button>
 					<view class="navigation-scroll-tail" />
 				</scroll-view>
 			</view>
 
-			<view v-else-if="ui.settingsView === 'nsfw'" class="screen-view settings-details themed-settings-details nsfw-settings-details">
+			<view v-else-if="ui.settingsView === 'nsfw'" class="screen-view settings-details themed-settings-details nsfw-settings-details" data-testid="nsfw-settings-page">
 				<view class="screen-header settings-detail-header themed-settings-header"><button class="icon-button header-back" aria-label="返回设置概览" @click="closeSettingsDetails(ui)"><ArrowLeft :size="22" /></button><text class="screen-title">NSFW 设置</text><view class="settings-detail-header-space" /></view>
 				<scroll-view class="settings-screen reference-scroll themed-settings-scroll" scroll-y>
 					<view class="settings-detail-summary nsfw-settings-summary">
@@ -462,6 +527,7 @@
 					<view class="settings-card themed-settings-card">
 						<button class="settings-row themed-settings-row" data-testid="nsfw-status-toggle" role="switch" :aria-checked="nsfwEnabled" :disabled="nsfwSaving" @click="toggleNsfw"><view class="settings-detail-row-icon nsfw-row-icon"><EyeOff :size="19" /></view><view class="settings-copy"><text>显示私密状态</text><text>{{ nsfwEnabled ? '状态栏同时显示私密字段' : '状态栏仅显示常规字段' }}</text></view><view class="toggle nsfw-toggle" :class="{ enabled: nsfwEnabled }"><view class="toggle-thumb" /></view></button>
 					</view>
+					<view class="settings-context-note"><Info :size="18" /><text>{{ characterStatusEnabled ? '开关会自动保存，只控制角色状态栏中的私密字段显示。' : '角色状态栏当前已关闭，开启后才能查看这些字段。' }}</text></view>
 					<view class="navigation-scroll-tail" />
 				</scroll-view>
 			</view>
@@ -485,6 +551,7 @@
 						<button class="settings-row themed-settings-row" data-testid="app-lock-toggle" role="switch" :aria-checked="ui.appLockEnabled" :disabled="appLockBusy" @click="toggleLock"><view class="settings-detail-row-icon app-lock-row-icon"><LockKeyhole :size="19" /></view><view class="settings-copy"><text>启用应用锁</text><text>{{ ui.appLockEnabled ? '验证当前 PIN 后关闭' : '离开应用后再次进入需要 PIN' }}</text></view><view class="toggle app-lock-toggle" :class="{ enabled: ui.appLockEnabled }"><view class="toggle-thumb" /></view></button>
 					</view>
 					<button v-if="ui.appLockEnabled" class="settings-secondary-command" :disabled="appLockBusy" @click="lockAppNow"><LockKeyhole :size="17" /><text>立即锁定</text></button>
+					<view class="settings-context-note"><LockKeyhole :size="18" /><text>{{ ui.appLockEnabled ? '关闭应用锁需要验证当前 PIN。请在上方输入后操作。' : '先输入并确认 4–8 位数字 PIN，再打开应用锁。' }}</text></view>
 					<view class="navigation-scroll-tail" />
 				</scroll-view>
 			</view>
@@ -495,13 +562,14 @@
 					<view class="settings-detail-summary reply-notification-settings-summary">
 						<view class="settings-detail-summary-icon"><MessageCircle :size="23" /></view>
 						<view class="settings-detail-summary-copy"><text>后台提醒</text><text>{{ replyNotificationLabel }}</text></view>
-						<view class="settings-detail-state" :class="{ enabled: replyNotificationSupported && replyNotificationsEnabled }"><view /><text>{{ replyNotificationsEnabled ? '开启' : '关闭' }}</text></view>
+						<view class="settings-detail-state" :class="{ enabled: replyNotificationSupported && replyNotificationsEnabled }"><view /><text>{{ !replyNotificationSupported ? '不可用' : replyNotificationsEnabled ? '开启' : '关闭' }}</text></view>
 					</view>
 					<text class="settings-section-label">通知</text>
 					<view class="settings-card themed-settings-card">
-						<button class="settings-row themed-settings-row" data-testid="reply-notifications-toggle" role="switch" :aria-checked="replyNotificationsEnabled" :disabled="!replyNotificationSupported" @click="toggleReplyNotifications"><view class="settings-detail-row-icon reply-notification-row-icon"><MessageCircle :size="19" /></view><view class="settings-copy"><text>回复完成时提醒</text><text>{{ replyNotificationSupported ? '离开当前会话或应用进入后台时发送通知' : '仅 Android App 安装包可用' }}</text></view><view class="toggle reply-notification-toggle" :class="{ enabled: replyNotificationSupported && replyNotificationsEnabled }"><view class="toggle-thumb" /></view></button>
+						<button class="settings-row themed-settings-row" data-testid="reply-notifications-toggle" role="switch" :aria-checked="replyNotificationSupported && replyNotificationsEnabled" :disabled="!replyNotificationSupported" @click="toggleReplyNotifications"><view class="settings-detail-row-icon reply-notification-row-icon"><MessageCircle :size="19" /></view><view class="settings-copy"><text>回复完成时提醒</text><text>{{ replyNotificationSupported ? '离开当前会话或应用进入后台时发送通知' : '仅 Android App 安装包可用' }}</text></view><view class="toggle reply-notification-toggle" :class="{ enabled: replyNotificationSupported && replyNotificationsEnabled }"><view class="toggle-thumb" /></view></button>
 					</view>
 					<button v-if="replyNotificationSupported && replyNotificationsEnabled && !replyNotificationAuthorized" class="settings-secondary-command" @click="openReplyNotificationSystemSettings"><Settings :size="17" /><text>打开系统通知设置</text></button>
+					<view class="settings-context-note"><Info :size="18" /><text>{{ replyNotificationSupported ? '通知还需要系统授权。正在查看的会话不会重复提醒。' : '当前为浏览器预览，此开关不可用。请在 Android App 中设置回复提醒。' }}</text></view>
 					<view class="navigation-scroll-tail" />
 				</scroll-view>
 			</view>
@@ -512,19 +580,23 @@
 					<view class="settings-detail-summary auto-sync-settings-summary">
 						<view class="settings-detail-summary-icon"><Cloud :size="23" /></view>
 						<view class="settings-detail-summary-copy"><text>云端增量同步</text><text>{{ cloudConnected ? (cloudBackupStatus || (autoBackupEnabled ? '前台每 3 分钟同步' : '当前已关闭')) : '请先登录云端账号' }}</text></view>
-						<view class="settings-detail-state" :class="{ enabled: cloudConnected && autoBackupEnabled }"><view /><text>{{ autoBackupEnabled ? '开启' : '关闭' }}</text></view>
+						<view class="settings-detail-state" :class="{ enabled: cloudConnected && autoBackupEnabled }"><view /><text>{{ !cloudConnected ? '未登录' : autoBackupEnabled ? '开启' : '关闭' }}</text></view>
 					</view>
 					<text class="settings-section-label">同步</text>
 					<view class="settings-card themed-settings-card">
-						<button class="settings-row themed-settings-row" data-testid="auto-sync-toggle" role="switch" :aria-checked="autoBackupEnabled" :disabled="cloudBusy || !cloudConnected" @click="toggleAutoBackup"><view class="settings-detail-row-icon auto-sync-row-icon"><Cloud :size="19" /></view><view class="settings-copy"><text>自动同步</text><text>{{ cloudConnected ? '应用在前台时定期同步新增和修改的数据' : '登录后可启用' }}</text></view><view class="toggle auto-sync-toggle" :class="{ enabled: cloudConnected && autoBackupEnabled }"><view class="toggle-thumb" /></view></button>
+						<button class="settings-row themed-settings-row" data-testid="auto-sync-toggle" role="switch" :aria-checked="cloudConnected && autoBackupEnabled" :disabled="cloudBusy || !cloudConnected" @click="toggleAutoBackup"><view class="settings-detail-row-icon auto-sync-row-icon"><Cloud :size="19" /></view><view class="settings-copy"><text>自动同步</text><text>{{ cloudConnected ? '应用在前台时定期同步新增和修改的数据' : '登录后可启用' }}</text></view><view class="toggle auto-sync-toggle" :class="{ enabled: cloudConnected && autoBackupEnabled }"><view class="toggle-thumb" /></view></button>
 					</view>
+					<view class="settings-context-note"><Info :size="18" /><text>自动同步在应用前台运行时进行。完整备份与恢复可在账号与云端中管理。</text></view>
+					<button class="settings-secondary-command" @click="openCloudModal"><Cloud :size="18" /><text>{{ cloudConnected ? '管理云端账号' : '登录云端账号' }}</text><ChevronRight :size="18" /></button>
 					<view class="navigation-scroll-tail" />
 				</scroll-view>
 			</view>
 
-			<view v-else class="screen-view settings-details">
-				<view class="screen-header reference-header settings-detail-header"><button class="icon-button header-back" aria-label="返回设置概览" @click="closeSettingsDetails(ui)"><ArrowLeft :size="21" /></button><text class="screen-title">设置</text></view>
-				<scroll-view class="settings-screen reference-scroll" scroll-y>
+			<SettingsInformation v-else-if="['storage', 'about', 'updates', 'help'].includes(ui.settingsView)" :key="ui.settingsView" :mode="ui.settingsView" :version="appVersion" :platform-label="aboutLabel" :storage-label="storageLabel" :stats="settingsDataStats" @back="closeSettingsDetails(ui)" @backup="openBackupMenu" @cloud="openCloudModal" @release="openReleasePage" @feedback="openFeedbackPage" @diagnostics="openAndroidDiagnostics" @privacy="openSettingsDetails(ui)" />
+			<view v-else class="screen-view settings-details themed-settings-details privacy-settings-details" data-testid="privacy-settings-page">
+				<view class="screen-header settings-detail-header themed-settings-header"><button class="icon-button header-back" aria-label="返回设置概览" @click="closeSettingsDetails(ui)"><ArrowLeft :size="22" /></button><text class="screen-title">隐私与安全</text><view class="settings-detail-header-space" /></view>
+				<scroll-view class="settings-screen reference-scroll themed-settings-scroll" scroll-y>
+					<view class="settings-page-intro"><text>安心记录，自在对话。</text><text>管理本机访问保护、接口密钥和回复提醒。</text></view>
 					<text class="settings-section-label">安全</text>
 					<view class="settings-card">
 						<button class="settings-row" @click="goToTab('providers')"><view class="settings-icon"><KeyRound :size="19" /></view><view class="settings-copy"><text>API 密钥管理</text><text>使用 {{ encryptionLabel }} 加密后保存</text></view><ChevronRight :size="18" /></button>
@@ -538,8 +610,8 @@
 					<view class="settings-card">
 						<button class="settings-row" @click="openAndroidDiagnostics"><view class="settings-icon"><Activity :size="19" /></view><view class="settings-copy"><text>Android 流式诊断</text><text>验证流式分块、停止和生命周期</text></view><ChevronRight :size="18" /></button>
 						<button class="settings-row" @click="showAboutApp"><view class="settings-icon"><Info :size="19" /></view><view class="settings-copy"><text>关于应用</text><text>版本 {{ appVersion }} · {{ aboutLabel }}</text></view><ChevronRight :size="18" /></button>
-						<button class="settings-row" @click="openReleasePage"><view class="settings-icon"><RefreshCw :size="19" /></view><view class="settings-copy"><text>检查更新</text><text>查看 GitHub 最新发布版本</text></view><ChevronRight :size="18" /></button>
-						<button class="settings-row" @click="openFeedbackPage"><view class="settings-icon"><CircleHelp :size="19" /></view><view class="settings-copy"><text>帮助与反馈</text><text>提交问题与改进建议</text></view><ChevronRight :size="18" /></button>
+						<button class="settings-row" @click="openSettingsInformation('updates')"><view class="settings-icon"><RefreshCw :size="19" /></view><view class="settings-copy"><text>检查更新</text><text>查看当前版本与更新方式</text></view><ChevronRight :size="18" /></button>
+						<button class="settings-row" @click="openSettingsInformation('help')"><view class="settings-icon"><CircleHelp :size="19" /></view><view class="settings-copy"><text>帮助与反馈</text><text>常见问题与反馈入口</text></view><ChevronRight :size="18" /></button>
 					</view>
 					<view class="navigation-scroll-tail" />
 				</scroll-view>
@@ -644,39 +716,63 @@
 
 		<view v-if="backupMenuOpen" class="modal-backdrop backup-modal-backdrop" @click.self="closeBackupMenu">
 			<view class="action-modal backup-transfer-modal" role="dialog" aria-modal="true" aria-label="导入与导出 JSON">
-				<view class="modal-heading"><text>导入与导出</text><button aria-label="关闭" :disabled="backupBusy" @click="closeBackupMenu"><X :size="19" /></button></view>
+				<view class="modal-heading"><view class="backup-heading-copy"><text>导入与导出</text><text>让记录随你同行</text></view><button aria-label="关闭" :disabled="backupBusy" @click="closeBackupMenu"><X :size="21" /></button></view>
 				<scroll-view class="backup-transfer-content" scroll-y>
+					<view class="backup-sheet-section">
 					<text class="backup-section-label">保存 JSON</text>
 					<view class="backup-choice-grid">
-						<button class="backup-choice" :disabled="backupBusy" @click="exportData"><view class="backup-choice-icon local"><Download :size="19" /></view><view><text>保存到本地</text><text>下载 JSON 文件</text></view></button>
-						<button class="backup-choice" :disabled="backupBusy" @click="exportDataToCloud"><view class="backup-choice-icon cloud"><Cloud :size="19" /></view><view><text>保存到云端</text><text>{{ cloudConnected ? '生成下载链接' : '登录后可用' }}</text></view></button>
+						<button class="backup-choice" :disabled="backupBusy" @click="exportData"><view class="backup-choice-icon local"><Download :size="21" /></view><view><text>保存到本地</text><text>下载 JSON 文件</text></view></button>
+						<button class="backup-choice" :disabled="backupBusy" @click="exportDataToCloud"><view class="backup-choice-icon cloud"><Cloud :size="21" /></view><view><text>保存到云端</text><text>{{ cloudConnected ? '生成下载链接' : '登录后可用' }}</text></view></button>
 					</view>
-					<view v-if="backupTransferStatus" class="backup-transfer-status"><Cloud :size="15" /><text>{{ backupTransferStatus }}</text></view>
+					<text class="backup-share-notice" data-testid="json-share-notice">云端 JSON 是明文分享，包含聊天和角色等导出数据。任何拿到链接的人都能读取；链接默认 7 天有效，实际以到期时间为准，也可提前撤销。私密备份请使用“账号与云端”的加密完整备份。</text>
+					<view v-if="backupTransferStatus" class="backup-transfer-status" role="status" aria-live="polite"><Cloud :size="17" /><text>{{ backupTransferStatus }}</text></view>
 					<view v-if="cloudExportUrl" class="backup-link-result">
-						<text>云端下载链接</text>
-						<view class="backup-link-field"><input :value="cloudExportUrl" readonly /><button aria-label="复制云端下载链接" @click="copyCloudExportLink"><Copy :size="17" /></button></view>
+						<text>云端下载链接 · {{ formatJsonShareDate(cloudExportExpiresAt) }} 失效</text>
+						<view class="backup-link-field"><input :value="cloudExportUrl" readonly aria-label="云端下载链接" /><button aria-label="复制云端下载链接" @click="copyCloudExportLink"><Copy :size="19" /></button></view>
 					</view>
+					</view>
+					<view v-if="cloudConnected" class="json-share-management" data-testid="json-share-management">
+						<view class="json-share-heading"><text class="backup-section-label">已分享的云端 JSON</text><button :disabled="jsonExportsLoading || backupBusy" @click="refreshJsonExports">{{ jsonExportsLoading ? '加载中' : '刷新' }}</button></view>
+						<text v-if="jsonExportsError" class="json-share-error" role="alert">{{ jsonExportsError }}</text>
+						<text v-else-if="!jsonExportsLoading && !jsonExports.length" class="json-share-empty">暂无有效分享</text>
+						<view v-for="item in jsonExports" :key="item.id" class="json-share-row" :data-share-id="item.id">
+							<view><text>{{ formatJsonShareDate(item.created_at) }} 创建</text><text>{{ formatJsonShareDate(item.expires_at) }} 失效 · {{ formatAttachmentSize(item.byte_size) }}</text></view>
+							<button :disabled="backupBusy || jsonExportRevokingId !== null" :aria-label="`撤销分享 ${item.id}`" @click="revokeJsonShare(item)">{{ jsonExportRevokingId === item.id ? '撤销中' : '撤销' }}</button>
+						</view>
+					</view>
+					<view class="backup-sheet-section backup-import-section">
 					<text class="backup-section-label backup-import-label">导入 JSON</text>
-					<button class="backup-local-import" :disabled="backupBusy" @click="chooseImportFile"><Upload :size="18" /><view><text>从本地文件导入</text><text>选择设备中的 JSON 文件</text></view><ChevronRight :size="17" /></button>
+					<button class="backup-local-import" :disabled="backupBusy" @click="chooseImportFile"><view class="backup-choice-icon local"><Upload :size="21" /></view><view><text>从本地文件导入</text><text>选择设备中的 JSON 文件</text></view><ChevronRight :size="19" /></button>
+					<text class="backup-link-label">或使用云端下载链接</text>
 					<view class="backup-url-import">
-						<input v-model="cloudImportUrl" :disabled="backupBusy" type="text" placeholder="粘贴云端 JSON 下载链接" confirm-type="done" @confirm="importDataFromLink" />
+						<input v-model="cloudImportUrl" :disabled="backupBusy" type="text" aria-label="云端 JSON 下载链接" placeholder="粘贴云端 JSON 下载链接" confirm-type="done" @confirm="importDataFromLink" />
 						<button :disabled="backupBusy || !cloudImportUrl.trim()" @click="importDataFromLink"><Import :size="17" /><text>{{ backupBusy ? '处理中' : '链接导入' }}</text></button>
+					</view>
 					</view>
 				</scroll-view>
 				<input ref="backupFile" class="hidden-file-input" type="file" accept="application/json,.json" @change="importData" />
 			</view>
 		</view>
 		<view v-if="cloudOpen" class="modal-backdrop cloud-modal-backdrop" @click.self="closeCloudModal"><view class="cloud-modal cloud-backup-card" role="dialog" aria-modal="true" aria-label="账号与云端配置">
-			<view class="cloud-modal-heading"><view class="settings-icon cloud-status-icon"><Cloud :size="20" /></view><view class="settings-copy"><text>账号与云端</text><text>{{ cloudAccountLabel }}</text></view><view v-if="cloudConnected" class="enabled-status"><i /><text>已启用</text></view><button aria-label="关闭账号与云端" @click="closeCloudModal"><X :size="19" /></button></view>
+			<view class="cloud-modal-heading"><view class="settings-icon cloud-status-icon"><Cloud :size="22" /></view><view class="settings-copy"><text>账号与云端</text><text>{{ cloudAccountLabel }}</text></view><button aria-label="关闭账号与云端" @click="closeCloudModal"><X :size="21" /></button></view>
 			<scroll-view class="cloud-modal-content" scroll-y>
-				<label class="cloud-field"><text>服务器</text><input v-model="cloudForm.baseUrl" :disabled="cloudBusy || cloudConnected" :placeholder="DEFAULT_CLOUD_BASE_URL" /></label>
-				<view class="cloud-field"><text>{{ cloudConnected ? '用户名' : '本地用户名' }}</text><view class="cloud-username-editor"><input v-model="cloudForm.username" :disabled="cloudBusy" maxlength="32" :placeholder="cloudConnected ? '1-32 个字符' : '本地显示名称'" /><button :disabled="cloudBusy || !cloudForm.username.trim()" @click.stop="saveProfileUsername">保存</button></view></view>
-				<label class="cloud-field"><text>邮箱</text><input v-model="cloudForm.email" :disabled="cloudBusy || cloudConnected" placeholder="name@example.com" /></label>
-				<label v-if="!cloudConnected" class="cloud-field"><text>登录密码</text><input v-model="cloudForm.password" :disabled="cloudBusy" type="password" placeholder="至少 12 个字符" /></label>
-				<label v-else class="cloud-field"><text>同步密码</text><view class="password-field"><input v-model="cloudForm.syncPassword" :disabled="cloudBusy" type="password" placeholder="用于加密云端备份" /><EyeOff :size="16" /></view></label>
-				<button v-if="cloudConnected" class="cloud-auto-row" data-testid="auto-sync-settings-entry" :disabled="cloudBusy" @click="openAutoSyncSettingsPage"><view><text>自动同步</text><text>{{ cloudBackupStatus || (autoBackupEnabled ? '已开启，前台每 3 分钟增量同步' : '已关闭') }}</text></view><ChevronRight :size="18" /></button>
-				<view v-if="!cloudConnected" class="cloud-actions"><button class="secondary-button" :disabled="cloudBusy" @click="registerCloud">注册</button><button class="primary-button" :disabled="cloudBusy" @click="loginCloud">登录</button></view>
-				<view v-else class="cloud-actions cloud-actions-wrap"><button class="primary-button" :disabled="cloudBusy" @click="syncCloudNow">立即同步</button><button class="secondary-button" :disabled="cloudBusy" @click="uploadCloudBackup">完整备份</button><button class="secondary-button" :disabled="cloudBusy" @click="restoreCloudBackup">从云端恢复</button><button class="danger-button" :disabled="cloudBusy" @click="deleteCloudBackup">删除完整备份</button><button class="logout-button" :disabled="cloudBusy" @click="logoutCloud">退出登录</button></view>
+				<view class="cloud-sheet-intro"><text>{{ cloudConnected ? '让对话在不同设备间延续。' : '登录后，同步你的角色与对话。' }}</text><view v-if="cloudConnected" class="enabled-status"><i /><text>已启用</text></view></view>
+				<view class="cloud-sheet-section">
+					<text class="cloud-section-label">账号信息</text>
+					<view class="cloud-field"><text>{{ cloudConnected ? '用户名' : '本地用户名' }}</text><view class="cloud-username-editor"><input v-model="cloudForm.username" :disabled="cloudBusy" maxlength="32" :aria-label="cloudConnected ? '用户名' : '本地用户名'" :placeholder="cloudConnected ? '1-32 个字符' : '本地显示名称'" /><button :disabled="cloudBusy || !cloudForm.username.trim()" @click.stop="saveProfileUsername">保存</button></view></view>
+					<label class="cloud-field"><text>服务器</text><input v-model="cloudForm.baseUrl" :disabled="cloudBusy || cloudConnected" :placeholder="DEFAULT_CLOUD_BASE_URL" aria-label="云端服务器" /></label>
+					<label class="cloud-field"><text>邮箱</text><input v-model="cloudForm.email" :disabled="cloudBusy || cloudConnected" placeholder="name@example.com" aria-label="邮箱" /></label>
+					<label v-if="!cloudConnected" class="cloud-field"><text>登录密码</text><input v-model="cloudForm.password" :disabled="cloudBusy" type="password" placeholder="至少 12 个字符" aria-label="登录密码" /></label>
+					<view v-if="!cloudConnected" class="cloud-actions"><button class="secondary-button" :disabled="cloudBusy" @click="registerCloud">注册</button><button class="primary-button" :disabled="cloudBusy" @click="loginCloud">登录</button></view>
+				</view>
+				<view v-if="cloudConnected" class="cloud-sheet-section cloud-sync-section">
+					<text class="cloud-section-label">同步与加密备份</text>
+					<label class="cloud-field"><text>同步密码</text><view class="password-field"><input v-model="cloudForm.syncPassword" :disabled="cloudBusy" type="password" placeholder="用于加密云端备份" aria-label="同步密码" /><EyeOff :size="18" /></view></label>
+					<text class="cloud-encryption-note">完整备份会在本地加密后上传，恢复时需要使用相同的同步密码。</text>
+					<button class="cloud-auto-row" data-testid="auto-sync-settings-entry" :disabled="cloudBusy" @click="openAutoSyncSettingsPage"><view><text>自动同步</text><text>{{ cloudBackupStatus || (autoBackupEnabled ? '已开启，前台每 3 分钟增量同步' : '已关闭') }}</text></view><ChevronRight :size="18" /></button>
+					<view class="cloud-actions cloud-actions-wrap"><button class="primary-button cloud-sync-now" :disabled="cloudBusy" @click="syncCloudNow"><RefreshCw :size="18" /><text>立即同步</text></button><button class="secondary-button" :disabled="cloudBusy" @click="uploadCloudBackup">完整备份</button><button class="secondary-button" :disabled="cloudBusy" @click="restoreCloudBackup">从云端恢复</button></view>
+				</view>
+				<view v-if="cloudConnected" class="cloud-sheet-account-actions"><button class="danger-button" :disabled="cloudBusy" @click="deleteCloudBackup">删除完整备份</button><button class="logout-button" :disabled="cloudBusy" @click="logoutCloud">退出登录</button></view>
 			</scroll-view>
 		</view></view>
 		<view v-if="profileAvatarMenuOpen" class="modal-backdrop" @click.self="profileAvatarMenuOpen = false"><view class="action-modal"><view class="modal-heading"><text>头像</text><button aria-label="关闭头像菜单" @click="profileAvatarMenuOpen = false"><X :size="19" /></button></view><button class="modal-action" @click="chooseProfileAvatarSource('image')"><Image :size="19" /><text>从相册选择</text></button><button class="modal-action" @click="chooseProfileAvatarSource('camera')"><Camera :size="19" /><text>拍照</text></button><button v-if="profileAvatar" class="modal-action avatar-reset-action" @click="resetProfileAvatar"><Trash2 :size="18" /><text>恢复默认头像</text></button></view></view>
@@ -788,7 +884,7 @@
 </template>
 
 <script>
-	import { markRaw } from 'vue'
+	import { reactive, markRaw } from 'vue'
 	import {
 		Activity, AlertCircle, ArrowLeft, Camera, Check, CheckCheck, ChevronDown, ChevronRight, CircleHelp, Cloud, Copy, Database,
 		Contact, Download, EyeOff, FileCog, FileText, Image, Import, Info, KeyRound, LockKeyhole, MessageCircle, Mic,
@@ -796,12 +892,18 @@
 		Square, ThumbsDown, ThumbsUp, Trash2, Upload, X
 	} from '../../src/components/app-icons.js'
 	import AppDialogLayer from '../../src/components/app-dialog-layer.vue'
+	import { isEmptyCompletedReply, messageResponseDetails } from '../../src/app/message-response-details.js'
 	import AppImage from '../../src/components/app-image.js'
 	import CharacterContacts from '../../src/components/character-contacts.vue'
+	import MainPageHeading from '../../src/components/main-page-heading.vue'
+	import SettingsInformation from '../../src/components/settings-information.vue'
 	import CharacterDetail from '../../src/components/character-detail.vue'
 	import GroupAvatar from '../../src/components/group-avatar.vue'
 	import GroupChatEditor from '../../src/components/group-chat-editor.vue'
 	import ProviderLogo from '../../src/components/provider-logo.js'
+	import { createComposerDraftStore } from '../../src/app/composer-drafts.js'
+	import { composerMethods } from '../../src/app/chat-composer-methods.js'
+	import { cloudSettingsMethods } from '../../src/app/cloud-settings-methods.js'
 	import StoryReader from '../../src/components/story-reader.vue'
 	import WorldBookManager from '../../src/components/world-book-manager.vue'
 	import { createCloudServices } from '../../src/app/create-cloud-services.js'
@@ -816,6 +918,7 @@
 	import { APP_VERSION, FEEDBACK_URL, RELEASES_URL } from '../../src/core/app-metadata.js'
 	import { CHARACTER_STATUS_SETTING_KEY, readCharacterStatusEnabled } from '../../src/core/character-status-setting.js'
 	import { DEFAULT_CLOUD_BASE_URL, normalizeCloudBaseUrl, resolveCloudRequestBaseUrl } from '../../src/core/cloud-base-url.js'
+	import { NETWORK_PROXY_MODE_MANUAL, NETWORK_PROXY_MODE_SMART, NETWORK_PROXY_SETTING_KEY, normalizeNetworkProxySetting, normalizeNetworkProxyUrl, readNetworkProxySetting } from '../../src/core/network-proxy.js'
 	import {
 		groupMentionQuery, groupMessageSpeakerKey, groupParticipantKey, groupParticipantKind, insertGroupMention,
 		isGroupConversation, normalizeGroupParticipants
@@ -824,7 +927,7 @@
 	import { PROFILE_AVATAR_SETTING_KEY, createProfileAvatar, normalizeProfileAvatar } from '../../src/core/profile-avatar.js'
 	import { extractStoryMemory } from '../../src/core/story-memory.js'
 	import {
-		STORY_READER_MODE_SETTING_KEY, normalizeStoryReaderBookmarks, normalizeStoryReaderMode,
+		STORY_READER_MODE_SETTING_KEY, createStoryReaderBlocks, storyReaderPositionMessageId, normalizeStoryReaderBookmarks, normalizeStoryReaderMode,
 		normalizeStoryReaderPosition, readStoryReaderBookmarks, readStoryReaderMode, readStoryReaderPosition,
 		storyReaderBookmarksSettingKey, storyReaderPositionSettingKey
 	} from '../../src/core/story-reader.js'
@@ -849,7 +952,7 @@
 	import {
 		applyFetchedModels, applyProviderModelSelection, applyProviderProtocolSelection, attachmentActions, canSendMessage, closeCharacterDetails as closeCharacterDetailsState,
 		closeGroupEditor as closeGroupEditorState, closeSettingsDetails, createInitialUiState, createProviderForm, isUserMessageRead, navigationItems,
-		openAppLockSettings, openAutoSyncSettings, openCharacterDetails as openCharacterDetailsState, openCharacterStatusSettings, openConversation, openConversationSettings, openGroupEditor, openNsfwSettings, openReplyNotificationSettings, openSettingsDetails, openStreamingSettings, selectTab, setGenerating,
+		openAppLockSettings, openAutoSyncSettings, openCharacterDetails as openCharacterDetailsState, openCharacterStatusSettings, openConversation, openConversationSettings, openGroupEditor, openNsfwSettings, openNetworkProxySettings, openReplyNotificationSettings, openSettingsDetails, openStreamingSettings, selectTab, setGenerating,
 		resolveAppBackAction, setGenerationMode, summarizeConversation
 	} from '../../src/ui-state.js'
 
@@ -865,7 +968,7 @@
 	const CHAT_VIRTUAL_SCROLL_INTERVAL = 32
 	const CHAT_VIRTUAL_MEASURE_INTERVAL = 96
 	const CHAT_HISTORY_AUTO_LOAD_THRESHOLD = 160
-	const CHAT_AUTO_FOLLOW_THRESHOLD = 32
+	const CHAT_BOTTOM_EPSILON = 2
 	const MAX_AVATAR_CACHE_ITEMS = 32
 	const STREAMING_RENDER_INTERVAL = 40
 	const SEGMENT_REVEAL_MIN_DELAY = 320
@@ -876,7 +979,7 @@
 	const SAVED_API_KEY_MASK = '••••••••••••'
 	const NSFW_SETTING_KEY = 'nsfwEnabled'
 	const SETTINGS_SEARCH_ITEMS = [
-		'对话设置 系统提示词 全局提示词', '流式传输 实时回答 完整回答 非流式', '角色状态栏 返回状态 状态协议 开关', '账号与云端 登录 自动备份 同步', '隐私与安全 API 密钥 应用锁 加密 通知 回复提醒',
+		'对话设置 系统提示词 全局提示词', '流式传输 实时回答 完整回答 非流式', '网络代理 代理 HTTP HTTPS 浏览器 端口 Clash Meta TUN VPN 混合端口', '角色状态栏 返回状态 状态协议 开关', '账号与云端 登录 自动备份 同步', '隐私与安全 API 密钥 应用锁 加密 通知 回复提醒',
 		'NSFW 设置 成人 私密状态 状态栏',
 		'数据与存储 本地数据库 SQLite IndexedDB', '导入与导出 JSON 备份 恢复', '设备与诊断 Android 流式 日志',
 		'关于应用 版本 信息', '检查更新 最新版本', '帮助与反馈 使用问题 问题反馈'
@@ -888,8 +991,8 @@
 		components: {
 			Activity, AlertCircle, ArrowLeft, Camera, Check, CheckCheck, ChevronDown, ChevronRight, CircleHelp, Cloud, Copy, Database,
 			Contact, Download, EyeOff, FileCog, FileText, Image, Import, Info, KeyRound, LockKeyhole, MessageCircle, Mic,
-			MoreVertical, Paperclip, PlayOutline, Plus, AppDialogLayer, AppImage, CharacterContacts, CharacterDetail, GroupAvatar, GroupChatEditor, ProviderLogo, StoryReader, WorldBookManager, RefreshCw, RotateCcw, Search, Send, Settings, Square,
-			ThumbsDown, ThumbsUp, Trash2, Upload, X
+			MoreVertical, Paperclip, PlayOutline, Plus, AppDialogLayer, AppImage, CharacterContacts, MainPageHeading, CharacterDetail, GroupAvatar, GroupChatEditor, ProviderLogo, StoryReader, WorldBookManager, RefreshCw, RotateCcw, Search, Send, Server, Settings, Square,
+			ThumbsDown, ThumbsUp, Trash2, Upload, X, SettingsInformation
 		},
 		data() {
 			return {
@@ -901,16 +1004,17 @@
 				messageHistoryLoading: false, messageHistoryHasMore: false, messageHistoryTrimmed: false, chatLoadRevision: 0, pendingStreamingMessage: null, streamingRenderTimer: null, segmentedReplyTimers: markRaw(new Map()),
 				chatScrollIntoView: '', chatScrollRevision: 0, chatScrollTimer: null,
 				chatVirtualScrollTop: 0, chatVirtualViewportHeight: 720, chatVirtualPinnedToBottom: true,
+				chatScrollPaused: false, chatScrollLastTop: null, chatScrollTouchY: null, chatScrollTouchDirection: 0,
 				chatVirtualMeasurementRevision: 0, chatVirtualMeasurements: markRaw(new Map()), chatVirtualScrollTimer: null, chatVirtualMeasureTimer: null, chatVirtualSuppressMeasurementScroll: false,
 				chatHistoryAutoLoadArmed: false, chatHistoryAutoLoadTimer: null,
-				searchQuery: '', searchOpen: false, homeMenuOpen: false, draftMessage: '', composerInputHeight: COMPOSER_MIN_HEIGHT,
+				searchQuery: '', searchOpen: false, homeMenuOpen: false, composerDraftStore: markRaw(createComposerDraftStore(reactive)), composerInputHeight: COMPOSER_MIN_HEIGHT,
 				groupEditorSaving: false, groupEditorReturnScreen: 'conversations',
 				conversationActionSheet: null, conversationActionResolver: null, appDialog: null, appDialogValue: '', appDialogResolver: null,
 				contactSearchQuery: '', storySearchQuery: '', contactSortMode: 'name', customCharacterDraft: null, customCharacterAvatar: null, characterDetailEditing: false, characterSaveBusy: false, pendingCharacterAvatarId: '',
 				characterImportBusy: false, characterImportStage: '', characterImportPreview: null, characterImportConfirmed: false, characterImportTarget: 'contacts',
 				worldBookManagerOpen: false, worldBookImportBusy: false, worldBookImportPreview: null, worldBookImportConfirmed: false,
 				worldBookApplyToAll: true, worldBookSelectedCharacterIds: [],
-				pendingAttachments: [], attachmentProcessing: false, attachmentPreview: null, imageDownloadBusy: false,
+				attachmentInputContext: null, attachmentPreview: null, imageDownloadBusy: false,
 				textAttachmentAccept: TEXT_ATTACHMENT_ACCEPT,
 				modelMenuOpen: false, attachmentMenuOpen: false, emojiMenuOpen: false,
 				emojiOptions: ['😀', '😂', '😊', '😍', '👍', '🙏', '🎉', '❤️'],
@@ -918,8 +1022,8 @@
 				providerTesting: false, providerLoadingModels: false, connectionStatus: 'untested', showApiKey: false,
 				providerApiKeyBusy: false, providerApiKeyDirty: false, providerApiKeyLoadedValue: '', providerApiKeyRequestId: 0,
 				providerAvatarPresets: PROVIDER_AVATAR_PRESETS, providerProtocols: PROVIDER_PROTOCOLS, providerAvatarMenuOpen: false, providerAvatarBusy: false,
-				systemPromptEnabled: false, systemPrompt: '', systemPromptSaving: false, streamingEnabled: true, streamingSaving: false, streamingSegmentedDisplay: false, streamingSegmentedSaving: false, storyReaderMode: 'page', storyReaderPosition: null, storyReaderPositionSaveTimer: null, pendingStoryReaderPositionSave: null, storyReaderPositionWritePromise: null, storyReaderBookmarks: [], storyReaderBookmarksWritePromise: null, storyReaderBookmarksRevision: 0, characterStatusEnabled: true, characterStatusSaving: false, nsfwEnabled: false, nsfwSaving: false, backupMenuOpen: false, backupBusy: false, backupTransferStatus: '',
-				cloudExportUrl: '', cloudImportUrl: '',
+				systemPromptEnabled: false, systemPrompt: '', systemPromptSaving: false, streamingEnabled: true, streamingSaving: false, streamingSegmentedDisplay: false, streamingSegmentedSaving: false, networkProxyEnabled: false, networkProxyMode: NETWORK_PROXY_MODE_MANUAL, networkProxyUrl: '', networkProxySavedUrl: '', networkProxyDetectedUrl: '', networkProxyDetecting: false, networkProxyDetectionFailed: false, networkProxyDetectionTimedOut: false, networkProxyDetectionRevision: 0, networkProxyNativeAvailable: null, networkProxySaving: false, networkProxyError: '', storyReaderMode: 'page', storyReaderPosition: null, storyReaderPositionSaveTimer: null, pendingStoryReaderPositionSave: null, storyReaderPositionWritePromise: null, storyReaderBookmarks: [], storyReaderBookmarksWritePromise: null, storyReaderBookmarksRevision: 0, characterStatusEnabled: true, characterStatusSaving: false, nsfwEnabled: false, nsfwSaving: false, backupMenuOpen: false, backupBusy: false, backupTransferStatus: '',
+				cloudExportUrl: '', cloudExportId: null, cloudExportExpiresAt: null, cloudImportUrl: '', jsonExports: [], jsonExportsLoading: false, jsonExportsRequestRevision: 0, jsonExportsError: '', jsonExportRevokingId: null, jsonExportsRevision: 0,
 				settingsSearchOpen: false, settingsSearchQuery: '', profileName: '', profileAvatar: null, profileAvatarMenuOpen: false, profileAvatarBusy: false,
 				cloudOpen: false, cloudBusy: false, cloudServices: null, cloudSession: null, networkSyncHandler: null,
 				autoBackupEnabled: false, cloudBackupStatus: '',
@@ -930,8 +1034,21 @@
 			}
 		},
 		computed: {
+			composerDraft() { return this.composerDraftStore.get(this.services?.workspaceId, this.ui.activeConversationId) },
+			draftMessage: { get() { return this.composerDraft.text }, set(value) { this.composerDraft.text = value } },
+			pendingAttachments: { get() { return this.composerDraft.attachments }, set(value) { this.composerDraft.attachments = value } },
+			attachmentProcessing: { get() { return this.composerDraft.processing }, set(value) { this.composerDraft.processing = value } },
 			DEFAULT_CLOUD_BASE_URL() { return DEFAULT_CLOUD_BASE_URL },
 			storageLabel() { return this.services?.platform?.storage || 'IndexedDB' },
+			settingsDataStats() {
+				return {
+					conversations: this.conversationItems.filter(item => item?.conversationKind !== 'story').length,
+					characters: this.characterItems.length,
+					stories: this.storyConversations.length,
+					providers: this.providerItems.length,
+					worldBooks: this.worldBookItems.length
+				}
+			},
 			encryptionLabel() { return this.services?.platform?.encryption || 'Web Crypto' },
 			aboutLabel() { return this.services?.platform?.about || '浏览器本地版' },
 			replyNotificationSupported() { return Boolean(this.services?.replyNotificationService?.supported) },
@@ -947,7 +1064,7 @@
 				const username = this.cloudConnected ? this.cloudSession?.user?.username : this.profileName
 				return this.cloudConnected ? (username || (email ? email.split('@')[0] : '云端用户')) : (username || '本地用户')
 			},
-			cloudAccountLabel() { return this.cloudConnected ? this.settingsProfileName : '登录后自动加密备份' },
+			cloudAccountLabel() { return this.cloudConnected ? this.settingsProfileName : '同步记录，管理加密备份' },
 			settingsProfileSubtitle() {
 				const email = this.cloudSession?.user?.email || this.cloudForm.email
 				return this.cloudConnected && email ? email : '本地模式'
@@ -1009,6 +1126,36 @@
 			streamingSettingLabel() {
 				if (!this.streamingEnabled) return '等待完整回答后显示'
 				return this.streamingSegmentedDisplay ? '完整段落逐条显示' : '回答内容实时显示'
+			},
+			networkProxyIsAndroid() { return this.services?.platform?.runtime === 'app-android' },
+			networkProxyIsSmart() { return this.networkProxyMode === NETWORK_PROXY_MODE_SMART },
+			networkProxyModeLabel() {
+				if (this.networkProxyIsAndroid) return this.networkProxyIsSmart ? '手机智能代理' : '手机手动代理'
+				return '浏览器网络代理'
+			},
+			networkProxySettingLabel() {
+				if (!this.networkProxyEnabled) return '已关闭，使用系统网络'
+				if (this.networkProxyIsAndroid && this.networkProxyIsSmart) {
+					if (this.networkProxyDetecting) return '正在检测本机代理端口'
+					if (this.networkProxyDetectedUrl) return `已发现端口 ${this.networkProxyDetectedUrl}`
+					if (this.networkProxyDetectionTimedOut) return '检测超时，使用系统网络'
+					return '未发现本机代理，使用系统网络'
+				}
+				return this.networkProxySavedUrl || '手动代理已开启'
+			},
+			networkProxyDetectionLabel() {
+				if (!this.networkProxyEnabled) return '开关已关闭，使用系统网络；手机 VPN 是否接管由系统决定。'
+				if (!this.networkProxyIsSmart) return `已启用手动地址：${this.networkProxySavedUrl}。未验证连通性，连接失败会显示错误。`
+				if (this.networkProxyNativeAvailable === false) return '当前安装包缺少原生代理检测接口，请使用自定义基座或重新云打包后再试。'
+				if (this.networkProxyDetecting) return '正在检测本机代理端口，最多等待 2.5 秒…'
+				if (this.networkProxyDetectedUrl) return `已自动发现本机代理：${this.networkProxyDetectedUrl}。尚未验证代理协议或模型连通性。`
+				if (this.networkProxyDetectionTimedOut) return '检测超时，已停止等待。可以重新检测，或填写地址后保存；当前使用系统网络。'
+				if (this.networkProxyDetectionFailed) return '检测失败，可以重新检测或保存手动地址；当前使用系统网络。'
+				return '未发现本机 HTTP 端口，当前使用系统网络；手机 VPN 是否接管由系统决定。'
+			},
+			networkProxyToggleLabel() {
+				if (this.networkProxyIsAndroid && this.networkProxyIsSmart) return this.networkProxyEnabled ? '已开启，自动寻找本机 HTTP 代理' : '开启后检测本机代理，不影响手动填写'
+				return this.networkProxyEnabled ? '使用已保存的代理地址' : '关闭后保留已保存的地址'
 			},
 			characterStatusSettingLabel() { return this.characterStatusEnabled ? '每轮返回并更新角色状态' : '已关闭，仅返回对话正文' },
 			characterImportLoadingTitle() {
@@ -1256,10 +1403,16 @@
 			characterImportSecondaryLabel() { return this.characterImportTarget === 'story' ? '仅保存到故事' : '仅保存' },
 			characterImportPrimaryLabel() { return this.characterImportTarget === 'story' ? '导入并开始故事' : '导入并新建聊天' },
 			canSend() {
-				return canSendMessage(this.ui, this.draftMessage, Boolean(this.activeProvider), this.pendingAttachments.length, this.attachmentProcessing) ||
-					this.canStoryContinue
+				return !this.composerDraft.sending && (canSendMessage(this.ui, this.draftMessage, Boolean(this.activeProvider), this.pendingAttachments.length, this.attachmentProcessing) ||
+					this.canStoryContinue)
 			},
 			composerMultiline() { return this.composerInputHeight > COMPOSER_MIN_HEIGHT },
+			composerActionKind() { return this.ui.generating ? 'stop' : this.ui.generationMode === 'image' ? 'image' : this.canSend ? 'send' : 'voice' },
+			showChatJumpLatest() {
+				return this.ui.screen === 'chat' && !this.activeStoryConversation && this.messageItems.length > 0 &&
+					(!this.chatVirtualPinnedToBottom || this.messageHistoryTrimmed) &&
+					!this.attachmentMenuOpen && !this.emojiMenuOpen && !this.modelMenuOpen
+			},
 			providerBusy() { return !this.ready || this.providerSaving || this.providerDefaultSaving || this.providerTesting || this.providerLoadingModels || this.providerApiKeyBusy }
 		},
 		watch: {
@@ -1284,10 +1437,15 @@
 					return
 				}
 				this.$nextTick(() => this.resizeComposerInput())
+			},
+			'ui.settingsView'(value) {
+				if (value === 'network-proxy' && this.networkProxyEnabled && this.networkProxyIsSmart) this.refreshNetworkProxyDetection()
 			}
 		},
 		async mounted() {
 			await this.initializeApp()
+			// The browser diagnostics page returns to Settings after a full document navigation.
+			if (getBrowserWindow()?.location?.search === '?tab=settings') this.goToTab('settings')
 			this.bindNetworkSyncListener()
 		},
 		onShow() {
@@ -1334,6 +1492,8 @@
 			closeWorkspace().catch(() => {})
 		},
 		methods: {
+			...cloudSettingsMethods,
+			...composerMethods,
 			closeSettingsDetails,
 			formatAttachmentSize,
 			isUserMessageRead,
@@ -1342,6 +1502,7 @@
 			openAppLockSettings,
 			openAutoSyncSettings,
 			openNsfwSettings,
+			openNetworkProxySettings,
 			openReplyNotificationSettings,
 			openSettingsDetails,
 			openStreamingSettings,
@@ -2188,22 +2349,6 @@
 					this.handleError(error, '开始故事失败')
 				}
 			},
-			resizeComposerInput(event) {
-				const lineCount = Number(event?.detail?.lineCount)
-				if (Number.isFinite(lineCount) && lineCount > 0) {
-					this.composerInputHeight = Math.min(COMPOSER_MAX_HEIGHT, COMPOSER_MIN_HEIGHT + (lineCount - 1) * COMPOSER_LINE_HEIGHT)
-					return
-				}
-
-				const ref = Array.isArray(this.$refs.composerInput) ? this.$refs.composerInput[0] : this.$refs.composerInput
-				const textarea = ref?.tagName === 'TEXTAREA' ? ref : ref?.$el?.querySelector?.('textarea')
-				if (!textarea || typeof textarea.scrollHeight !== 'number') return
-
-				textarea.style.height = `${COMPOSER_MIN_HEIGHT}px`
-				const nextHeight = Math.min(COMPOSER_MAX_HEIGHT, Math.max(COMPOSER_MIN_HEIGHT, Math.ceil(textarea.scrollHeight)))
-				textarea.style.height = `${nextHeight}px`
-				this.composerInputHeight = nextHeight
-			},
 			toggleModelMenu() { this.closeComposerMenus(); this.modelMenuOpen = !this.modelMenuOpen },
 			async saveStoryReaderMode(mode) {
 				const nextMode = normalizeStoryReaderMode(mode)
@@ -2284,108 +2429,6 @@
 				return (this.storyReaderBookmarksWritePromise || Promise.resolve()).catch(() => {})
 			},
 			setChatGenerationMode() { setGenerationMode(this.ui, 'chat') },
-			setImageGenerationMode() {
-				if (this.pendingAttachments.length) { this.showToast('生图模式暂不支持输入附件'); return }
-				setGenerationMode(this.ui, 'image')
-			},
-			closeComposerMenus() { this.attachmentMenuOpen = false; this.emojiMenuOpen = false },
-			closeStoryMenus() { this.modelMenuOpen = false; this.closeComposerMenus() },
-			toggleAttachmentMenu() { this.modelMenuOpen = false; this.emojiMenuOpen = false; this.attachmentMenuOpen = !this.attachmentMenuOpen },
-			toggleEmojiMenu() { this.modelMenuOpen = false; this.attachmentMenuOpen = false; this.emojiMenuOpen = !this.emojiMenuOpen },
-			appendEmoji(emoji) { this.draftMessage += emoji; this.emojiMenuOpen = false },
-			focusComposer() {
-				this.$nextTick(() => {
-					const ref = Array.isArray(this.$refs.composerInput) ? this.$refs.composerInput[0] : this.$refs.composerInput
-					const input = ref?.focus ? ref : ref?.$el?.querySelector?.('textarea')
-					input?.focus?.()
-				})
-			},
-			openGroupMention() {
-				if (!this.activeGroupConversation || this.ui.generating) return
-				this.closeComposerMenus()
-				if (groupMentionQuery(this.draftMessage) === null) {
-					this.draftMessage = `${this.draftMessage}${this.draftMessage && !/\s$/.test(this.draftMessage) ? ' ' : ''}@`
-				}
-				this.focusComposer()
-			},
-			selectGroupMention(participant) {
-				this.draftMessage = insertGroupMention(this.draftMessage, participant?.nameSnapshot)
-				this.focusComposer()
-			},
-			chooseAttachmentAction(action) {
-				this.closeComposerMenus()
-				if (this.services?.nativeAttachmentPicker) {
-					this.handleNativeAttachmentAction(action)
-					return
-				}
-				this.$nextTick(() => {
-					const target = this.$refs[action?.inputRef]
-					const ref = Array.isArray(target) ? target[0] : target
-					const input = ref?.type ? ref : ref?.$el?.querySelector?.('input')
-					if (input?.type === 'file') {
-						input.click()
-						return
-					}
-					this.openNativeAttachmentPicker(action)
-				})
-			},
-			async handleNativeAttachmentAction(action) {
-				if (this.attachmentProcessing) return
-				this.attachmentProcessing = true
-				this.errorMessage = ''
-				try {
-					const prepared = await this.services.nativeAttachmentPicker.pick(action?.id, { existing: this.pendingAttachments })
-					this.pendingAttachments = [...this.pendingAttachments, ...prepared]
-				} catch (error) {
-					this.handleError(error, '附件处理失败')
-				} finally {
-					this.attachmentProcessing = false
-				}
-			},
-			openNativeAttachmentPicker(action) {
-				if (typeof document === 'undefined') {
-					this.handleError(new Error('当前 App 运行环境需要原生文件选择适配器'), '附件选择失败')
-					return
-				}
-				const nativeInput = document.createElement('input')
-				nativeInput.type = 'file'
-				nativeInput.accept = action?.id === 'file' ? this.textAttachmentAccept : 'image/*'
-				nativeInput.multiple = action?.id !== 'camera'
-				if (action?.id === 'camera') nativeInput.setAttribute('capture', 'environment')
-				nativeInput.style.display = 'none'
-				document.body.appendChild(nativeInput)
-				let cleanupTimer = 0
-				const cleanup = () => {
-					clearTimeout(cleanupTimer)
-					nativeInput.remove()
-				}
-				nativeInput.addEventListener('change', event => {
-					Promise.resolve(this.handleAttachmentSelection(event)).finally(cleanup)
-				}, { once: true })
-				nativeInput.addEventListener('cancel', cleanup, { once: true })
-				cleanupTimer = setTimeout(cleanup, 5 * 60 * 1000)
-				nativeInput.click()
-			},
-			async handleAttachmentSelection(event) {
-				const input = event?.target
-				const files = input?.files
-				if (!files?.length || this.attachmentProcessing) return
-				this.attachmentProcessing = true
-				this.errorMessage = ''
-				try {
-					const prepared = await this.services.attachmentService.prepareFiles(files, { existing: this.pendingAttachments })
-					this.pendingAttachments = [...this.pendingAttachments, ...prepared]
-				} catch (error) {
-					this.handleError(error, '附件处理失败')
-				} finally {
-					this.attachmentProcessing = false
-					if (input) input.value = ''
-				}
-			},
-			removePendingAttachment(index) {
-				if (this.attachmentProcessing) return
-				this.pendingAttachments.splice(index, 1)
-			},
 			attachmentSource: imageAttachmentSource,
 			attachmentPreviewImageStyle(attachment) { return { backgroundImage: `url(${this.attachmentSource(attachment)})` } },
 			previewImageAttachment(attachment) { this.attachmentPreview = { kind: 'image', attachment } },
@@ -2459,6 +2502,23 @@
 				this.replyNotificationsEnabled = Boolean(await this.services.repository.getSetting(REPLY_NOTIFICATION_SETTING_KEY, true))
 				this.streamingEnabled = await readStreamingEnabled(this.services.repository)
 				this.streamingSegmentedDisplay = await readStreamingSegmentedDisplayEnabled(this.services.repository)
+				const networkProxy = await readNetworkProxySetting(this.services.repository)
+				this.networkProxyEnabled = networkProxy.enabled
+				this.networkProxyMode = this.networkProxyIsAndroid && !networkProxy.enabled && !networkProxy.url ? NETWORK_PROXY_MODE_SMART : networkProxy.mode
+				this.networkProxyUrl = networkProxy.url
+				this.networkProxySavedUrl = networkProxy.url
+				this.networkProxyDetectionRevision += 1
+				this.networkProxyDetectionTimedOut = false
+				this.networkProxyDetectedUrl = ''
+				this.networkProxyDetecting = false
+				this.networkProxyDetectionFailed = false
+				this.networkProxyNativeAvailable = this.networkProxyIsAndroid
+					? this.services.networkProxy?.nativeAvailable === true
+					: null
+				this.networkProxyError = ''
+				if (this.networkProxyIsAndroid && this.networkProxyEnabled && this.networkProxyMode === NETWORK_PROXY_MODE_SMART) {
+					this.refreshNetworkProxyDetection()
+				}
 				this.storyReaderMode = await readStoryReaderMode(this.services.repository)
 				this.characterStatusEnabled = await readCharacterStatusEnabled(this.services.repository)
 				this.nsfwEnabled = Boolean(await this.services.repository.getSetting(NSFW_SETTING_KEY, false))
@@ -2498,6 +2558,8 @@
 				if (!this.conversationItems.length && this.providerItems[0]) await this.addConversation(false)
 			},
 			resetWorkspaceViewState() {
+				this.resetJsonShareState()
+				this.backupMenuOpen = false
 				this.dataLoadRevision += 1
 				this.conversationLoadPromise = null
 				this.characterLoadPromise = null
@@ -2526,7 +2588,8 @@
 				this.characterRenderLimit = PRIMARY_LIST_BATCH_SIZE
 				this.storyRenderLimit = PRIMARY_LIST_BATCH_SIZE
 				this.providerItems = []
-				this.pendingAttachments = []
+				this.attachmentPreview = null
+				this.closeComposerMenus()
 				this.assistantStatusOpen = false
 				this.groupStatusSpeakerKey = ''
 				this.groupEditorSaving = false
@@ -2678,6 +2741,7 @@
 					displaySegments: message.responseDisplayMode === 'segmented'
 						? splitAssistantReplySegments(displayContent, { includeTrailing: message.status !== 'generating' })
 						: (displayContent ? [displayContent] : []),
+					emptyCompletedReply: isEmptyCompletedReply({ ...presentation, displayContent }),
 					assistantStatus,
 					statusParsingStarted
 				})
@@ -2689,7 +2753,8 @@
 				const extracted = extractAssistantStatus(visibleContent, { hideIncomplete: message.status === 'generating' })
 				return decorateAssistantContent(extracted.content, extracted.status, statusParsingStarted)
 			},
-			async openChat(conversationId) {
+			async openChat(conversationId, { restoreStoryPosition = true } = {}) {
+				await this.flushStoryReaderPositionSave()
 				this.homeMenuOpen = false
 				clearTimeout(this.streamingRenderTimer)
 				this.streamingRenderTimer = null
@@ -2710,22 +2775,31 @@
 				this.messageHistoryLoading = true
 				const loadRevision = ++this.chatLoadRevision
 				try {
-					const [page, savedStoryPosition, savedStoryBookmarks] = await Promise.all([
+					let [page, savedStoryPosition, savedStoryBookmarks] = await Promise.all([
 						this.readChatMessagePage(conversationId),
-						storyConversationActive
+						storyConversationActive && restoreStoryPosition
 							? readStoryReaderPosition(this.services?.repository, conversationId)
 							: Promise.resolve(null),
 						storyConversationActive
 							? readStoryReaderBookmarks(this.services?.repository, conversationId)
 							: Promise.resolve([])
 					])
+					if (loadRevision !== this.chatLoadRevision) return
+					const anchorMessageId = storyReaderPositionMessageId(savedStoryPosition)
+					if (anchorMessageId && !page.messages.some(message => message.id === anchorMessageId)) {
+						const anchoredPage = await this.services.repository.listMessageWindow(conversationId, { anchorMessageId, limit: CHAT_MESSAGE_PAGE_SIZE })
+						if (anchoredPage.anchorFound) page = anchoredPage
+						else { savedStoryPosition = null; if (loadRevision === this.chatLoadRevision) this.showToast('原阅读位置已删除，已打开最新内容') }
+					}
+					if (loadRevision !== this.chatLoadRevision) return
 					const messages = await this.hydrateChatMessages(page.messages)
 					if (loadRevision !== this.chatLoadRevision || this.ui.activeConversationId !== conversationId) return
-					this.storyReaderPosition = savedStoryPosition
+					this.storyReaderPosition = this.resolveLoadedStoryPosition(savedStoryPosition, messages)
 					this.storyReaderBookmarks = savedStoryBookmarks
 					this.messageItems = messages
 					this.chatVirtualPinnedToBottom = true
 					this.messageHistoryHasMore = page.hasMore
+					this.messageHistoryTrimmed = Boolean(page.hasNewer)
 					this.groupStatusSpeakerKey = ''
 					for (let index = this.messageItems.length - 1; index >= 0; index -= 1) {
 						const message = this.messageItems[index]
@@ -2748,6 +2822,65 @@
 					if (loadRevision === this.chatLoadRevision) this.handleError(error, '对话加载失败')
 				} finally {
 					if (loadRevision === this.chatLoadRevision) this.messageHistoryLoading = false
+				}
+			},
+			resolveLoadedStoryPosition(position, messages) {
+				if (!position) return null
+				const blocks = createStoryReaderBlocks(messages)
+				if (blocks.some(block => block.id === position.blockId)) return position
+				const messageId = storyReaderPositionMessageId(position)
+				const block = blocks.find(item => item.messageId === messageId)
+				return block ? { ...position, blockId: block.id, characterOffset: 0 } : null
+			},
+			async loadStoryReaderPosition(value) {
+				if (!this.activeStoryConversation || this.messageHistoryLoading || this.ui.generating) return
+				const conversationId = this.ui.activeConversationId
+				const position = normalizeStoryReaderPosition(value, conversationId)
+				const anchorMessageId = storyReaderPositionMessageId(position)
+				if (!anchorMessageId) return
+				const services = this.services
+				const revision = ++this.chatLoadRevision
+				this.messageHistoryLoading = true
+				try {
+					await this.flushStoryReaderPositionSave()
+					const page = await services.repository.listMessageWindow(conversationId, { anchorMessageId, limit: CHAT_MESSAGE_PAGE_SIZE })
+					if (revision !== this.chatLoadRevision || services !== this.services) return
+					if (!page.anchorFound) { this.showToast('这条书签对应的内容已删除'); return }
+					const messages = await this.hydrateChatMessages(page.messages)
+					if (revision !== this.chatLoadRevision || services !== this.services) return
+					this.storyReaderPosition = this.resolveLoadedStoryPosition(position, messages)
+					this.messageItems = messages
+					this.messageHistoryHasMore = page.hasMore
+					this.messageHistoryTrimmed = page.hasNewer
+				} catch (error) {
+					if (revision === this.chatLoadRevision) this.handleError(error, '书签内容加载失败')
+				} finally {
+					if (revision === this.chatLoadRevision) this.messageHistoryLoading = false
+				}
+			},
+			async loadNewerStoryMessages() {
+				if (!this.activeStoryConversation || !this.messageHistoryTrimmed || this.messageHistoryLoading || this.ui.generating || !this.messageItems.length) return
+				const services = this.services
+				const conversationId = this.ui.activeConversationId
+				const revision = this.chatLoadRevision
+				const anchorMessageId = this.messageItems[this.messageItems.length - 1].id
+				this.messageHistoryLoading = true
+				try {
+					const page = await services.repository.listMessageWindow(conversationId, { anchorMessageId, limit: CHAT_MESSAGE_PAGE_SIZE })
+					if (services !== this.services || revision !== this.chatLoadRevision) return
+					if (!page.anchorFound) { this.showToast('章节位置已变化，请返回最新内容后重试'); return }
+					const loaded = await this.hydrateChatMessages(page.messages)
+					if (services !== this.services || revision !== this.chatLoadRevision) return
+					const byId = new Map(this.messageItems.map(message => [message.id, message]))
+					for (const message of loaded) byId.set(message.id, message)
+					const merged = [...byId.values()].sort((a, b) => Number(a.sequence) - Number(b.sequence))
+					this.messageHistoryHasMore = this.messageHistoryHasMore || merged.length > MAX_RENDERED_CHAT_MESSAGES
+					this.messageItems = merged.slice(-MAX_RENDERED_CHAT_MESSAGES)
+					this.messageHistoryTrimmed = page.hasNewer
+				} catch (error) {
+					if (revision === this.chatLoadRevision) this.handleError(error, '后续内容加载失败')
+				} finally {
+					if (revision === this.chatLoadRevision) this.messageHistoryLoading = false
 				}
 			},
 			async loadEarlierMessages() {
@@ -2793,7 +2926,16 @@
 			},
 			reloadLatestMessages() {
 				const conversationId = this.ui.activeConversationId
-				return conversationId ? this.openChat(conversationId) : Promise.resolve()
+				return conversationId ? this.openChat(conversationId, { restoreStoryPosition: false }) : Promise.resolve()
+			},
+			async jumpToLatestChat() {
+				if (this.ui.screen !== 'chat' || this.messageHistoryLoading || (this.messageHistoryTrimmed && this.ui.generating)) return
+				// openChat owns the loaded window and its guarded scroll; do not scroll again after it returns.
+				if (this.messageHistoryTrimmed) return this.reloadLatestMessages()
+				clearTimeout(this.chatVirtualScrollTimer)
+				this.chatVirtualScrollTimer = null
+				this._chatVirtualPendingScroll = null
+				this.scrollChatToBottom(true, true)
 			},
 			messageAnchorId(message) {
 				const sequence = Number(message?.sequence) || 0
@@ -2912,7 +3054,12 @@
 				this.closeCloudModal()
 				this.openAutoSyncSettings(this.ui)
 			},
-			showAboutApp() { this.showToast(`织语 · 版本 ${APP_VERSION} · ${this.aboutLabel}`) },
+			openSettingsInformation(mode) {
+				if (!['storage', 'about', 'updates', 'help'].includes(mode)) return
+				this.goToTab('settings')
+				this.ui.settingsView = mode
+			},
+			showAboutApp() { this.openSettingsInformation('about') },
 			openExternalUrl(url, errorLabel = '页面') {
 				const plusApi = typeof plus !== 'undefined' ? plus : null
 				if (typeof plusApi?.runtime?.openURL === 'function') {
@@ -3122,12 +3269,15 @@
 			},
 			async manageConversation(conversation) {
 				if (!conversation) return
+				const services = this.services
+				const workspaceId = services?.workspaceId
 				try {
 					const action = await this.chooseConversationAction(conversation)
+					if (services !== this.services) return
 					let title = null
 					if (action === 'rename') {
 						title = await this.requestConversationTitle(conversation.title)
-						if (title === null) return
+						if (title === null || services !== this.services) return
 					}
 					if (!action) return
 					if (action === 'group-settings') {
@@ -3135,15 +3285,17 @@
 						return
 					} else if (action === 'delete') {
 						if (!await this.confirmAction('删除会话', '确定删除这个会话及其消息吗？', '删除')) return
-						await this.services.chatService.deleteConversation(conversation.id)
-						if (this.ui.activeConversationId === conversation.id) this.backToConversations()
+						if (services !== this.services) return
+						await services.chatService.deleteConversation(conversation.id)
+						this.composerDraftStore.remove(workspaceId, conversation.id)
+						if (services === this.services && this.ui.activeConversationId === conversation.id) this.backToConversations()
 					} else if (action === 'rename') {
 						const normalizedTitle = String(title).trim()
 						if (!normalizedTitle) { this.showToast('会话名称不能为空'); return }
-						await this.services.chatService.renameConversation(conversation.id, normalizedTitle)
+						await services.chatService.renameConversation(conversation.id, normalizedTitle)
 					}
-					await this.loadConversations()
-				} catch (error) { this.handleError(error) }
+					if (services === this.services) await this.loadConversations()
+				} catch (error) { if (services === this.services) this.handleError(error) }
 			},
 			commitMessageUpdate(message) {
 				if (message?.conversationId && message.conversationId !== this.ui.activeConversationId) return
@@ -3216,65 +3368,32 @@
 			finishMessageAnimation(messageId) {
 				this.animatedMessageIds = this.animatedMessageIds.filter((id) => id !== messageId)
 			},
-			async sendMessage() {
-				if (!this.canSend) return
-				if (this.messageHistoryTrimmed) await this.reloadLatestMessages()
-				this.closeComposerMenus()
-				const content = this.draftMessage
-				const pendingAttachments = this.pendingAttachments
-				let userMessagePersisted = false
-				this.draftMessage = ''
-				this.errorMessage = ''
-				try {
-					const result = await this.services.chatService.send({
-						conversationId: this.ui.activeConversationId,
-						providerProfileId: this.activeProvider?.id || null,
-						content,
-						attachments: pendingAttachments,
-						mode: this.ui.generationMode,
-						onMessage: message => {
-							if (message.role === 'user') {
-								userMessagePersisted = true
-								this.pendingAttachments = []
-							}
-							this.upsertMessage(message)
-						},
-						onState: ({ generating }) => setGenerating(this.ui, generating)
-					})
-					if (result?.autoHandoffLimitReached) this.showToast('AI 接力已达到每轮 8 条上限')
-					await this.loadConversations()
-				} catch (error) {
-					if (!userMessagePersisted) {
-						this.draftMessage = content
-						this.pendingAttachments = pendingAttachments
-					}
-					this.handleError(error)
-				}
-			},
-			handleComposerAction() {
-				if (this.ui.generating) { this.stopGeneration(); return }
-				if (this.canStoryContinue && !this.draftMessage.trim() && !this.pendingAttachments.length) {
-					this.continueMessage(this.latestCompletedAssistantMessage.id)
-					return
-				}
-				if (this.canSend) { this.sendMessage(); return }
-				if (this.ui.generationMode === 'chat') this.startVoiceInput()
-			},
-			startVoiceInput() {
-				this.closeComposerMenus()
-				if (typeof plus === 'undefined' || typeof plus.speech?.startRecognize !== 'function') { this.showToast('当前环境不支持语音输入'); return }
-				plus.speech.startRecognize({ userInterface: true, continue: false }, result => {
-					const recognized = String(result ?? '').trim()
-					if (recognized) this.draftMessage = `${this.draftMessage}${this.draftMessage ? ' ' : ''}${recognized}`
-				}, error => this.handleError(new Error(error?.message || '语音识别失败'), '语音输入失败'))
-			},
-			stopGeneration() { this.services.chatService.stop() },
 			async retryMessage(messageId) {
-				try { await this.services.chatService.retry(messageId, { providerProfileId: this.activeProvider?.id || null, onMessage: this.upsertMessage, onState: ({ generating }) => setGenerating(this.ui, generating) }); await this.loadConversations() }
-				catch (error) { this.handleError(error) }
+				if (this.ui.generating) return
+				const services = this.services
+				const conversationId = this.ui.activeConversationId
+				try {
+					await services.chatService.retry(messageId, {
+						providerProfileId: this.activeProvider?.id || null,
+						onMessage: message => { if (services === this.services && conversationId === this.ui.activeConversationId) this.upsertMessage(message) },
+						onState: ({ generating }) => { if (services === this.services) setGenerating(this.ui, generating) }
+					})
+					if (services === this.services) await this.loadConversations()
+				} catch (error) {
+					if (services === this.services && conversationId === this.ui.activeConversationId) this.handleError(error)
+				}
+			},
+			isEmptyCompletedReply,
+			async showMessageResponseDetails(value) {
+				const message = typeof value === 'string' ? this.messageItems.find(item => item.id === value) : value
+				const content = messageResponseDetails(message)
+				if (await this.openAppDialog({ kind: 'confirm', title: '本次响应详情', content, preserveLineBreaks: true, cancelText: '关闭', confirmText: '复制详情', tone: 'primary' })) {
+					try { await this.writeClipboard(content); this.showToast('响应详情已复制') }
+					catch { this.showToast('复制失败，请重新尝试') }
+				}
 			},
 			canContinueMessage(message) {
-				if (!message || this.ui.generating || (!this.activeProvider && !message.speakerProviderProfileId)) return false
+				if (!message || this.messageHistoryTrimmed || this.ui.generating || (!this.activeProvider && !message.speakerProviderProfileId)) return false
 				if (!['completed', 'interrupted'].includes(message.status) || message.generationMode === 'image' || !String(message.content ?? message.displayContent ?? '').trim()) return false
 				const visibleMessages = this.messageItems.filter(item => !item.deletedAt)
 				const latestMessage = visibleMessages[visibleMessages.length - 1]
@@ -3284,15 +3403,17 @@
 				if (this.ui.generating) return
 				this.closeStoryMenus()
 				this.errorMessage = ''
+				const services = this.services
+				const conversationId = this.ui.activeConversationId
 				try {
-					await this.services.chatService.continueResponse(messageId, {
+					await services.chatService.continueResponse(messageId, {
 						providerProfileId: this.activeProvider?.id || null,
-						onMessage: this.upsertMessage,
-						onState: ({ generating }) => setGenerating(this.ui, generating)
+						onMessage: message => { if (services === this.services && conversationId === this.ui.activeConversationId) this.upsertMessage(message) },
+						onState: ({ generating }) => { if (services === this.services) setGenerating(this.ui, generating) }
 					})
-					await this.loadConversations()
+					if (services === this.services) await this.loadConversations()
 				} catch (error) {
-					this.handleError(error, '续写失败')
+					if (services === this.services && conversationId === this.ui.activeConversationId) this.handleError(error, '续写失败')
 				}
 			},
 			async copyMessage(content) { try { await this.writeClipboard(content); this.showToast('已复制') } catch { this.showToast('复制失败') } },
@@ -3628,6 +3749,113 @@
 					this.streamingSegmentedSaving = false
 				}
 			},
+			clearNetworkProxyDetection() {
+				this.networkProxyDetectionRevision += 1
+				this.services?.networkProxy?.invalidate?.()
+				this.networkProxyDetecting = false
+				this.networkProxyDetectedUrl = ''
+				this.networkProxyDetectionFailed = false
+				this.networkProxyDetectionTimedOut = false
+			},
+			normalizeManualNetworkProxyUrl(value) {
+				const url = normalizeNetworkProxyUrl(value)
+				if (this.networkProxyIsAndroid && url.startsWith('https:')) {
+					throw new Error('Android 手动代理请填写 http:// 地址及 HTTP/混合端口；仍可访问 HTTPS 模型接口。')
+				}
+				return url
+			},
+			async refreshNetworkProxyDetection() {
+				const networkProxy = this.services?.networkProxy
+				this.networkProxyNativeAvailable = this.networkProxyIsAndroid
+					? networkProxy?.nativeAvailable === true
+					: null
+				if (!this.networkProxyIsAndroid || !this.networkProxyEnabled || !this.networkProxyIsSmart || typeof networkProxy?.detect !== 'function') return ''
+				const revision = ++this.networkProxyDetectionRevision
+				this.networkProxyDetecting = true
+				this.networkProxyDetectedUrl = ''
+				this.networkProxyDetectionFailed = false
+				this.networkProxyDetectionTimedOut = false
+				try {
+					const detectedUrl = String(await networkProxy.detect({ force: true }) || '')
+					if (revision !== this.networkProxyDetectionRevision) return ''
+					const state = networkProxy.getDetectionState?.()
+					this.networkProxyDetectedUrl = detectedUrl
+					this.networkProxyDetectionFailed = Boolean(state?.failed)
+					this.networkProxyDetectionTimedOut = Boolean(state?.timedOut)
+					return detectedUrl
+				} catch (_) {
+					if (revision === this.networkProxyDetectionRevision) {
+						this.networkProxyDetectedUrl = ''
+						this.networkProxyDetectionFailed = true
+					}
+					return ''
+				} finally {
+					if (revision === this.networkProxyDetectionRevision) this.networkProxyDetecting = false
+				}
+			},
+			applyNetworkProxySetting(setting) {
+				this.clearNetworkProxyDetection()
+				this.networkProxyEnabled = setting.enabled
+				this.networkProxyMode = setting.mode
+				this.networkProxySavedUrl = setting.url
+			},
+			async toggleNetworkProxy() {
+				if (this.networkProxySaving || !this.services?.repository) return
+				this.networkProxySaving = true
+				this.networkProxyError = ''
+				try {
+					const enabled = !this.networkProxyEnabled
+					const mode = this.networkProxyIsAndroid ? this.networkProxyMode : NETWORK_PROXY_MODE_MANUAL
+					let url = this.networkProxySavedUrl
+					if (enabled && mode === NETWORK_PROXY_MODE_MANUAL) {
+						url = this.normalizeManualNetworkProxyUrl(url || this.networkProxyUrl)
+						if (!url) throw new Error('请先填写代理地址，再保存并使用。')
+					}
+					const setting = normalizeNetworkProxySetting({ enabled, mode, url })
+					await this.services.repository.setSetting(NETWORK_PROXY_SETTING_KEY, setting)
+					this.applyNetworkProxySetting(setting)
+					this.showToast(enabled ? (mode === NETWORK_PROXY_MODE_SMART ? '智能检测已开启' : '手动代理已开启') : '网络代理已关闭')
+				} catch (error) {
+					this.networkProxyError = error?.message || '网络代理设置失败'
+				} finally {
+					this.networkProxySaving = false
+				}
+				// Saving the switch must never wait for a native detection callback.
+				if (!this.networkProxyError && this.networkProxyIsAndroid && this.networkProxyEnabled && this.networkProxyIsSmart) this.refreshNetworkProxyDetection()
+			},
+			async useSmartNetworkProxy() {
+				if (!this.networkProxyIsAndroid || this.networkProxySaving || !this.services?.repository) return
+				this.networkProxySaving = true
+				this.networkProxyError = ''
+				try {
+					const setting = normalizeNetworkProxySetting({ enabled: true, mode: NETWORK_PROXY_MODE_SMART, url: this.networkProxySavedUrl })
+					await this.services.repository.setSetting(NETWORK_PROXY_SETTING_KEY, setting)
+					this.applyNetworkProxySetting(setting)
+					this.showToast('已切换为智能检测')
+				} catch (error) {
+					this.networkProxyError = error?.message || '网络代理设置失败'
+				} finally {
+					this.networkProxySaving = false
+				}
+				if (!this.networkProxyError) this.refreshNetworkProxyDetection()
+			},
+			async saveNetworkProxySettings() {
+				if (this.networkProxySaving || !this.services?.repository) return
+				this.networkProxySaving = true
+				this.networkProxyError = ''
+				try {
+					const url = this.normalizeManualNetworkProxyUrl(this.networkProxyUrl)
+					const setting = normalizeNetworkProxySetting({ enabled: Boolean(url), mode: NETWORK_PROXY_MODE_MANUAL, url })
+					await this.services.repository.setSetting(NETWORK_PROXY_SETTING_KEY, setting)
+					this.applyNetworkProxySetting(setting)
+					this.networkProxyUrl = setting.url
+					this.showToast(setting.enabled ? `已保存并启用 ${setting.url}` : '网络代理已关闭')
+				} catch (error) {
+					this.networkProxyError = error?.message || '网络代理设置保存失败'
+				} finally {
+					this.networkProxySaving = false
+				}
+			},
 			async toggleCharacterStatus() {
 				if (this.characterStatusSaving || !this.services?.repository) return
 				const previous = this.characterStatusEnabled
@@ -3704,512 +3932,11 @@
 					this.handleError(error, '打开通知设置失败')
 				}
 			},
-			showLocalDataInfo() { this.showToast(`${this.conversationItems.length} 个会话，${this.providerItems.length} 个接口`) },
-			openBackupMenu() {
-				this.errorMessage = ''
-				this.backupTransferStatus = ''
-				this.backupMenuOpen = true
-			},
-			closeBackupMenu() {
-				if (this.backupBusy) return
-				this.backupMenuOpen = false
-			},
-			isCloudOnline() {
-				return typeof navigator === 'undefined' || navigator.onLine !== false
-			},
-			async stopCloudActivityAndWait(cloud = this.cloudServices) {
-				const waits = []
-				const scheduler = cloud?.scheduler
-				if (typeof scheduler?.stopAndWait === 'function') waits.push(scheduler.stopAndWait())
-				else scheduler?.stop?.()
-				const coordinator = cloud?.syncCoordinator
-				if (typeof coordinator?.stopAndWait === 'function') waits.push(coordinator.stopAndWait())
-				else coordinator?.stopForeground?.()
-				await Promise.all(waits)
-			},
-			bindNetworkSyncListener() {
-				if (this.networkSyncHandler) return
-				const handler = status => {
-					const connected = typeof status === 'object' ? status.isConnected !== false : true
-					if (connected && this.autoBackupEnabled && this.cloudConnected) {
-						this.cloudServices?.syncCoordinator?.onNetworkRestored().catch(() => {})
-					}
-				}
-				const uniApi = getUniApi()
-				if (typeof uniApi?.onNetworkStatusChange === 'function') {
-					uniApi.onNetworkStatusChange(handler)
-					this.networkSyncHandler = { type: 'uni', handler }
-					return
-				}
-				const browserWindow = getBrowserWindow()
-				browserWindow?.addEventListener?.('online', handler)
-				this.networkSyncHandler = { type: 'browser', handler }
-			},
-			unbindNetworkSyncListener() {
-				if (!this.networkSyncHandler) return
-				const { type, handler } = this.networkSyncHandler
-				if (type === 'uni') getUniApi()?.offNetworkStatusChange?.(handler)
-				else getBrowserWindow()?.removeEventListener?.('online', handler)
-				this.networkSyncHandler = null
-			},
-			async refreshAfterCloudSync() {
-				await this.repairCharacterConversationLinks()
-				await Promise.all([this.loadProviders(), this.loadCharacters(), this.loadWorldBooks(), this.loadConversations()])
-				if (this.ui.screen === 'chat' && this.ui.activeConversationId) {
-					await this.openChat(this.ui.activeConversationId)
-				}
-			},
-			buildCloudServices(baseUrl) {
-				const accountId = String(this.cloudSession?.user?.id ?? '').trim()
-				return preserveServiceIdentity(createCloudServices({
-					...this.services,
-					baseUrl,
-					getDeviceId: () => this.cloudDeviceId(),
-					getAccountId: async () => accountId || null,
-					isOnline: () => this.isCloudOnline(),
-					onStatus: ({ state, completedAt }) => {
-						if (state === 'uploading') this.cloudBackupStatus = '正在自动备份'
-						if (state === 'failed') this.cloudBackupStatus = '自动备份失败，稍后重试'
-						if (state === 'completed') this.cloudBackupStatus = `最近备份 ${this.formatMessageTime(completedAt)}`
-					},
-					onSyncStatus: ({ state, completedAt }) => {
-						if (state === 'syncing') this.cloudBackupStatus = '正在同步'
-						if (state === 'failed') this.cloudBackupStatus = '同步失败，稍后重试'
-						if (state === 'completed') {
-							this.cloudBackupStatus = `最近同步 ${this.formatMessageTime(completedAt)}`
-							this.refreshAfterCloudSync().catch(error => this.handleError(error, '同步后刷新失败'))
-						}
-					}
-				}))
-			},
-			async prepareCloudServices() {
-				const configuredBaseUrl = normalizeCloudBaseUrl(this.cloudForm.baseUrl)
-				const baseUrl = resolveCloudRequestBaseUrl(configuredBaseUrl)
-				if (!baseUrl) throw new Error('请填写云端服务器地址')
-				this.cloudForm.baseUrl = baseUrl
-				const sessionBaseUrl = normalizeCloudBaseUrl(this.cloudSession?.cloud_base_url)
-				if (sessionBaseUrl && resolveCloudRequestBaseUrl(sessionBaseUrl) !== baseUrl) {
-					throw new Error('当前账号属于其他云端服务器，请先退出登录')
-				}
-				const serviceBaseUrl = sessionBaseUrl || baseUrl
-				if (!this.cloudServices || this.cloudServices.apiClient.baseUrl !== serviceBaseUrl) {
-					await this.stopCloudActivityAndWait()
-					this.cloudServices = this.buildCloudServices(serviceBaseUrl)
-					this.cloudSession = await this.cloudServices.tokenStore.load()
-					await this.syncCloudUsernameFromSession()
-				}
-				await this.services.repository.setSetting('cloudConfig', { baseUrl, email: this.cloudForm.email.trim() })
-				return this.cloudServices
-			},
-			async cloudAuthenticate(action) {
-				this.cloudBusy = true; this.errorMessage = ''
-				try {
-					const email = this.cloudForm.email.trim()
-					const username = this.cloudForm.username.trim()
-					const cloud = await this.prepareCloudServices()
-					const baseUrl = cloud.apiClient.baseUrl
-					const credentials = { email, password: this.cloudForm.password }
-					if (action === 'register') credentials.username = username
-					const session = await cloud.apiClient[action](credentials)
-					await this.activateWorkspaceForSession(session)
-					this.cloudSession = session
-					this.cloudForm.baseUrl = baseUrl
-					this.cloudForm.email = email
-					this.cloudForm.username = session.user?.username || username
-					await this.services.repository.setSetting('cloudConfig', { baseUrl, email })
-					await this.stopCloudActivityAndWait()
-					this.cloudServices = this.buildCloudServices(baseUrl)
-					await this.syncCloudUsernameFromSession()
-					this.cloudForm.password = ''
-					if (this.autoBackupEnabled) {
-						this.cloudServices?.syncCoordinator?.startForeground().catch(error => {
-							this.handleError(error, '登录后的自动同步启动失败')
-						})
-					}
-					this.showToast(`${action === 'register' ? '注册成功' : '登录成功'}，已切换到独立账号空间`)
-				} catch (error) { this.handleError(error, action === 'register' ? '注册失败' : '登录失败') }
-				finally { this.cloudBusy = false }
-			},
-			registerCloud() { return this.cloudAuthenticate('register') },
-			loginCloud() { return this.cloudAuthenticate('login') },
-			async syncCloudUsernameFromSession() {
-				if (!this.cloudSession) {
-					this.profileName = String(await this.services?.repository?.getSetting?.('profileName', '') || '').trim()
-					this.cloudForm.username = this.profileName
-					return
-				}
-				this.cloudForm.username = this.cloudSession.user?.username || ''
-				this.profileName = await syncProfileNameFromCloudSession(this.services?.repository, this.cloudSession)
-			},
-			async saveProfileUsername() {
-				if (this.cloudBusy) return
-				this.cloudBusy = true; this.errorMessage = ''
-				try {
-					if (this.cloudConnected) {
-						const cloud = await this.prepareCloudServices()
-						this.cloudSession = await cloud.apiClient.updateUsername(this.cloudForm.username.trim())
-						await this.syncCloudUsernameFromSession()
-						this.showToast('用户名已更新')
-					} else {
-						this.profileName = await saveLocalProfileName(this.services?.repository, this.cloudForm.username)
-						this.cloudForm.username = this.profileName
-						this.showToast('本地用户名已保存')
-					}
-				} catch (error) { this.handleError(error, this.cloudConnected ? '更新用户名失败' : '保存本地用户名失败') }
-				finally { this.cloudBusy = false }
-			},
-			async cloudDeviceId() {
-				let deviceId = await this.services.repository.getSetting('cloudDeviceId', '')
-				if (!deviceId) {
-					deviceId = globalThis.crypto?.randomUUID?.() || `device-${Date.now()}`
-					await this.services.repository.setSetting('cloudDeviceId', deviceId)
-				}
-				return deviceId
-			},
-			async prepareIncrementalSyncCredential(cloud) {
-				const entered = this.cloudForm.syncPassword
-				const existing = await cloud.credentialStore.load()
-				if (!entered && !existing) throw new Error('请先输入同步密码')
-				if (entered) await cloud.credentialStore.save(entered)
-				return { newlySaved: Boolean(entered && !existing) }
-			},
-			cloudBackupProgressText(progress = {}) {
-				const bytes = Number(progress.byteSize || progress.estimatedUploadBytes) || 0
-				const size = bytes > 0 ? `（${this.formatAttachmentSize(bytes)}）` : ''
-				return ({
-					estimating: '正在检查备份大小',
-					estimated: `备份大小已估算${size}`,
-					reading: `正在读取本地数据${size}`,
-					encrypting: `正在加密备份${size}`,
-					uploading: `正在上传备份${size}`,
-					completed: `备份已上传${size}`,
-					failed: `备份上传失败${size}`
-				})[progress.stage] || `正在处理云端备份${size}`
-			},
-			cloudBackupFailureText(error, fallbackBytes = 0) {
-				const bytes = Number(error?.backupByteSize || error?.byteSize || fallbackBytes) || 0
-				const size = bytes > 0 ? `（${this.formatAttachmentSize(bytes)}）` : ''
-				if (error?.code === 'backup_too_large') return `备份超过服务器上限${size}`
-				if (error?.code === 'cloud_transfer_timeout') return `备份上传超时${size}`
-				if (error?.code === 'network_error') return `备份上传网络中断${size}`
-				if (error?.code === 'cloud_backup_server_error') return `服务器处理备份失败${size}`
-				return `云端备份失败${size}`
-			},
-			addCloudDiagnostic(type, detail = {}) {
-				try {
-					this.services?.diagnosticLogStore?.add?.(type, detail)
-				} catch (_) {}
-			},
-			async uploadCloudBackup() {
-				this.cloudBusy = true; this.errorMessage = ''
-				const startedAt = Date.now()
-				let transferBytes = 0
-				this.cloudBackupStatus = '正在检查备份大小'
-				this.addCloudDiagnostic('cloud_backup_start', { operation: 'full_backup_upload' })
-				try {
-					const cloud = await this.prepareCloudServices()
-					if (this.autoBackupEnabled && this.cloudForm.syncPassword) await cloud.credentialStore.save(this.cloudForm.syncPassword)
-					const syncPassword = this.cloudForm.syncPassword || await cloud.credentialStore.load()
-					if (!syncPassword) throw new Error('请先输入同步密码')
-					const result = await cloud.cloudBackupService.upload({
-						deviceId: await this.cloudDeviceId(),
-						syncPassword,
-						onProgress: progress => {
-							transferBytes = Number(progress.byteSize || progress.estimatedUploadBytes) || transferBytes
-							this.cloudBackupStatus = this.cloudBackupProgressText(progress)
-							this.addCloudDiagnostic('cloud_backup_progress', {
-								operation: 'full_backup_upload',
-								stage: progress.stage,
-								byteSize: transferBytes
-							})
-						}
-					})
-					transferBytes = Number(result?.byte_size) || transferBytes
-					const size = transferBytes > 0 ? ` · ${this.formatAttachmentSize(transferBytes)}` : ''
-					this.cloudBackupStatus = `最近备份 ${this.formatMessageTime(new Date().toISOString())}${size}`
-					this.addCloudDiagnostic('cloud_backup_completed', {
-						operation: 'full_backup_upload',
-						byteSize: transferBytes,
-						durationMs: Date.now() - startedAt
-					})
-					this.showToast('云端备份完成')
-				}
-				catch (error) {
-					transferBytes = Number(error?.backupByteSize || error?.byteSize) || transferBytes
-					this.cloudBackupStatus = this.cloudBackupFailureText(error, transferBytes)
-					this.addCloudDiagnostic('cloud_backup_failed', {
-						operation: 'full_backup_upload',
-						byteSize: transferBytes,
-						durationMs: Date.now() - startedAt,
-						code: String(error?.code || ''),
-						status: Number(error?.status) || 0,
-						serverCode: String(error?.serverCode || ''),
-						message: String(error?.message || '')
-					})
-					this.handleError(error, '云端备份失败')
-				}
-				finally { this.cloudBusy = false }
-			},
-			async toggleAutoBackup() {
-				this.cloudBusy = true; this.errorMessage = ''
-				const wasEnabled = this.autoBackupEnabled
-				let cloud = null
-				let credential = null
-				try {
-					cloud = await this.prepareCloudServices()
-					if (this.autoBackupEnabled) {
-						this.autoBackupEnabled = false
-						await this.stopCloudActivityAndWait(cloud)
-						this.cloudBackupStatus = ''
-						await this.services.repository.setSetting('cloudAutoBackup', false)
-						return
-					}
-					credential = await this.prepareIncrementalSyncCredential(cloud)
-					await cloud.syncCoordinator?.startForeground()
-					this.autoBackupEnabled = true
-					await this.services.repository.setSetting('cloudAutoBackup', true)
-				} catch (error) {
-					if (wasEnabled) {
-						this.autoBackupEnabled = true
-						cloud?.syncCoordinator?.startForeground?.().catch(() => {})
-					} else {
-						await this.stopCloudActivityAndWait(cloud)
-						this.autoBackupEnabled = false
-						await this.services.repository.setSetting('cloudAutoBackup', false).catch(() => {})
-						if (credential?.newlySaved) await cloud?.credentialStore?.clear?.().catch(() => {})
-					}
-					this.handleError(error, '自动同步设置失败')
-				}
-				finally { this.cloudBusy = false }
-			},
-			async syncCloudNow() {
-				if (this.cloudBusy) return
-				this.cloudBusy = true
-				this.errorMessage = ''
-				let cloud = null
-				let credential = null
-				try {
-					cloud = await this.prepareCloudServices()
-					credential = await this.prepareIncrementalSyncCredential(cloud)
-					const result = await cloud.syncCoordinator.manualSync()
-					if (result?.skipped) throw new Error(result.skipped === 'offline' ? '当前网络不可用' : '当前无法执行云端同步')
-					await this.refreshAfterCloudSync()
-					this.showToast(`同步完成：上传 ${result.pushed || 0}，接收 ${result.pulled || 0}`)
-				} catch (error) {
-					if (credential?.newlySaved) await cloud?.credentialStore?.clear?.().catch(() => {})
-					this.handleError(error, '云端同步失败')
-				}
-				finally { this.cloudBusy = false }
-			},
-			async restoreCloudBackup() {
-				if (!await this.confirmCloudAction('从云端恢复会复制历史记录到本机，是否继续？')) return
-				this.cloudBusy = true; this.errorMessage = ''
-				try {
-					const cloud = await this.prepareCloudServices()
-					const syncPassword = this.cloudForm.syncPassword || await cloud.credentialStore.load()
-					if (!syncPassword) throw new Error('请先输入同步密码')
-					const result = await cloud.cloudBackupService.restore({ syncPassword })
-					await this.repairCharacterConversationLinks()
-					await this.loadProfileAvatar()
-					await this.loadProviders()
-					await this.loadCharacters()
-					await this.loadWorldBooks()
-					await this.loadConversations()
-					this.showToast(`已恢复 ${result.conversations} 个会话和 ${result.characters || 0} 个角色`)
-				}
-				catch (error) { this.handleError(error, '云端恢复失败') }
-				finally { this.cloudBusy = false }
-			},
-			confirmCloudAction(content) {
-				return this.confirmAction('云端备份', content)
-			},
-			async deleteCloudBackup() {
-				if (!await this.confirmCloudAction('确定删除服务器上的完整备份吗？增量同步记录和本地数据不会删除。')) return
-				this.cloudBusy = true; this.errorMessage = ''
-				try {
-					const cloud = await this.prepareCloudServices()
-					await cloud.apiClient.deleteBackup()
-					this.showToast('云端完整备份已删除')
-				} catch (error) { this.handleError(error, '删除云端备份失败') }
-				finally { this.cloudBusy = false }
-			},
-			async logoutCloud() {
-				this.cloudBusy = true
-				let remoteLogoutError = null
-				try {
-					await this.stopCloudActivityAndWait()
-					try {
-						await this.cloudServices?.apiClient.logout()
-					} catch (error) {
-						remoteLogoutError = error
-					}
-					await this.activateLocalWorkspace()
-					this.cloudForm.password = ''
-					this.cloudForm.syncPassword = ''
-					this.cloudBackupStatus = ''
-					this.showToast(remoteLogoutError ? '已退出本地，云端会话暂未撤销' : '已退出登录并返回本地空间')
-				}
-				catch (error) { this.handleError(error, '退出登录失败') }
-				finally { this.cloudBusy = false }
-			},
-			async exportData() {
-				if (this.backupBusy) return
-				this.backupBusy = true
-				this.errorMessage = ''
-				try {
-					const { content } = await this.services.backupService.exportText()
-					const fileName = createJsonExportFileName()
-					const plusApi = typeof plus !== 'undefined' ? plus : null
-					if (plusApi?.io?.requestFileSystem) {
-						await exportTextToDownloads({ plusApi, fileName, content })
-						this.showToast('JSON 已保存到下载目录')
-					} else {
-						if (typeof Blob !== 'function' || typeof URL === 'undefined' || typeof document === 'undefined') {
-							throw new Error('当前环境不支持文件导出')
-						}
-						const blob = new Blob([content], { type: 'application/json' })
-						const url = URL.createObjectURL(blob)
-						const anchor = document.createElement('a')
-						anchor.href = url
-						anchor.download = fileName
-						anchor.click()
-						URL.revokeObjectURL(url)
-						this.showToast('导出完成')
-					}
-					this.backupMenuOpen = false
-				} catch (error) {
-					this.handleError(error, '导出失败')
-				} finally {
-					this.backupBusy = false
-				}
-			},
-			async exportDataToCloud() {
-				if (this.backupBusy) return
-				this.backupBusy = true
-				this.errorMessage = ''
-				this.backupTransferStatus = '正在生成备份文件'
-				const startedAt = Date.now()
-				let transferBytes = 0
-				this.addCloudDiagnostic('cloud_backup_start', { operation: 'json_export_upload' })
-				try {
-					const cloud = await this.prepareCloudServices()
-					if (!this.cloudSession?.access_token) throw new Error('请先在“账号与云端”登录')
-					const { data, byteSize } = await this.services.backupService.exportText()
-					transferBytes = Number(byteSize) || 0
-					this.backupTransferStatus = `正在上传 ${this.formatAttachmentSize(transferBytes)}`
-					const uploaded = await cloud.apiClient.uploadJsonExport(data)
-					this.cloudExportUrl = uploaded.download_url
-					this.backupTransferStatus = `已上传 ${this.formatAttachmentSize(Number(uploaded.byte_size) || transferBytes)}`
-					this.addCloudDiagnostic('cloud_backup_completed', {
-						operation: 'json_export_upload',
-						byteSize: Number(uploaded.byte_size) || transferBytes,
-						durationMs: Date.now() - startedAt
-					})
-					this.showToast('云端 JSON 已保存')
-				} catch (error) {
-					if (error && typeof error === 'object' &&
-						!Number(error.backupByteSize) && transferBytes > 0) error.backupByteSize = transferBytes
-					this.backupTransferStatus = this.cloudBackupFailureText(error, transferBytes)
-					this.addCloudDiagnostic('cloud_backup_failed', {
-						operation: 'json_export_upload',
-						byteSize: transferBytes,
-						durationMs: Date.now() - startedAt,
-						code: String(error?.code || ''),
-						status: Number(error?.status) || 0,
-						message: String(error?.message || '')
-					})
-					this.handleError(error, '云端保存失败')
-				} finally {
-					this.backupBusy = false
-				}
-			},
-			chooseImportFile() {
-				if (this.backupBusy) return
-				if (this.services?.nativeBackupPicker) {
-					this.importNativeBackup()
-					return
-				}
-				this.$nextTick(() => {
-					const target = this.$refs.backupFile
-					const input = Array.isArray(target) ? target[0] : target
-					if (input?.click) input.click()
-					else this.handleError(new Error('当前环境无法打开备份文件选择器'), '导入失败')
-				})
-			},
-			async importNativeBackup() {
-				this.backupBusy = true
-				this.errorMessage = ''
-				try {
-					const file = await this.services.nativeBackupPicker.pick()
-					if (!file) return
-					const text = file.nativePrepared?.textContent
-					if (typeof text !== 'string') throw new Error('原生备份文件内容无效')
-					const result = await this.applyImportedBackup(JSON.parse(text.replace(/^\uFEFF/, '')))
-					this.backupMenuOpen = false
-					this.showToast(`已导入 ${result.conversations} 个会话`)
-				} catch (error) {
-					this.handleError(error, '导入失败')
-				} finally {
-					this.backupBusy = false
-				}
-			},
-			async applyImportedBackup(payload) {
-				const result = await this.services.backupService.importData(payload)
-				await this.repairCharacterConversationLinks()
-				await this.loadProfileAvatar()
-				await this.loadProviders()
-				await this.loadCharacters()
-				await this.loadWorldBooks()
-				await this.loadConversations()
-				return result
-			},
-			async importData(event) {
-				const file = event.target.files?.[0]
-				if (!file) return
-				this.backupBusy = true
-				this.errorMessage = ''
-				try {
-					const result = await this.applyImportedBackup(JSON.parse((await file.text()).replace(/^\uFEFF/, '')))
-					this.backupMenuOpen = false
-					this.showToast(`已导入 ${result.conversations} 个会话`)
-				}
-				catch (error) { this.handleError(error, '导入失败') }
-				finally { this.backupBusy = false; event.target.value = '' }
-			},
-			async importDataFromLink() {
-				if (this.backupBusy) return
-				const downloadUrl = this.cloudImportUrl.trim()
-				if (!downloadUrl) { this.showToast('请粘贴云端 JSON 链接'); return }
-				this.backupBusy = true
-				this.errorMessage = ''
-				try {
-					const cloud = await this.prepareCloudServices()
-					const payload = await cloud.apiClient.downloadJsonExport(downloadUrl)
-					const result = await this.applyImportedBackup(payload)
-					this.backupMenuOpen = false
-					this.showToast(`已从链接导入 ${result.conversations} 个会话`)
-				} catch (error) {
-					this.handleError(error, '链接导入失败')
-				} finally {
-					this.backupBusy = false
-				}
-			},
-			writeClipboard(content) {
-				const value = String(content ?? '')
-				const uniApi = getUniApi()
-				if (typeof uniApi?.setClipboardData === 'function') {
-					return new Promise((resolve, reject) => uniApi.setClipboardData({ data: value, success: resolve, fail: reject }))
-				}
-				if (globalThis.navigator?.clipboard?.writeText) return globalThis.navigator.clipboard.writeText(value)
-				return Promise.reject(new Error('当前环境不支持复制'))
-			},
-			async copyCloudExportLink() {
-				try { await this.writeClipboard(this.cloudExportUrl); this.showToast('下载链接已复制') }
-				catch (error) { this.handleError(error, '复制失败') }
-			},
+			showLocalDataInfo() { this.openSettingsInformation('storage') },
 			formatMessageTime(value) { const date = value ? new Date(value) : new Date(); return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}` },
 			statusLabel(status) { return ({ failed: '回答失败', interrupted: '回答已中断', cancelled: '已停止生成' })[status] || '回答未完成' },
 			resetChatVirtualWindow() {
+				this.cancelPendingChatScroll()
 				clearTimeout(this.chatVirtualScrollTimer)
 				clearTimeout(this.chatVirtualMeasureTimer)
 				this.chatVirtualScrollTimer = null
@@ -4220,6 +3947,10 @@
 				this.chatVirtualScrollTop = 0
 				this.chatVirtualViewportHeight = Number(this.chatScrollTarget()?.clientHeight) || 720
 				this.chatVirtualPinnedToBottom = true
+				this.chatScrollPaused = false
+				this.chatScrollLastTop = null
+				this.chatScrollTouchY = null
+				this.chatScrollTouchDirection = 0
 				this.chatVirtualSuppressMeasurementScroll = false
 				this.disarmChatHistoryAutoLoad()
 			},
@@ -4243,8 +3974,7 @@
 				const layout = buildVirtualMessageLayout(this.messageItems, {
 					measurements: this.chatVirtualMeasurements
 				})
-				this.chatVirtualPinnedToBottom = false
-				this.chatVirtualScrollTop = layout.offsets[index] || 0
+				this.pauseChatAutoFollow(layout.offsets[index] || 0)
 			},
 			scheduleChatVirtualMeasurement({ follow = true } = {}) {
 				if (!follow) this.chatVirtualSuppressMeasurementScroll = true
@@ -4272,24 +4002,76 @@
 				this.chatVirtualMeasurementRevision += 1
 				if (this.chatVirtualPinnedToBottom && !suppressAutoScroll) this.scrollChatToBottom()
 			},
+			pauseChatAutoFollow(scrollTop = null) {
+				const target = this.chatScrollTarget()
+				const domTop = Number(target?.scrollTop)
+				const domScrollable = Number.isFinite(domTop) && Number(target?.scrollHeight) > Number(target?.clientHeight)
+				const position = scrollTop ?? (domScrollable ? domTop : this.chatScrollLastTop) ?? this.chatVirtualScrollTop
+				// Capture the real position before unpinning: the virtual window ignores it while pinned.
+				this.chatVirtualScrollTop = Math.max(0, Number(position) || 0)
+				this.chatVirtualViewportHeight = Number(target?.clientHeight) || this.chatVirtualViewportHeight
+				this.chatScrollPaused = true
+				this.chatVirtualPinnedToBottom = false
+				this.cancelPendingChatScroll()
+				clearTimeout(this.chatVirtualScrollTimer)
+				this.chatVirtualScrollTimer = null
+				this._chatVirtualPendingScroll = null
+			},
+			onChatWheel(event) {
+				if (Number(event?.deltaY) < 0) this.pauseChatAutoFollow()
+			},
+			onChatScrollKeydown(event) {
+				if (event?.target?.closest?.('input, textarea, [contenteditable="true"]')) return
+				if (['ArrowUp', 'PageUp', 'Home'].includes(event?.key) || (event?.key === ' ' && event?.shiftKey)) this.pauseChatAutoFollow()
+			},
+			onChatTouchStart(event) {
+				const touch = event?.touches?.[0] || event?.changedTouches?.[0]
+				const y = Number(touch?.clientY ?? touch?.pageY)
+				if (!Number.isFinite(y)) return
+				this.chatScrollTouchY = y
+				this.chatScrollTouchDirection = 0
+				this.cancelPendingChatScroll()
+			},
+			onChatTouchMove(event) {
+				if (this.chatScrollTouchY === null) return
+				const touch = event?.touches?.[0] || event?.changedTouches?.[0]
+				const y = Number(touch?.clientY ?? touch?.pageY)
+				if (!Number.isFinite(y)) return
+				const delta = y - this.chatScrollTouchY
+				if (Math.abs(delta) < 2) return
+				this.chatScrollTouchY = y
+				this.chatScrollTouchDirection = delta > 0 ? -1 : 1
+				// A downward finger movement reads earlier messages; act before the native scroll callback.
+				if (delta > 0) this.pauseChatAutoFollow()
+			},
+			onChatTouchEnd() {
+				this.chatScrollTouchY = null
+				this.chatScrollTouchDirection = 0
+				if (!this.chatScrollPaused && this.chatVirtualPinnedToBottom) this.scrollChatToBottom()
+			},
 			onChatScroll(event) {
 				const detail = event?.detail || {}
 				const target = this.chatScrollTarget()
-				const scrollTop = Number(detail.scrollTop)
-				if (!Number.isFinite(scrollTop)) return
-				const scrollHeight = Number(detail.scrollHeight) || Number(target?.scrollHeight) || 0
+				const rawScrollTop = Number(detail.scrollTop ?? event?.currentTarget?.scrollTop)
+				if (!Number.isFinite(rawScrollTop)) return
+				const scrollTop = Math.max(0, rawScrollTop)
+				const scrollHeight = Number(detail.scrollHeight ?? event?.currentTarget?.scrollHeight) || Number(target?.scrollHeight) || 0
 				const viewportHeight = Number(target?.clientHeight) || this.chatVirtualViewportHeight || 720
 				const distanceToBottom = Math.max(0, scrollHeight - scrollTop - viewportHeight)
-				const pinnedToBottom = distanceToBottom <= CHAT_AUTO_FOLLOW_THRESHOLD
-				if (!pinnedToBottom && (
-					this.chatVirtualPinnedToBottom || this.chatScrollTimer || this.chatScrollIntoView
-				)) this.cancelPendingChatScroll()
-				this.chatVirtualPinnedToBottom = pinnedToBottom
+				const previousTop = this.chatScrollLastTop
+				const movingUp = previousTop !== null && scrollTop < previousTop - 1
+				const movingDown = previousTop !== null && scrollTop > previousTop + 1
+				this.chatScrollLastTop = scrollTop
+				if (distanceToBottom > CHAT_BOTTOM_EPSILON && (movingUp || previousTop === null)) this.pauseChatAutoFollow(scrollTop)
+				if (this.chatScrollPaused && distanceToBottom <= CHAT_BOTTOM_EPSILON && movingDown && this.chatScrollTouchDirection !== -1) {
+					this.chatScrollPaused = false
+					this.chatVirtualPinnedToBottom = true
+				}
 				this._chatVirtualPendingScroll = {
 					scrollTop,
 					scrollHeight,
 					viewportHeight,
-					pinnedToBottom
+					pinnedToBottom: this.chatVirtualPinnedToBottom
 				}
 				if (this.chatVirtualScrollTimer) return
 				this.chatVirtualScrollTimer = setTimeout(() => {
@@ -4299,7 +4081,7 @@
 					if (!pending) return
 					this.chatVirtualScrollTop = pending.scrollTop
 					this.chatVirtualViewportHeight = pending.viewportHeight
-					this.chatVirtualPinnedToBottom = pending.pinnedToBottom
+					// Follow intent is updated synchronously; a queued geometry sample must never restore it.
 					this.$nextTick(() => this.scheduleChatVirtualMeasurement())
 					if (this.chatHistoryAutoLoadArmed && !pending.pinnedToBottom &&
 						pending.scrollTop <= CHAT_HISTORY_AUTO_LOAD_THRESHOLD) {
@@ -4359,16 +4141,16 @@
 				this.chatScrollIntoView = ''
 			},
 			requestChatScrollToBottom() {
-				if (!this.chatVirtualPinnedToBottom) return
+				if (!this.chatVirtualPinnedToBottom || this.chatScrollPaused || this.chatScrollTouchY !== null) return
 				this.chatVirtualPinnedToBottom = true
 				const revision = this.chatScrollRevision + 1
 				this.chatScrollRevision = revision
 				this.chatScrollIntoView = ''
 				this.$nextTick(() => {
-					if (revision !== this.chatScrollRevision || !this.chatVirtualPinnedToBottom) return
+					if (revision !== this.chatScrollRevision || !this.chatVirtualPinnedToBottom || this.chatScrollPaused || this.chatScrollTouchY !== null) return
 					this.chatScrollIntoView = `chat-bottom-${revision}`
 					this.$nextTick(() => {
-						if (revision !== this.chatScrollRevision || !this.chatVirtualPinnedToBottom) return
+						if (revision !== this.chatScrollRevision || !this.chatVirtualPinnedToBottom || this.chatScrollPaused || this.chatScrollTouchY !== null) return
 						const ref = Array.isArray(this.$refs.chatScroll) ? this.$refs.chatScroll[0] : this.$refs.chatScroll
 						const target = ref?.$el || ref
 						if (typeof target?.scrollTo === 'function') target.scrollTo({ top: target.scrollHeight })
@@ -4378,7 +4160,13 @@
 			},
 			scrollChatToBottom(immediate = false, force = false) {
 				if (!force && !this.chatVirtualPinnedToBottom) return
-				if (force) this.chatVirtualPinnedToBottom = true
+				if (!force && (this.chatScrollPaused || this.chatScrollTouchY !== null)) return
+				if (force) {
+					this.chatScrollPaused = false
+					this.chatScrollTouchY = null
+					this.chatScrollTouchDirection = 0
+					this.chatVirtualPinnedToBottom = true
+				}
 				if (immediate) {
 					clearTimeout(this.chatScrollTimer)
 					this.requestChatScrollToBottom()
@@ -4401,6 +4189,12 @@
 </script>
 
 <style>
+	@import '../../src/styles/interaction-feedback.css';
+	@import '../../src/styles/main-pages.css';
+	@import '../../src/styles/provider-redesign.css';
+	@import '../../src/styles/settings-redesign.css';
+	@import '../../src/styles/settings-details.css';
+	@import '../../src/styles/settings-cloud.css';
 	* {
 		box-sizing: border-box;
 	}
@@ -5194,7 +4988,10 @@
 		align-items: center;
 		justify-content: flex-end;
 		min-width: 48px;
-		height: 31px;
+		height: 54px;
+		flex-direction: column;
+		gap: 4px;
+		border-radius: 8px;
 		padding: 0 3px 0 8px;
 		background: #fff;
 		font-size: 12px;
@@ -5398,6 +5195,42 @@
 		border-radius: 7px;
 		background: #fff;
 		box-shadow: 0 10px 24px rgba(18, 23, 31, 0.12);
+	}
+
+	.model-menu-backdrop {
+		position: absolute;
+		inset: calc(var(--status-bar-height, 0px) + 62px) 0 0;
+		z-index: 7;
+		background: transparent;
+	}
+
+	.chat-jump-latest {
+		position: absolute;
+		right: 4px;
+		bottom: calc(100% + 10px);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 5px;
+		min-height: 40px;
+		padding: 0 13px;
+		border: 1px solid #ecdff1;
+		border-radius: 22px;
+		background: #fff;
+		color: #9840ad;
+		box-shadow: 0 3px 12px rgba(52, 38, 67, 0.12);
+		font-size: 12px;
+		font-weight: 600;
+	}
+
+	.chat-jump-latest:disabled {
+		opacity: 0.6;
+	}
+
+	.composer-action-icon {
+		display: flex;
+		align-items: center;
+		justify-content: center;
 	}
 
 	.popover-label {
@@ -7693,8 +7526,160 @@
 		--settings-detail-accent-soft: #eafafb;
 	}
 
+	.network-proxy-settings-details {
+		--settings-detail-accent: #397bc6;
+		--settings-detail-accent-soft: #edf5ff;
+	}
+
 	.streaming-toggle.enabled {
 		background: #16a7b1;
+	}
+
+	.network-proxy-toggle.enabled {
+		background: #397bc6;
+	}
+
+	.proxy-settings-card {
+		overflow: hidden;
+	}
+
+	.proxy-url-field {
+		display: flex;
+		padding: 13px 12px 15px 62px;
+		border-top: 1px solid #ececef;
+		flex-direction: column;
+		gap: 7px;
+	}
+
+	.proxy-url-field > text:first-child {
+		font-size: 13px;
+		font-weight: 680;
+		color: #37383d;
+	}
+
+	.proxy-url-field input {
+		box-sizing: border-box;
+		width: 100%;
+		height: 40px;
+		padding: 0 11px;
+		border: 1px solid #dedee2;
+		border-radius: 7px;
+		background: #fafafb;
+		font-size: 13px;
+		color: #28292e;
+		outline: none;
+	}
+
+	.proxy-url-field input:focus {
+		border-color: #397bc6;
+		background: #fff;
+	}
+
+	.proxy-url-field > text:last-child {
+		font-size: 11px;
+		line-height: 17px;
+		color: #898a90;
+	}
+
+	.proxy-smart-help {
+		display: flex;
+		padding: 13px 12px 15px 62px;
+		border-top: 1px solid #ececef;
+		flex-direction: column;
+		gap: 6px;
+	}
+
+	.proxy-smart-help text {
+		font-size: 11px;
+		line-height: 17px;
+		color: #898a90;
+	}
+
+	.proxy-smart-help text:first-child {
+		font-size: 12px;
+		color: #5f6067;
+	}
+
+	.proxy-smart-actions {
+		display: flex;
+		padding: 0 12px 14px 62px;
+	}
+
+	.proxy-detect-button {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		height: 36px;
+		padding: 0 14px;
+		border: 1px solid #cfdcf0;
+		border-radius: 8px;
+		background: #f4f8ff;
+		font-size: 13px;
+		font-weight: 600;
+		color: #397bc6;
+	}
+
+	.proxy-detect-button:active {
+		transform: scale(0.99);
+	}
+
+	.proxy-detect-button:disabled {
+		opacity: 0.55;
+	}
+
+	.proxy-manual-card {
+		display: block;
+		padding: 14px 14px 2px;
+	}
+
+	.proxy-manual-card .proxy-url-field {
+		padding: 0 0 12px;
+		border-top: none;
+	}
+
+	.proxy-tips-card {
+		display: flex;
+		padding: 13px 14px 15px;
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	.proxy-tips-card text {
+		font-size: 11px;
+		line-height: 18px;
+		color: #898a90;
+	}
+
+	.network-proxy-error {
+		display: block;
+		margin: 9px 2px 0;
+		font-size: 12px;
+		line-height: 18px;
+		color: #c23d5a;
+	}
+
+	.network-proxy-save-button {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 8px;
+		width: 100%;
+		height: 50px;
+		margin-top: 14px;
+		border-radius: 8px;
+		background: #397bc6;
+		font-size: 15px;
+		font-weight: 700;
+		color: #fff;
+		box-shadow: 0 6px 16px rgba(57, 123, 198, 0.18);
+	}
+
+	.network-proxy-save-button:active {
+		transform: scale(0.99);
+	}
+
+	.network-proxy-save-button:disabled {
+		opacity: 0.55;
 	}
 
 	.character-status-settings-details {
@@ -9708,4 +9693,13 @@
 			box-shadow: 0 8px 32px rgba(20, 23, 28, 0.1);
 		}
 	}
+	.backup-share-notice { display: block; margin-top: 14px; color: #77634b; font-size: 12px; line-height: 1.65; }
+	.json-share-management { margin-top: 18px; }
+	.json-share-heading, .json-share-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+	.json-share-heading button, .json-share-row button { flex-shrink: 0; padding: 7px 10px; border: 0; border-radius: 8px; font-size: 12px; background: #edf3f5; color: #397283; }
+	.json-share-row { padding: 12px 0; border-bottom: 1px solid #edf1f2; }
+	.json-share-row > view { min-width: 0; display: flex; flex-direction: column; gap: 5px; font-size: 12px; overflow-wrap: anywhere; }
+	.json-share-row > view > text:last-child, .json-share-empty { color: #7a858a; font-size: 11px; }
+	.json-share-row button { color: #ad5555; }
+	.json-share-error { display: block; padding-top: 10px; color: #ad5555; font-size: 12px; }
 </style>

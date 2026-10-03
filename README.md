@@ -114,6 +114,10 @@
 - 云同步使用本地修订号与内容哈希识别头像变化，仅在需要上传时读取大型资源。
 - 云端恢复后自动修复角色、会话和头像关联。
 - 支持注册、登录、自定义用户名、云端 JSON 分享链接与跨设备恢复。
+- JSON 分享是持链接即可读取的明文分享，区别于端到端加密的完整云备份。新分享默认七天有效，可在“导入与导出 JSON”中查看有效期并撤销；默认每账号最多 20 条有效分享、总计 500 MB，过期数据在下次上传或管理分享时清理。
+- 应用锁与 PIN 验证记录、设备代理、云端连接配置不随本地备份、完整云备份或增量同步迁移；导入旧备份也会保留当前设备原有的安全设置。
+
+如果发送或续写后没有正文，消息会显示失败原因，可点“响应详情”查看接收字节、正文与可显示字符数、结束原因，并复制这些统计。记录不包含密钥、提示词或回复原文；没有诊断记录的历史空回复会明确提示无法追溯上游响应。应用不会因空回复自动重发请求。
 
 ### 隐私与稳定性
 
@@ -151,7 +155,7 @@
 
 ## 本地开发
 
-需要 Node.js 20.19 或更高版本。
+需要 Node.js 22.13 或更高版本，推荐 Node.js 24（与 CI 一致）；SQLite 回归测试使用 Node 内置的 `node:sqlite`。
 
 ```bash
 npm install
@@ -164,7 +168,7 @@ npm run dev
 
 云端功能需要 PHP 8.2 或更高版本、PDO MySQL 和 MySQL/MariaDB。只使用本地模式时可以跳过本节。
 
-1. 按编号顺序执行 `server/migrations/001_initial.sql` 至 `006_auth_limits_and_sync_compaction.sql`。
+1. 按编号顺序执行 `server/migrations/001_initial.sql` 至 `007_expiring_json_exports.sql`。已有部署需先执行新增的 `007`，再更新服务端代码；迁移为既有分享设置从迁移执行时起七天的最后有效期，不影响加密完整备份。
 2. 将 `server/config.example.php` 复制为 `server/config.php`，填写数据库连接、公开服务地址和容量限制。
 3. 将站点 Web 根目录指向 `server/public/`，并为公开服务配置 HTTPS。
 4. 反向代理至少配置 `client_max_body_size 110m`、`client_body_timeout 600s` 和 `fastcgi_read_timeout 600s`。
@@ -179,8 +183,10 @@ npm run dev
 npm test
 npm run build
 npm run test:e2e
+npm audit --audit-level=moderate
 php server/tests/bootstrap-paths.php
 php server/tests/integration.php
+php server/tests/json-export-security.php
 php server/tests/sync-integration.php
 ```
 

@@ -5,12 +5,9 @@ import {
   timestampFromRecord
 } from '../core/cloud-sync-protocol.js'
 import { hashSyncValue } from '../core/cloud-sync-crypto.js'
+import { DEVICE_LOCAL_SETTING_KEYS } from '../core/local-settings.js'
 
-export const DEFAULT_LOCAL_ONLY_SYNC_SETTINGS = Object.freeze([
-  'cloudDeviceId',
-  'cloudAutoBackup',
-  'cloudConfig'
-])
+export const DEFAULT_LOCAL_ONLY_SYNC_SETTINGS = DEVICE_LOCAL_SETTING_KEYS
 
 function cloneJson(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value))
@@ -62,7 +59,7 @@ export class CloudSyncRepositoryAdapter {
     }
     this.repository = repository
     this.vault = vault
-    this.localOnlySettingKeys = new Set(localOnlySettingKeys)
+    this.localOnlySettingKeys = new Set([...DEVICE_LOCAL_SETTING_KEYS, ...localOnlySettingKeys])
   }
 
   isLocalOnlySetting(key) {

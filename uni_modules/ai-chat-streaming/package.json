@@ -32,7 +32,8 @@
         "onAiChatStreamEvent": "onAiChatStreamEvent",
         "offAiChatStreamEvent": "offAiChatStreamEvent",
         "aiChatStreamRequest": "aiChatStreamRequest",
-        "aiChatStreamCancel": "aiChatStreamCancel"
+        "aiChatStreamCancel": "aiChatStreamCancel",
+        "aiChatDetectHttpProxy": "aiChatDetectHttpProxy"
       }
     },
     "platforms": {
