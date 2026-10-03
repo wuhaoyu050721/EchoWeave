@@ -337,10 +337,11 @@ test('conversation summary labels attachment-only messages', () => {
 })
 
 test('conversation summary uses the latest message and stable fallback values', () => {
+  // The summary displays device-local time, so the fixture must use the local timezone too.
   const summary = summarizeConversation(
-    { id: 'c1', title: 'Title', updatedAt: '2026-07-13T09:28:00.000+08:00' },
-    { content: 'Latest reply', updatedAt: '2026-07-13T09:29:00.000+08:00' },
-    new Date('2026-07-13T10:00:00.000+08:00')
+    { id: 'c1', title: 'Title', updatedAt: new Date(2026, 6, 13, 9, 28).toISOString() },
+    { content: 'Latest reply', updatedAt: new Date(2026, 6, 13, 9, 29).toISOString() },
+    new Date(2026, 6, 13, 10, 0)
   )
   assert.equal(summary.preview, 'Latest reply')
   assert.equal(summary.time, '09:29')
