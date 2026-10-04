@@ -144,7 +144,7 @@ test('chat motion is retained and new navigation feedback respects reduced motio
 		readFile(new URL('../src/styles/main-pages.css', import.meta.url), 'utf8')
 	])
 
-	assert.match(source, /\.screen-view\s*\{[^}]*animation:\s*page-switch-in 220ms/s)
+	assert.match(source, /\.screen-view,\s*\.primary-tab-view\s*\{[^}]*animation:\s*page-switch-in 220ms/s)
 	assert.match(source, /\.chat-toolbar,\s*\.chat-scroll,\s*\.composer\s*\{[^}]*animation:\s*page-switch-in 220ms/s)
 	assert.match(source, /@keyframes page-switch-in/)
 	assert.match(source, /@media \(prefers-reduced-motion:\s*reduce\)/)
@@ -222,7 +222,6 @@ test('primary tabs stay mounted and reuse bounded cached lists', async () => {
 	assert.match(providerLogo, /lazyLoad: \{ type: Boolean, default: false \}/)
 	assert.match(providerLogo, /elementProps\['lazy-load'\] = true/)
 	assert.match(providerLogo, /elementProps\.loading = 'lazy'/)
-	assert.match(source, /\.screen-view\.primary-tab-view\s*\{[^}]*animation:\s*none/s)
 	assert.match(source, /\.conversation-row\s*\{[^}]*content-visibility:\s*auto/s)
 	assert.match(contacts, /\.contact-row\s*\{[^}]*content-visibility:\s*auto/s)
 })

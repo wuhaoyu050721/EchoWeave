@@ -4438,11 +4438,11 @@
 		flex: 1;
 		flex-direction: column;
 		min-height: 0;
-		animation: page-switch-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
 	}
 
-	.screen-view.primary-tab-view {
-		animation: none;
+	.screen-view,
+	.primary-tab-view {
+		animation: page-switch-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
 	}
 
 	.chat-toolbar,
@@ -9805,6 +9805,7 @@
 
 	@media (prefers-reduced-motion: reduce) {
 		.screen-view,
+		.primary-tab-view,
 		.chat-toolbar,
 		.chat-scroll,
 		.composer,
