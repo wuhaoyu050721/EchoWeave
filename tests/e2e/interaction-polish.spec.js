@@ -102,6 +102,33 @@ test('model menu dismisses on background click and composer focus', async ({ pag
   await expect(page.locator('.composer-input')).toBeFocused()
 })
 
+test('rename dialog saves typed input and cancelling deletion keeps the conversation', async ({ page }) => {
+  const id = await setupChat(page)
+  await page.getByRole('button', { name: '管理会话', exact: true }).click()
+  await page.getByTestId('conversation-rename-action').click()
+  const input = page.getByTestId('app-dialog-input')
+  const save = page.getByTestId('app-dialog-confirm')
+  await input.fill('')
+  await expect(save).toBeDisabled()
+  await input.fill('重命名后保留的会话')
+  await expect(save).toBeEnabled()
+  await save.click()
+  await expect(page.getByTestId('app-dialog')).toHaveCount(0)
+  await expect.poll(() => page.evaluate(async id =>
+    (await globalThis.__echoWeavePreview.services.repository.getConversation(id))?.title, id
+  )).toBe('重命名后保留的会话')
+
+  await page.getByRole('button', { name: '管理会话', exact: true }).click()
+  await page.getByTestId('conversation-delete-action').click()
+  const dialog = page.getByTestId('app-dialog')
+  await expect(dialog).toHaveAccessibleName('删除会话')
+  await dialog.getByRole('button', { name: '取消', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  expect(await page.evaluate(async id =>
+    (await globalThis.__echoWeavePreview.services.repository.getConversation(id))?.title, id
+  )).toBe('重命名后保留的会话')
+})
+
 for (const story of [false, true]) {
   test(`${story ? 'story' : 'ordinary chat'} keyboard keeps Enter as newline and sends once with ${story ? 'Meta' : 'Control'}+Enter`, async ({ page }) => {
     const requests = await interceptReplies(page)

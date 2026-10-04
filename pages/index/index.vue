@@ -4341,6 +4341,7 @@
 	@import '../../src/styles/settings-redesign.css';
 	@import '../../src/styles/settings-details.css';
 	@import '../../src/styles/settings-cloud.css';
+	@import '../../src/styles/popup-theme.css';
 	* {
 		box-sizing: border-box;
 	}

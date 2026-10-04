@@ -5,7 +5,7 @@
 		@click.self="$emit('cancel-action')"
 		@touchmove.stop.prevent
 	>
-		<view class="app-action-sheet" role="dialog" aria-modal="true" aria-label="会话操作" data-testid="conversation-action-sheet" @click.stop>
+		<view class="app-action-sheet" role="dialog" aria-modal="true" aria-label="会话操作" data-testid="conversation-action-sheet" @click.stop @touchmove.stop>
 			<view class="app-action-sheet-grabber" />
 			<view class="app-action-sheet-heading">
 				<view class="app-action-sheet-copy">
@@ -48,6 +48,7 @@
 			:aria-label="dialog.title"
 			data-testid="app-dialog"
 			@click.stop
+			@touchmove.stop
 		>
 			<view class="app-confirm-icon">
 				<MessageCircle v-if="isPrompt" :size="23" />
@@ -59,6 +60,7 @@
 			<label v-if="isPrompt" class="app-confirm-field">
 				<text>会话名称</text>
 				<input
+					class="app-confirm-input"
 					:value="inputValue"
 					:focus="true"
 					maxlength="80"
@@ -66,7 +68,7 @@
 					aria-label="会话名称"
 					placeholder="输入会话名称"
 					data-testid="app-dialog-input"
-					@input="$emit('update:inputValue', $event.detail.value)"
+					@input="$emit('update:inputValue', $event.detail?.value ?? $event.target?.value ?? '')"
 					@confirm="confirmDisabled || $emit('confirm-dialog')"
 				/>
 			</label>
@@ -110,7 +112,7 @@
 		z-index: 70;
 		display: flex;
 		box-sizing: border-box;
-		background: rgba(15, 20, 29, 0.42);
+		background: rgba(37, 35, 42, 0.4);
 		-webkit-backdrop-filter: blur(2px);
 		backdrop-filter: blur(2px);
 		animation: app-dialog-backdrop-in 160ms ease-out both;
@@ -124,14 +126,20 @@
 		display: flex;
 		box-sizing: border-box;
 		width: 100%;
-		padding: 0 14px max(14px, calc(env(safe-area-inset-bottom) + 10px));
-		border: 1px solid rgba(220, 227, 236, 0.9);
+		max-height: 100%;
+		padding: 0 20px max(14px, calc(env(safe-area-inset-bottom) + 10px));
+		overflow-y: auto;
+		border: 1px solid var(--paper-line, #e5e0e7);
 		border-bottom: 0;
-		border-radius: 8px 8px 0 0;
-		background: #fff;
-		box-shadow: 0 -18px 48px rgba(15, 20, 29, 0.2);
+		border-radius: 26px 26px 0 0;
+		background: var(--paper-bg, #f8f7f4);
+		box-shadow: 0 -18px 48px rgba(42, 31, 55, 0.16);
 		flex-direction: column;
 		animation: app-action-sheet-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+	}
+
+	.app-action-sheet > * {
+		flex-shrink: 0;
 	}
 
 	.app-action-sheet-grabber {
@@ -139,14 +147,14 @@
 		height: 4px;
 		margin: 9px auto 0;
 		border-radius: 2px;
-		background: #cbd3dc;
+		background: #ccc2d3;
 	}
 
 	.app-action-sheet-heading {
 		display: flex;
 		align-items: center;
 		min-height: 65px;
-		border-bottom: 1px solid #e7ebf0;
+		border-bottom: 1px solid var(--paper-line, #e5e0e7);
 	}
 
 	.app-action-sheet-copy {
@@ -161,7 +169,7 @@
 		font-size: 16px;
 		font-weight: 750;
 		line-height: 22px;
-		color: #172033;
+		color: var(--paper-ink, #25232a);
 	}
 
 	.app-action-sheet-copy text:last-child {
@@ -170,7 +178,7 @@
 		overflow: hidden;
 		font-size: 12px;
 		line-height: 17px;
-		color: #758196;
+		color: var(--paper-muted, #706775);
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
@@ -183,8 +191,8 @@
 		height: 36px;
 		margin-left: 12px;
 		border-radius: 50%;
-		background: #f0f3f7;
-		color: #536174;
+		background: var(--paper-soft, #eee8f4);
+		color: var(--paper-accent, #7850a0);
 		flex: 0 0 auto;
 	}
 
@@ -199,8 +207,11 @@
 		gap: 12px;
 		width: 100%;
 		min-height: 66px;
-		border-bottom: 1px solid #edf0f4;
+		padding: 12px 0;
+		border-bottom: 1px solid var(--paper-line, #e5e0e7);
+		line-height: 20px;
 		text-align: left;
+		white-space: normal;
 	}
 
 	.app-action-row:last-child {
@@ -209,7 +220,7 @@
 
 	.app-action-row > .app-icon {
 		margin-left: auto;
-		color: #a1aab7;
+		color: #a99caf;
 		flex: 0 0 auto;
 	}
 
@@ -219,13 +230,13 @@
 		justify-content: center;
 		width: 38px;
 		height: 38px;
-		border-radius: 8px;
+		border-radius: 13px;
 		flex: 0 0 auto;
 	}
 
 	.app-action-icon-primary {
-		background: #eaf3ff;
-		color: #1f6fcb;
+		background: var(--paper-soft, #eee8f4);
+		color: var(--paper-accent, #7850a0);
 	}
 
 	.app-action-icon-danger {
@@ -245,13 +256,13 @@
 		font-size: 14px;
 		font-weight: 680;
 		line-height: 20px;
-		color: #222b3b;
+		color: var(--paper-ink, #25232a);
 	}
 
 	.app-action-copy text:last-child {
 		font-size: 11px;
 		line-height: 16px;
-		color: #8792a3;
+		color: var(--paper-muted, #706775);
 	}
 
 	.app-action-row-danger .app-action-copy text:first-child {
@@ -269,14 +280,18 @@
 		box-sizing: border-box;
 		width: min(340px, 100%);
 		max-height: calc(100% - 40px);
-		padding: 22px 20px 18px;
+		padding: 24px 22px 20px;
 		overflow-y: auto;
-		border: 1px solid rgba(220, 227, 236, 0.92);
-		border-radius: 8px;
-		background: #fff;
-		box-shadow: 0 20px 56px rgba(15, 20, 29, 0.24);
+		border: 1px solid var(--paper-line, #e5e0e7);
+		border-radius: 24px;
+		background: var(--paper-bg, #f8f7f4);
+		box-shadow: 0 20px 56px rgba(42, 31, 55, 0.2);
 		flex-direction: column;
 		animation: app-confirm-dialog-in 190ms cubic-bezier(0.22, 1, 0.36, 1) both;
+	}
+
+	.app-confirm-dialog > * {
+		flex-shrink: 0;
 	}
 
 	.app-confirm-icon {
@@ -286,8 +301,8 @@
 		width: 44px;
 		height: 44px;
 		border-radius: 50%;
-		background: #eaf3ff;
-		color: #1f6fcb;
+		background: var(--paper-soft, #eee8f4);
+		color: var(--paper-accent, #7850a0);
 	}
 
 	.app-confirm-dialog.is-danger .app-confirm-icon {
@@ -300,7 +315,7 @@
 		font-size: 18px;
 		font-weight: 750;
 		line-height: 25px;
-		color: #172033;
+		color: var(--paper-ink, #25232a);
 		word-break: break-word;
 	}
 
@@ -308,7 +323,7 @@
 		margin-top: 7px;
 		font-size: 13px;
 		line-height: 20px;
-		color: #758196;
+		color: var(--paper-muted, #706775);
 		word-break: break-word;
 	}
 
@@ -328,26 +343,46 @@
 		font-size: 12px;
 		font-weight: 650;
 		line-height: 17px;
-		color: #536174;
+		color: var(--paper-muted, #706775);
 	}
 
-	.app-confirm-field input {
+	.app-confirm-input {
 		box-sizing: border-box;
 		width: 100%;
 		height: 46px;
 		padding: 0 12px;
-		border: 1px solid #cdd7e3;
-		border-radius: 7px;
-		background: #f8fafc;
+		border: 1px solid var(--paper-line, #e5e0e7);
+		border-radius: 14px;
+		background: #fff;
 		font-size: 14px;
-		color: #172033;
+		line-height: 22px;
+		color: var(--paper-ink, #25232a);
 		outline: none;
 	}
 
-	.app-confirm-field input:focus {
-		border-color: #4c8fd9;
+	.app-confirm-input:focus,
+	.app-confirm-input:focus-within {
+		border-color: var(--paper-accent, #7850a0);
 		background: #fff;
-		box-shadow: 0 0 0 3px rgba(31, 111, 203, 0.12);
+		box-shadow: 0 0 0 3px rgba(120, 80, 160, 0.12);
+	}
+
+	.app-confirm-input :deep(.uni-input-wrapper) {
+		display: flex;
+		align-items: center;
+		height: 100%;
+	}
+
+	.app-confirm-input :deep(.uni-input-input) {
+		height: 100%;
+		line-height: 22px;
+	}
+
+	.app-confirm-input :deep(.uni-input-placeholder) {
+		display: flex;
+		align-items: center;
+		height: 100%;
+		line-height: 22px;
 	}
 
 	.app-confirm-actions {
@@ -358,19 +393,29 @@
 	}
 
 	.app-confirm-actions button {
-		height: 43px;
-		border-radius: 7px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		box-sizing: border-box;
+		min-height: 46px;
+		height: auto;
+		padding: 11px 12px;
+		border-radius: 14px;
 		font-size: 14px;
 		font-weight: 680;
+		line-height: 22px;
+		text-align: center;
+		white-space: normal;
+		word-break: break-word;
 	}
 
 	.app-confirm-cancel {
-		background: #eef2f6;
-		color: #4e5b6d;
+		background: var(--paper-soft, #eee8f4);
+		color: var(--paper-accent, #7850a0);
 	}
 
 	.app-confirm-submit {
-		background: #1f6fcb;
+		background: var(--paper-accent, #7850a0);
 		color: #fff;
 	}
 
@@ -383,8 +428,8 @@
 	}
 
 	@keyframes app-dialog-backdrop-in {
-		from { background-color: rgba(15, 20, 29, 0); }
-		to { background-color: rgba(15, 20, 29, 0.42); }
+		from { background-color: rgba(37, 35, 42, 0); }
+		to { background-color: rgba(37, 35, 42, 0.4); }
 	}
 
 	@keyframes app-action-sheet-in {

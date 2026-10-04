@@ -14,8 +14,8 @@ test('shared dialogs render polished action, prompt, and confirmation states', a
   assert.match(source, /:disabled="confirmDisabled"/)
   assert.match(source, /@click\.self="\$emit\('cancel-dialog'\)"/)
   assert.match(source, /max\(14px, calc\(env\(safe-area-inset-bottom\) \+ 10px\)\)/)
-  assert.match(source, /\.app-action-sheet\s*\{[^}]*border-radius:\s*8px 8px 0 0/s)
-  assert.match(source, /\.app-confirm-dialog\s*\{[^}]*width:\s*min\(340px, 100%\)[^}]*border-radius:\s*8px/s)
+  assert.match(source, /\.app-action-sheet\s*\{[^}]*border-radius:\s*26px 26px 0 0/s)
+  assert.match(source, /\.app-confirm-dialog\s*\{[^}]*width:\s*min\(340px, 100%\)[^}]*border-radius:\s*24px/s)
   assert.match(source, /@media \(prefers-reduced-motion: reduce\)/)
 })
 

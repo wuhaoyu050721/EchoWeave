@@ -1,0 +1,210 @@
+/* Shared paper surfaces for overlays; keep page and chat canvas controls separate. */
+.app-shell .modal-backdrop,
+.app-shell .world-book-manager-backdrop,
+.app-shell .character-delete-backdrop {
+	--text: var(--paper-ink);
+	--muted: var(--paper-muted);
+	--border: var(--paper-line);
+	--accent: var(--paper-accent);
+	--accent-strong: var(--paper-accent);
+	--soft: var(--paper-soft);
+	--provider-accent: var(--paper-accent);
+	--provider-accent-soft: var(--paper-soft);
+	background: rgba(37, 35, 42, 0.34);
+	color: var(--paper-ink);
+}
+
+.app-shell .action-modal:not(.backup-transfer-modal),
+.app-shell .character-import-modal,
+.app-shell .attachment-preview-modal,
+.app-shell .character-delete-dialog,
+.app-shell .world-book-manager-sheet,
+.app-shell .character-import-loading-panel,
+.app-shell .story-bookmark-sheet {
+	border: 1px solid var(--paper-line);
+	border-radius: 24px;
+	background: var(--paper-bg);
+	color: var(--paper-ink);
+	box-shadow: 0 16px 44px rgba(37, 35, 42, 0.16);
+}
+
+/* Status details use the same bottom-sheet edge as account and transfer sheets. */
+.app-shell .assistant-status-modal {
+	border-radius: 26px 26px 0 0;
+	background: var(--paper-bg);
+	color: var(--paper-ink);
+}
+
+.app-shell .modal-heading,
+.app-shell .attachment-preview-header {
+	min-height: 56px;
+	gap: 12px;
+	line-height: 24px;
+	color: var(--paper-ink);
+	border-color: var(--paper-line);
+}
+
+.app-shell .modal-heading > button,
+.app-shell .attachment-preview-header > button {
+	flex: 0 0 auto;
+	width: 40px;
+	height: 40px;
+	border-radius: 50%;
+	background: var(--paper-soft);
+	color: var(--paper-muted);
+	line-height: 20px;
+}
+
+.app-shell .modal-action {
+	min-height: 52px;
+	height: auto;
+	padding: 12px 10px;
+	line-height: 24px;
+	border-color: var(--paper-line);
+}
+
+.app-shell .modal-action > .app-icon { flex: 0 0 auto; color: var(--paper-accent); }
+.app-shell .modal-action > text { min-width: 0; overflow-wrap: anywhere; }
+.app-shell .modal-action:active { background: var(--paper-soft); }
+.app-shell .avatar-reset-action,
+.app-shell .avatar-reset-action > .app-icon { color: #b93b49; }
+
+.app-shell .character-import-actions button,
+.app-shell .world-book-manager-sheet .manager-list-actions button,
+.app-shell .world-book-manager-sheet .manager-editor-actions button,
+.app-shell .character-delete-dialog .character-delete-actions button {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 46px;
+	height: auto;
+	padding: 11px 12px;
+	border-radius: 14px;
+	font-size: 14px;
+	line-height: 22px;
+	text-align: center;
+	white-space: normal;
+	overflow-wrap: anywhere;
+}
+
+.app-shell .character-import-actions .secondary-button {
+	border-color: var(--paper-line);
+	background: var(--paper-soft);
+	color: var(--paper-accent);
+}
+
+.app-shell .character-delete-dialog {
+	max-height: calc(100% - 40px);
+	overflow-y: auto;
+}
+.app-shell .character-delete-dialog > * { flex-shrink: 0; }
+.app-shell .character-delete-dialog .character-delete-title { color: var(--paper-ink); }
+.app-shell .character-delete-dialog .character-delete-copy { color: var(--paper-muted); line-height: 22px; }
+.app-shell .character-delete-dialog .character-delete-actions button { background: var(--paper-soft); color: var(--paper-muted); }
+.app-shell .character-delete-dialog .character-delete-actions .character-delete-confirm { background: #b93b49; color: #fff; }
+
+.app-shell .character-import-loading-icon { background: var(--paper-soft); color: var(--paper-accent); }
+.app-shell .character-import-loading-progress { background: var(--paper-soft); }
+.app-shell .character-import-loading-progress > view { background: var(--paper-accent); }
+.app-shell .character-import-loading-title { color: var(--paper-ink); }
+.app-shell .character-import-loading-detail { color: var(--paper-muted); }
+.app-shell .character-permission-row.confirmed .character-permission-check { border-color: var(--paper-accent); background: var(--paper-accent); }
+.app-shell .character-import-actions { border-color: var(--paper-line); }
+.app-shell .world-book-preview-icon { border-radius: 14px; background: var(--paper-soft); color: var(--paper-accent); }
+.app-shell .world-book-binding-row { border-color: var(--paper-line); border-radius: 14px; background: #fdfcfc; }
+.app-shell .world-book-binding-row.selected { border-color: #bda5cf; background: var(--paper-soft); }
+.app-shell .world-book-binding-row.selected .world-book-binding-check { border-color: var(--paper-accent); background: var(--paper-accent); }
+
+.app-shell .provider-avatar-modal .provider-avatar-auto-option,
+.app-shell .provider-avatar-modal .provider-avatar-custom-option,
+.app-shell .provider-avatar-modal .provider-avatar-preset {
+	border-color: var(--paper-line);
+	border-radius: 14px;
+	background: #fdfcfc;
+}
+.app-shell .provider-avatar-modal .provider-avatar-auto-option.selected,
+.app-shell .provider-avatar-modal .provider-avatar-custom-option.selected,
+.app-shell .provider-avatar-modal .provider-avatar-preset.selected {
+	border-color: #bda5cf;
+	background: var(--paper-soft);
+}
+.app-shell .attachment-preview-text { background: #efedef; color: var(--paper-ink); }
+
+.app-shell .world-book-manager-sheet .manager-heading,
+.app-shell .world-book-manager-sheet .manager-list-actions,
+.app-shell .world-book-manager-sheet .manager-editor-actions {
+	border-color: var(--paper-line);
+	background: var(--paper-bg);
+}
+.app-shell .world-book-manager-sheet .manager-heading > text { color: var(--paper-ink); line-height: 24px; }
+.app-shell .world-book-manager-sheet .manager-editor-scroll { background: var(--paper-bg); }
+.app-shell .world-book-manager-sheet .manager-book-icon { border-radius: 14px; background: var(--paper-soft); color: var(--paper-accent); }
+.app-shell .world-book-manager-sheet .manager-primary-button { background: var(--paper-accent); }
+.app-shell .world-book-manager-sheet .manager-secondary-button { border-color: var(--paper-line); background: var(--paper-soft); color: var(--paper-accent); }
+.app-shell .world-book-manager-sheet .manager-segmented { border-color: var(--paper-line); border-radius: 14px; background: #efedef; }
+.app-shell .world-book-manager-sheet .manager-segmented button,
+.app-shell .world-book-manager-sheet .manager-delete-confirm button {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 40px;
+	height: auto;
+	padding: 9px 12px;
+	border-radius: 11px;
+	line-height: 22px;
+	text-align: center;
+	white-space: normal;
+	overflow-wrap: anywhere;
+}
+.app-shell .world-book-manager-sheet .manager-segmented button.selected { background: var(--paper-soft); color: var(--paper-accent); box-shadow: none; }
+.app-shell .world-book-manager-sheet .manager-toggle.enabled,
+.app-shell .world-book-manager-sheet .manager-character-row.selected .manager-check { border-color: var(--paper-accent); background: var(--paper-accent); }
+.app-shell .world-book-manager-sheet .manager-add-rule { border-color: #bda5cf; background: var(--paper-soft); color: var(--paper-accent); }
+.app-shell .world-book-manager-sheet .manager-delete-confirm { border-radius: 14px; }
+
+.app-shell .model-popover,
+.app-shell .group-mention-popover,
+.app-shell .attachment-popover,
+.app-shell .emoji-popover,
+.app-shell .story-model-popover,
+.app-shell .story-attachment-popover {
+	--accent: var(--paper-accent);
+	--text: var(--paper-ink);
+	--muted: var(--paper-muted);
+	--soft: var(--paper-soft);
+	--border: var(--paper-line);
+	border-color: var(--paper-line);
+	border-radius: 18px;
+	background: var(--paper-bg);
+	color: var(--paper-ink);
+	box-shadow: 0 10px 28px rgba(37, 35, 42, 0.14);
+}
+.app-shell .story-bookmark-sheet .story-bookmark-toggle { border-color: var(--paper-line); border-radius: 14px; background: #fdfcfc; color: var(--paper-accent); }
+.app-shell .story-bookmark-sheet .story-bookmark-toggle.active { border-color: #bda5cf; background: var(--paper-soft); }
+.app-shell .story-model-popover button,
+.app-shell .story-attachment-popover button { line-height: 20px; }
+.app-shell .story-attachment-popover button:active,
+.app-shell .group-mention-popover button:active { background: var(--paper-soft); }
+
+/* Status messages must remain readable above dialogs, including validation errors. */
+.app-shell .toast-message {
+	z-index: 100;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: max-content;
+	max-width: calc(100% - 40px);
+	min-height: 44px;
+	padding: 11px 16px;
+	border: 1px solid var(--paper-line);
+	border-radius: 16px;
+	background: var(--paper-bg);
+	color: var(--paper-ink);
+	box-shadow: 0 6px 24px rgba(37, 35, 42, 0.16);
+	font-size: 13px;
+	line-height: 22px;
+	text-align: center;
+	white-space: normal;
+	overflow-wrap: anywhere;
+	pointer-events: none;
+}
