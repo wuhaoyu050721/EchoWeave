@@ -6,6 +6,9 @@ test.beforeEach(async ({ page, baseURL }) => {
   const observation = { errors: [], upstreamRequests: [] }
   observations.set(page, observation)
   page.on('pageerror', error => observation.errors.push(error.message))
+  page.on('console', message => {
+    if (message.type() === 'error') observation.errors.push(message.text())
+  })
   const origin = new URL(baseURL).origin
   await page.route('**/*', route => {
     const url = new URL(route.request().url())
@@ -23,6 +26,8 @@ test.afterEach(async ({ page }) => {
 
 async function setupStreamingChat(page, { segmented = false } = {}) {
   await page.goto('/preview/')
+  await expect(page).toHaveURL(/\/preview\/$/)
+  await expect(page).toHaveTitle('织语')
   await expect.poll(() => page.evaluate(() => Boolean(
     globalThis.__echoWeavePreview?.ready && !globalThis.__echoWeavePreview.initializing
   ))).toBe(true)
@@ -195,3 +200,67 @@ test('return to latest resumes following after a shallow history gesture', async
   await expect.poll(() => bottomDistance(page)).toBeLessThanOrEqual(2)
   await expect.poll(() => page.evaluate(() => globalThis.__echoWeavePreview.chatVirtualPinnedToBottom)).toBe(true)
 })
+
+for (const gesture of ['released', 'slightly reversed']) {
+  test(`a ${gesture} history touch ignores a late native bottom sample during generation`, async ({ page }, testInfo) => {
+    await setupStreamingChat(page)
+    await appendReply(page, '正在生成回答，仍然可以查看上面的历史内容。')
+    await expect.poll(() => bottomDistance(page)).toBeLessThanOrEqual(2)
+    await page.locator('.chat-scroll').hover()
+    await page.mouse.wheel(0, -88)
+    await expect.poll(() => bottomDistance(page)).toBeGreaterThan(80)
+
+    const history = await page.evaluate(({ gesture }) => {
+      const app = globalThis.__echoWeavePreview
+      const target = document.querySelector('.chat-scroll')
+      const sendTouch = (type, y) => {
+        const event = new Event(type, { bubbles: true })
+        Object.defineProperty(event, 'touches', { value: type === 'touchend' ? [] : [{ clientY: y, pageY: y }] })
+        Object.defineProperty(event, 'changedTouches', { value: [{ clientY: y, pageY: y }] })
+        target.dispatchEvent(event)
+      }
+      const sendNativeScroll = scrollTop => app.onChatScroll({
+        detail: { scrollTop, scrollHeight: target.scrollHeight }
+      })
+      sendTouch('touchstart', 200)
+      sendTouch('touchmove', 216)
+      target.scrollTop -= 16
+      sendNativeScroll(target.scrollTop)
+      if (gesture === 'slightly reversed') {
+        // A small correction within the same gesture still means reading history.
+        sendTouch('touchmove', 213)
+        target.scrollTop += 3
+        sendNativeScroll(target.scrollTop)
+      } else {
+        sendTouch('touchend', 216)
+      }
+      const top = target.scrollTop
+      // Android's scroll-view can deliver an older geometry sample after a
+      // touch callback. It must not override the reader's newer scroll intent.
+      sendNativeScroll(target.scrollHeight - target.clientHeight)
+      const pinnedAfterLateSample = app.chatVirtualPinnedToBottom
+      if (gesture === 'slightly reversed') sendTouch('touchend', 213)
+      return { top, pinnedAfterLateSample }
+    }, { gesture })
+    expect(history.pinnedAfterLateSample).toBe(false)
+    for (let index = 0; index < 3; index += 1) {
+      await appendReply(page, `继续生成第 ${index + 1} 段，读者的位置应保持不变。`)
+      await page.waitForTimeout(140)
+    }
+    expect(Math.abs(await position(page) - history.top)).toBeLessThan(3)
+    await expect(page.getByTestId('chat-jump-latest')).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath('native-history-still-generating.png') })
+    await appendReply(page, '回答已结束，仍然保留历史阅读位置。', { completed: true })
+    await page.waitForTimeout(160)
+    expect(Math.abs(await position(page) - history.top)).toBeLessThan(3)
+    await expect.poll(() => page.evaluate(() => globalThis.__echoWeavePreview.chatVirtualPinnedToBottom)).toBe(false)
+    await page.screenshot({ path: testInfo.outputPath('native-history-completed.png') })
+
+    await page.getByTestId('chat-jump-latest').click()
+    await expect.poll(() => bottomDistance(page)).toBeLessThanOrEqual(2)
+    await expect(page.getByTestId('chat-jump-latest')).toHaveCount(0)
+    await appendReply(page, '点击回到最新后重新跟随新内容。')
+    await expect.poll(() => bottomDistance(page)).toBeLessThanOrEqual(2)
+    await expect.poll(() => page.evaluate(() => globalThis.__echoWeavePreview.chatVirtualPinnedToBottom)).toBe(true)
+  })
+}

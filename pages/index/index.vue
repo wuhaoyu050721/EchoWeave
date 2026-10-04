@@ -217,7 +217,7 @@
 					<text>{{ provider.name }}</text><text>{{ provider.defaultModel }}</text>
 				</button>
 			</view>
-			<scroll-view ref="chatScroll" class="chat-scroll" :class="{ 'has-character-status': latestAssistantStatus }" scroll-y :scroll-into-view="chatScrollIntoView" tabindex="0" @scroll="onChatScroll" @wheel.passive="onChatWheel" @keydown="onChatScrollKeydown" @touchstart.passive="onChatTouchStart" @touchmove.passive="onChatTouchMove" @touchend="onChatTouchEnd" @touchcancel="onChatTouchEnd">
+			<scroll-view ref="chatScroll" class="chat-scroll" :class="{ 'has-character-status': latestAssistantStatus }" scroll-y :scroll-into-view="chatScrollIntoView" tabindex="0" @scroll="onChatScroll" @wheel.passive="onChatWheel" @keydown="onChatScrollKeydown" @touchstart.passive="onChatTouchStart" @touchmove.passive="onChatTouchMove" @touchend="onChatTouchEnd" @touchcancel="onChatTouchCancel">
 				<view v-if="messageHistoryHasMore || (messageHistoryLoading && messageItems.length)" class="chat-history-loader">
 					<button :disabled="messageHistoryLoading || ui.generating" @click="loadEarlierMessages"><ChevronDown class="chat-history-icon" :size="15" /><text>{{ messageHistoryLoading ? '加载中…' : '加载更早消息' }}</text></button>
 				</view>
@@ -969,6 +969,7 @@
 	const CHAT_VIRTUAL_MEASURE_INTERVAL = 96
 	const CHAT_HISTORY_AUTO_LOAD_THRESHOLD = 160
 	const CHAT_BOTTOM_EPSILON = 2
+	const CHAT_SCROLL_RESUME_WINDOW = 1500
 	const MAX_AVATAR_CACHE_ITEMS = 32
 	const STREAMING_RENDER_INTERVAL = 40
 	const SEGMENT_REVEAL_MIN_DELAY = 320
@@ -1005,6 +1006,9 @@
 				chatScrollIntoView: '', chatScrollRevision: 0, chatScrollTimer: null,
 				chatVirtualScrollTop: 0, chatVirtualViewportHeight: 720, chatVirtualPinnedToBottom: true,
 				chatScrollPaused: false, chatScrollLastTop: null, chatScrollTouchY: null, chatScrollTouchDirection: 0,
+				chatScrollResumeAllowed: false, chatScrollTouchStartY: null, chatScrollTouchReadHistory: false,
+				chatScrollResumeUntil: 0, chatScrollResumeSample: null, chatScrollEventWatermark: 0,
+				chatScrollViewportMeasured: false, chatScrollViewportRevision: 0,
 				chatVirtualMeasurementRevision: 0, chatVirtualMeasurements: markRaw(new Map()), chatVirtualScrollTimer: null, chatVirtualMeasureTimer: null, chatVirtualSuppressMeasurementScroll: false,
 				chatHistoryAutoLoadArmed: false, chatHistoryAutoLoadTimer: null,
 				searchQuery: '', searchOpen: false, homeMenuOpen: false, composerDraftStore: markRaw(createComposerDraftStore(reactive)), composerInputHeight: COMPOSER_MIN_HEIGHT,
@@ -3951,6 +3955,17 @@
 				this.chatScrollLastTop = null
 				this.chatScrollTouchY = null
 				this.chatScrollTouchDirection = 0
+				this.chatScrollTouchStartY = null
+				this.chatScrollTouchReadHistory = false
+				this.chatScrollResumeAllowed = false
+				this.chatScrollResumeUntil = 0
+				this.chatScrollResumeSample = null
+				this.chatScrollEventWatermark = 0
+				this.chatScrollViewportMeasured = false
+				const viewportRevision = ++this.chatScrollViewportRevision
+				this.$nextTick(() => {
+					if (viewportRevision === this.chatScrollViewportRevision) this.refreshChatScrollViewport()
+				})
 				this.chatVirtualSuppressMeasurementScroll = false
 				this.disarmChatHistoryAutoLoad()
 			},
@@ -4009,64 +4024,188 @@
 				const position = scrollTop ?? (domScrollable ? domTop : this.chatScrollLastTop) ?? this.chatVirtualScrollTop
 				// Capture the real position before unpinning: the virtual window ignores it while pinned.
 				this.chatVirtualScrollTop = Math.max(0, Number(position) || 0)
+				this.chatScrollLastTop = this.chatVirtualScrollTop
 				this.chatVirtualViewportHeight = Number(target?.clientHeight) || this.chatVirtualViewportHeight
 				this.chatScrollPaused = true
 				this.chatVirtualPinnedToBottom = false
+				this.chatScrollResumeAllowed = false
+				this.chatScrollResumeUntil = 0
+				this.chatScrollResumeSample = null
 				this.cancelPendingChatScroll()
 				clearTimeout(this.chatVirtualScrollTimer)
 				this.chatVirtualScrollTimer = null
 				this._chatVirtualPendingScroll = null
 			},
 			onChatWheel(event) {
+				this.recordChatScrollInput(event)
+				this.chatScrollResumeSample = null
 				if (Number(event?.deltaY) < 0) this.pauseChatAutoFollow()
+				else if (Number(event?.deltaY) > 0) this.allowChatFollowResume()
 			},
 			onChatScrollKeydown(event) {
 				if (event?.target?.closest?.('input, textarea, [contenteditable="true"]')) return
+				this.recordChatScrollInput(event)
+				this.chatScrollResumeSample = null
 				if (['ArrowUp', 'PageUp', 'Home'].includes(event?.key) || (event?.key === ' ' && event?.shiftKey)) this.pauseChatAutoFollow()
+				else if (['ArrowDown', 'PageDown', 'End'].includes(event?.key) || (event?.key === ' ' && !event?.shiftKey)) this.allowChatFollowResume()
 			},
 			onChatTouchStart(event) {
 				const touch = event?.touches?.[0] || event?.changedTouches?.[0]
 				const y = Number(touch?.clientY ?? touch?.pageY)
 				if (!Number.isFinite(y)) return
+				this.recordChatScrollInput(event)
 				this.chatScrollTouchY = y
+				this.chatScrollTouchStartY = y
 				this.chatScrollTouchDirection = 0
+				this.chatScrollTouchReadHistory = false
+				this.chatScrollResumeAllowed = false
+				this.chatScrollResumeUntil = 0
+				this.chatScrollResumeSample = null
 				this.cancelPendingChatScroll()
+				clearTimeout(this.chatVirtualScrollTimer)
+				this.chatVirtualScrollTimer = null
+				this._chatVirtualPendingScroll = null
+				this.refreshChatScrollViewport()
 			},
 			onChatTouchMove(event) {
 				if (this.chatScrollTouchY === null) return
 				const touch = event?.touches?.[0] || event?.changedTouches?.[0]
 				const y = Number(touch?.clientY ?? touch?.pageY)
 				if (!Number.isFinite(y)) return
-				const delta = y - this.chatScrollTouchY
+				const delta = y - this.chatScrollTouchStartY
 				if (Math.abs(delta) < 2) return
 				this.chatScrollTouchY = y
-				this.chatScrollTouchDirection = delta > 0 ? -1 : 1
-				// A downward finger movement reads earlier messages; act before the native scroll callback.
-				if (delta > 0) this.pauseChatAutoFollow()
+				// Once this gesture reads history, a small reverse movement cannot authorize following.
+				if (delta > 0) this.chatScrollTouchReadHistory = true
+				if (this.chatScrollTouchReadHistory) {
+					this.chatScrollTouchDirection = -1
+					this.pauseChatAutoFollow()
+				} else {
+					this.chatScrollTouchDirection = 1
+					this.allowChatFollowResume()
+				}
 			},
-			onChatTouchEnd() {
+			onChatTouchEnd(event) {
+				// Native scroll-view can consume touchmove; the final coordinates still express intent.
+				this.onChatTouchMove(event)
 				this.chatScrollTouchY = null
-				this.chatScrollTouchDirection = 0
+				this.chatScrollTouchStartY = null
+				if (this.canResumeChatFollow() && this.chatScrollResumeSample &&
+					Date.now() - this.chatScrollResumeSample.observedAt <= CHAT_SCROLL_RESUME_WINDOW) {
+					// Apply native movement held until changedTouches confirmed a downward gesture.
+					this.chatScrollLastTop = this.chatScrollResumeSample.scrollTop
+					this.chatVirtualScrollTop = this.chatScrollResumeSample.scrollTop
+				}
+				this.tryResumeChatFollow()
 				if (!this.chatScrollPaused && this.chatVirtualPinnedToBottom) this.scrollChatToBottom()
 			},
+			onChatTouchCancel() {
+				this.chatScrollTouchY = null
+				this.chatScrollTouchStartY = null
+				this.chatScrollTouchDirection = -1
+				this.chatScrollTouchReadHistory = true
+				this.pauseChatAutoFollow()
+			},
+			recordChatScrollInput(event) {
+				const timeStamp = Number(event?.timeStamp)
+				if (!Number.isFinite(timeStamp) || timeStamp <= 0) return
+				// Bridges may use epoch timestamps while DOM events use a monotonic clock.
+				const sameClock = (timeStamp >= 1e12) === (this.chatScrollEventWatermark >= 1e12)
+				this.chatScrollEventWatermark = sameClock ? Math.max(this.chatScrollEventWatermark, timeStamp) : timeStamp
+			},
+			allowChatFollowResume() {
+				this.chatScrollResumeAllowed = true
+				this.chatScrollResumeUntil = Date.now() + CHAT_SCROLL_RESUME_WINDOW
+			},
+			canResumeChatFollow() {
+				if (Date.now() > this.chatScrollResumeUntil) this.chatScrollResumeAllowed = false
+				return this.chatScrollResumeAllowed
+			},
+			tryResumeChatFollow() {
+				const sample = this.chatScrollResumeSample
+				if (!this.chatScrollPaused || !sample || !this.canResumeChatFollow()) return false
+				if (Date.now() - sample.observedAt > CHAT_SCROLL_RESUME_WINDOW) return false
+				const target = this.chatScrollTarget()
+				const domHeight = Number(target?.clientHeight)
+				const height = domHeight > 0 ? domHeight : (this.chatScrollViewportMeasured ? this.chatVirtualViewportHeight : 0)
+				const liveDomGeometry = domHeight > 0 && Number(target?.scrollHeight) > 0 && Number.isFinite(Number(target?.scrollTop))
+				const top = liveDomGeometry ? Number(target.scrollTop) : sample.scrollTop
+				const contentHeight = liveDomGeometry ? Number(target.scrollHeight) : sample.scrollHeight
+				if (!(height > 0 && contentHeight > 0) || Math.abs(Math.max(0, contentHeight - height) - top) > CHAT_BOTTOM_EPSILON) return false
+				this.chatScrollPaused = false
+				this.chatVirtualPinnedToBottom = true
+				this.chatScrollLastTop = top
+				this.chatScrollResumeAllowed = false
+				this.chatScrollResumeSample = null
+				return true
+			},
+			refreshChatScrollViewport() {
+				const revision = ++this.chatScrollViewportRevision
+				const height = Number(this.chatScrollTarget()?.clientHeight)
+				this.chatScrollViewportMeasured = height > 0
+				if (height > 0) {
+					this.chatVirtualViewportHeight = height
+					return
+				}
+				const conversationId = this.ui.activeConversationId
+				const loadRevision = this.chatLoadRevision
+				try {
+					const query = getUniApi()?.createSelectorQuery?.()
+					if (!query) return
+					// The outer scroll-view has header padding; measure the actual inner viewport.
+					query.in(this).select('.chat-scroll .uni-scroll-view .uni-scroll-view').boundingClientRect(rect => {
+						if (revision !== this.chatScrollViewportRevision || loadRevision !== this.chatLoadRevision ||
+							conversationId !== this.ui.activeConversationId || this.ui.screen !== 'chat') return
+						const measuredHeight = Number(rect?.height)
+						if (!Number.isFinite(measuredHeight) || measuredHeight <= 0) return
+						this.chatVirtualViewportHeight = measuredHeight
+						this.chatScrollViewportMeasured = true
+						if (this.tryResumeChatFollow()) this.scrollChatToBottom()
+					}).exec()
+				} catch (_) {
+					// A virtual-list estimate must never be used as proof that the viewport reached the end.
+				}
+			},
 			onChatScroll(event) {
+				const timeStamp = Number(event?.timeStamp)
+				const sameClock = (timeStamp >= 1e12) === (this.chatScrollEventWatermark >= 1e12)
+				if (sameClock && Number.isFinite(timeStamp) && timeStamp > 0 && timeStamp < this.chatScrollEventWatermark) return
 				const detail = event?.detail || {}
 				const target = this.chatScrollTarget()
-				const rawScrollTop = Number(detail.scrollTop ?? event?.currentTarget?.scrollTop)
+				// Browser and App WebView containers can expose newer geometry than a bridged event.
+				const liveDomGeometry = Number(target?.clientHeight) > 0 && Number(target?.scrollHeight) > 0 && Number.isFinite(Number(target?.scrollTop))
+				const rawScrollTop = Number(liveDomGeometry ? target.scrollTop : (detail.scrollTop ?? event?.currentTarget?.scrollTop))
 				if (!Number.isFinite(rawScrollTop)) return
 				const scrollTop = Math.max(0, rawScrollTop)
-				const scrollHeight = Number(detail.scrollHeight ?? event?.currentTarget?.scrollHeight) || Number(target?.scrollHeight) || 0
-				const viewportHeight = Number(target?.clientHeight) || this.chatVirtualViewportHeight || 720
-				const distanceToBottom = Math.max(0, scrollHeight - scrollTop - viewportHeight)
+				const scrollHeight = Number(liveDomGeometry ? target.scrollHeight : (detail.scrollHeight ?? event?.currentTarget?.scrollHeight)) || Number(target?.scrollHeight) || 0
+				const domHeight = Number(target?.clientHeight)
+				const measuredHeight = domHeight > 0 ? domHeight : (this.chatScrollViewportMeasured ? this.chatVirtualViewportHeight : 0)
+				const viewportHeight = measuredHeight || this.chatVirtualViewportHeight || 720
+				const distanceToBottom = measuredHeight > 0 && scrollHeight > 0 ? Math.max(0, scrollHeight - measuredHeight) - scrollTop : Infinity
+				const atBottom = Math.abs(distanceToBottom) <= CHAT_BOTTOM_EPSILON
+				if (domHeight > 0) {
+					this.chatVirtualViewportHeight = domHeight
+					this.chatScrollViewportMeasured = true
+				}
 				const previousTop = this.chatScrollLastTop
 				const movingUp = previousTop !== null && scrollTop < previousTop - 1
 				const movingDown = previousTop !== null && scrollTop > previousTop + 1
-				this.chatScrollLastTop = scrollTop
-				if (distanceToBottom > CHAT_BOTTOM_EPSILON && (movingUp || previousTop === null)) this.pauseChatAutoFollow(scrollTop)
-				if (this.chatScrollPaused && distanceToBottom <= CHAT_BOTTOM_EPSILON && movingDown && this.chatScrollTouchDirection !== -1) {
-					this.chatScrollPaused = false
-					this.chatVirtualPinnedToBottom = true
+				const resumeAllowed = this.canResumeChatFollow()
+				// Deferred movement is still a newer event; older samples cannot replace it.
+				this.recordChatScrollInput(event)
+				if (movingDown && (resumeAllowed || (this.chatScrollTouchY !== null && !this.chatScrollTouchReadHistory))) {
+					this.chatScrollResumeSample = { scrollTop, scrollHeight, observedAt: Date.now() }
+					if (resumeAllowed) this.chatScrollResumeUntil = Date.now() + CHAT_SCROLL_RESUME_WINDOW
 				}
+				// A delayed native bottom event must not move the virtual window either.
+				if (!liveDomGeometry && this.chatScrollPaused && movingDown && !resumeAllowed &&
+					(atBottom || this.chatScrollTouchReadHistory || this.chatScrollTouchY !== null)) return
+				this.chatScrollLastTop = scrollTop
+				if (!atBottom && (movingUp || (previousTop === null && measuredHeight > 0 && distanceToBottom > CHAT_BOTTOM_EPSILON))) {
+					if (this.chatScrollTouchY !== null && movingUp) this.chatScrollTouchReadHistory = true
+					this.pauseChatAutoFollow(scrollTop)
+				}
+				if (atBottom && movingDown) this.tryResumeChatFollow()
 				this._chatVirtualPendingScroll = {
 					scrollTop,
 					scrollHeight,
@@ -4080,7 +4219,7 @@
 					this._chatVirtualPendingScroll = null
 					if (!pending) return
 					this.chatVirtualScrollTop = pending.scrollTop
-					this.chatVirtualViewportHeight = pending.viewportHeight
+					// A queued sample may predate a native viewport measurement; never replace that measurement.
 					// Follow intent is updated synchronously; a queued geometry sample must never restore it.
 					this.$nextTick(() => this.scheduleChatVirtualMeasurement())
 					if (this.chatHistoryAutoLoadArmed && !pending.pinnedToBottom &&
@@ -4104,7 +4243,10 @@
 			},
 			chatScrollTarget() {
 				const ref = Array.isArray(this.$refs.chatScroll) ? this.$refs.chatScroll[0] : this.$refs.chatScroll
-				return ref?.$el || ref || null
+				const target = ref?.$el || ref || null
+				const inner = target?.querySelector?.('.uni-scroll-view-content')?.parentElement
+				if (inner) return inner
+				return String(target?.tagName || '').toLowerCase() === 'uni-scroll-view' ? null : target
 			},
 			captureChatScrollSnapshot(anchorId) {
 				const target = this.chatScrollTarget()
@@ -4151,8 +4293,7 @@
 					this.chatScrollIntoView = `chat-bottom-${revision}`
 					this.$nextTick(() => {
 						if (revision !== this.chatScrollRevision || !this.chatVirtualPinnedToBottom || this.chatScrollPaused || this.chatScrollTouchY !== null) return
-						const ref = Array.isArray(this.$refs.chatScroll) ? this.$refs.chatScroll[0] : this.$refs.chatScroll
-						const target = ref?.$el || ref
+						const target = this.chatScrollTarget()
 						if (typeof target?.scrollTo === 'function') target.scrollTo({ top: target.scrollHeight })
 						else if (target && 'scrollTop' in target) target.scrollTop = target.scrollHeight
 					})
@@ -4165,6 +4306,11 @@
 					this.chatScrollPaused = false
 					this.chatScrollTouchY = null
 					this.chatScrollTouchDirection = 0
+					this.chatScrollTouchStartY = null
+					this.chatScrollTouchReadHistory = false
+					this.chatScrollResumeAllowed = false
+					this.chatScrollResumeUntil = 0
+					this.chatScrollResumeSample = null
 					this.chatVirtualPinnedToBottom = true
 				}
 				if (immediate) {

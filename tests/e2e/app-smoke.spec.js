@@ -214,6 +214,7 @@ test('core local workflow remains usable', async ({ page }) => {
     preview.loadEarlierMessages = () => { calls += 1 }
     preview.messageHistoryHasMore = true
     preview.chatHistoryAutoLoadArmed = true
+    scroll.scrollTop = 32
     preview.onChatScroll({
       detail: {
         scrollTop: 32,
