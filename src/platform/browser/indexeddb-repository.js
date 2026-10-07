@@ -600,14 +600,21 @@ export class IndexedDbRepository {
     await transactionToPromise(transaction)
   }
 
-  async importRecordsIfUnchanged({ entityType, entityId, expectedSnapshot, records }) {
-    const storeName = SYNC_STORE_BY_ENTITY[entityType]
-    if (!storeName) throw new Error('Unsupported sync entity type')
+  async importRecordsIfUnchanged({ entityType, entityId, expectedSnapshot, records, additionalSnapshots = [] }) {
+    const snapshots = [{ entityType, entityId, expectedSnapshot }, ...additionalSnapshots].map(snapshot => {
+      if (!Object.prototype.hasOwnProperty.call(SYNC_STORE_BY_ENTITY, snapshot.entityType)) throw new Error('Unsupported sync entity type')
+      return { ...snapshot, storeName: SYNC_STORE_BY_ENTITY[snapshot.entityType] }
+    })
     const transaction = this.#transaction(IMPORT_STORE_NAMES, 'readwrite')
     const completion = transactionToPromise(transaction)
     try {
-      const stored = await requestToPromise(transaction.objectStore(storeName).get(entityId))
-      if (!matchesSyncSnapshot(stored, expectedSnapshot, entityType === 'settings')) {
+      // 角色与关联资源必须一起校验，避免覆盖在预览后被编辑或删除的世界书。
+      const storedSnapshots = await Promise.all(snapshots.map(snapshot => (
+        requestToPromise(transaction.objectStore(snapshot.storeName).get(snapshot.entityId))
+      )))
+      if (snapshots.some((snapshot, index) => !matchesSyncSnapshot(
+        storedSnapshots[index], snapshot.expectedSnapshot, snapshot.entityType === 'settings'
+      ))) {
         await completion
         return false
       }

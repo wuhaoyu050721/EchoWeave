@@ -314,10 +314,13 @@ function isExternalAssetUri(value) {
 }
 
 async function characterAssetsForExport(character, options) {
-  if (Array.isArray(options.characterAssets)) return options.characterAssets.filter(asset => asset && !asset.deletedAt)
+  // 更新卡片后旧资源仍供历史消息读取；导出仅使用当前卡片引用，避免同名资源命中旧内容。
+  const activeIds = Array.isArray(character.assetIds) ? new Set(character.assetIds) : null
+  const isCurrentAsset = asset => asset && !asset.deletedAt && (!activeIds || activeIds.has(asset.id))
+  if (Array.isArray(options.characterAssets)) return options.characterAssets.filter(isCurrentAsset)
   const repository = options.repository
   if (typeof repository?.listCharacterAssets === 'function') {
-    return (await repository.listCharacterAssets(character.id)).filter(asset => asset && !asset.deletedAt)
+    return (await repository.listCharacterAssets(character.id)).filter(isCurrentAsset)
   }
   if (typeof repository?.getCharacterAsset === 'function') {
     const assets = await Promise.all(uniqueIds(character.assetIds).map(id => repository.getCharacterAsset(id)))

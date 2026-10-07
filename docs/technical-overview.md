@@ -50,6 +50,16 @@
 
 [interaction-feedback.css](../src/styles/interaction-feedback.css) 提供短时的菜单、提示、按压和焦点反馈，并响应 `prefers-reduced-motion`。聊天支持 Ctrl/Cmd + Enter 发送，普通 Enter 保留换行；输入法确认和按键重复不应触发重复发送。故事的空输入通过专门的续写操作处理。
 
+## 原位更新角色卡
+
+角色详情的“更新角色卡”复用 PNG 解析与敏感扩展确认流程，由 [updateTransaction.js](../src/features/character-import/updateTransaction.js) 负责更新。目标由用户选定的角色 ID 决定，不根据姓名或文件哈希猜测；普通导入仍创建新角色。
+
+更新仅替换卡片字段及当前资源引用，保留角色 ID、创建时间、所属范围、云备份偏好和故事记忆。专属且未共享的内嵌世界书沿用原 ID 更新；新版移除的内嵌世界书解除角色默认绑定，并保留为仅能被故事显式选择的记录，避免旧故事及备份产生悬空引用。单独绑定、共享、全局和故事自动记忆世界书保持原状。历史资源仍留存，以便旧消息的头像引用及备份正常读取；导出仅使用当前卡片的资源 ID，避免同名资源误用旧版本。
+
+IndexedDB 与 SQLite 的 `importRecordsIfUnchanged` 在一个事务中检查角色及待改写世界书的快照，并写入角色、世界书和新资源。保存失败或目标发生变化时不会部分更新；会话、消息和旧开场白不参与写入。选择文件时捕获工作区与角色快照，过期的异步结果不能写入其他工作区。界面在生成中暂不允许更新，下一次生成的提示词解析器会重新读取当前角色与世界书。
+
+回归覆盖见 [character-update.test.js](../tests/character-update.test.js) 和 [character-update.spec.js](../tests/e2e/character-update.spec.js)。两端存储适配器回归与浏览器手机视口验证不等同于 Android APK 真机验收。
+
 ## 聊天请求、空回复与持久化
 
 [ProviderRouter](../src/providers/provider-router.js) 路由到 [OpenAI 兼容适配器](../src/providers/openai-provider.js) 或 [Gemini 适配器](../src/providers/gemini-provider.js)。界面中的服务商名称和图标不代表另有一套原生协议；实际请求使用接口配置选定的协议。

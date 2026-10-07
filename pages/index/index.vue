@@ -127,6 +127,7 @@
 				@request-avatar-change="requestCharacterAvatarChange"
 				@export-json="exportCharacterJson"
 				@export-png="exportCharacterPng"
+				@update-card="requestCharacterCardUpdate"
 				@delete-character="deleteCharacterFromDetails"
 			/>
 		</template>
@@ -623,7 +624,7 @@
 			<button v-for="item in navigationItems" :key="item.id" class="nav-item" :data-tab="item.id" :class="{ active: ui.activeTab === item.id }" :aria-current="ui.activeTab === item.id ? 'page' : undefined" @click="goToTab(item.id)"><component :is="iconMap[item.icon]" :size="24" /><text>{{ item.label }}</text></button>
 		</view>
 
-		<input ref="characterCardInput" class="hidden-file-input" type="file" accept="image/png,.png" @change="handleCharacterCardSelection" />
+		<input ref="characterCardInput" class="hidden-file-input" type="file" accept="image/png,.png" @change="handleCharacterCardSelection" @cancel="closeCharacterImportPreview" />
 		<input ref="characterAvatarInput" class="hidden-file-input" type="file" accept="image/*" @change="handleCharacterAvatarSelection" />
 		<view
 			v-if="characterImportBusy"
@@ -643,6 +644,11 @@
 			<view class="character-import-modal" role="dialog" aria-modal="true" :aria-label="characterImportTitle">
 				<view class="modal-heading"><text>{{ characterImportTitle }}</text><button aria-label="关闭角色卡预览" :disabled="characterImportBusy" @click="closeCharacterImportPreview"><X :size="19" /></button></view>
 				<scroll-view class="character-import-content" scroll-y>
+					<view v-if="isCharacterCardUpdate" class="character-update-notice">
+						<text>更新“{{ characterImportSession.characterName }}”</text>
+						<text>新版设定、头像和内嵌世界书将替换原卡内容；手动关联的世界书和故事记忆会保留。</text>
+						<text>已有对话和消息记录保持不变，后续回复使用新版设定。新版问候语仅用于新建聊天。</text>
+					</view>
 					<view class="character-preview-identity">
 						<ProviderLogo class="character-preview-avatar" :src="characterImportPreview.character.avatarDataUrl" :alt="characterImportPreview.character.name" mode="aspectFill" />
 						<view><text class="character-preview-name">{{ characterImportPreview.character.name }}</text><text>{{ characterImportPreview.character.sourceVersion.toUpperCase() }} · {{ formatAttachmentSize(characterImportPreview.source.byteSize) }}</text></view>
@@ -660,8 +666,8 @@
 					</button>
 				</scroll-view>
 				<view class="character-import-actions">
-					<button class="secondary-button" :disabled="characterImportBusy" @click="commitCharacterPreview(false)">{{ characterImportSecondaryLabel }}</button>
-					<button class="primary-button" :disabled="characterImportBusy" @click="commitCharacterPreview(true)">{{ characterImportBusy ? '导入中...' : characterImportPrimaryLabel }}</button>
+					<button class="secondary-button" :disabled="characterImportBusy" @click="isCharacterCardUpdate ? closeCharacterImportPreview() : commitCharacterPreview(false)">{{ characterImportSecondaryLabel }}</button>
+					<button class="primary-button" :disabled="characterImportBusy" @click="commitCharacterPreview(!isCharacterCardUpdate)">{{ characterImportBusy ? (isCharacterCardUpdate ? '更新中...' : '导入中...') : characterImportPrimaryLabel }}</button>
 				</view>
 			</view>
 		</view>
@@ -945,7 +951,7 @@
 	import { createImageExportFileName, createJsonExportFileName, downloadImageInBrowser, exportBytesToDownloads, exportTextToDownloads, saveImageToPhotoAlbum } from '../../src/platform/app/app-file-exporter.js'
 	import { preserveServiceIdentity } from '../../src/app/vue-service-container.js'
 	import { TEXT_ATTACHMENT_ACCEPT, formatAttachmentSize } from '../../src/core/attachment-policy.js'
-	import { commitCharacterImport, inspectCharacterCard } from '../../src/features/character-import/importCharacterCard.js'
+	import { commitCharacterImport, commitCharacterUpdate, inspectCharacterCard } from '../../src/features/character-import/importCharacterCard.js'
 	import { createCharacterManager } from '../../src/features/character-management.js'
 	import { applyCharacterEdits, createCustomCharacter } from '../../src/features/character-editor.js'
 	import { commitWorldBookImport, inspectWorldBook } from '../../src/features/world-book-import/importWorldBook.js'
@@ -1015,7 +1021,7 @@
 				groupEditorSaving: false, groupEditorReturnScreen: 'conversations',
 				conversationActionSheet: null, conversationActionResolver: null, appDialog: null, appDialogValue: '', appDialogResolver: null,
 				contactSearchQuery: '', storySearchQuery: '', contactSortMode: 'name', customCharacterDraft: null, customCharacterAvatar: null, characterDetailEditing: false, characterSaveBusy: false, pendingCharacterAvatarId: '',
-				characterImportBusy: false, characterImportStage: '', characterImportPreview: null, characterImportConfirmed: false, characterImportTarget: 'contacts',
+				characterImportBusy: false, characterImportStage: '', characterImportPreview: null, characterImportConfirmed: false, characterImportTarget: 'contacts', characterImportSession: null,
 				worldBookManagerOpen: false, worldBookImportBusy: false, worldBookImportPreview: null, worldBookImportConfirmed: false,
 				worldBookApplyToAll: true, worldBookSelectedCharacterIds: [],
 				attachmentInputContext: null, attachmentPreview: null, imageDownloadBusy: false,
@@ -1163,7 +1169,7 @@
 			},
 			characterStatusSettingLabel() { return this.characterStatusEnabled ? '每轮返回并更新角色状态' : '已关闭，仅返回对话正文' },
 			characterImportLoadingTitle() {
-				if (this.characterImportStage === 'saving') return '正在导入角色卡'
+				if (this.characterImportStage === 'saving') return this.isCharacterCardUpdate ? '正在更新角色卡' : '正在导入角色卡'
 				if (this.characterImportStage === 'selecting') return '正在读取角色卡'
 				return '正在解析角色卡'
 			},
@@ -1403,9 +1409,10 @@
 				if (this.ui.generationMode === 'image') return '描述要生成的图片...'
 				return this.activeStoryConversation ? '输入事件走向，留空点发送可续写' : '输入消息'
 			},
-			characterImportTitle() { return this.characterImportTarget === 'story' ? '导入故事角色卡' : '导入角色卡' },
-			characterImportSecondaryLabel() { return this.characterImportTarget === 'story' ? '仅保存到故事' : '仅保存' },
-			characterImportPrimaryLabel() { return this.characterImportTarget === 'story' ? '导入并开始故事' : '导入并新建聊天' },
+			isCharacterCardUpdate() { return Boolean(this.characterImportSession?.characterId) },
+			characterImportTitle() { return this.isCharacterCardUpdate ? '更新角色卡' : this.characterImportTarget === 'story' ? '导入故事角色卡' : '导入角色卡' },
+			characterImportSecondaryLabel() { return this.isCharacterCardUpdate ? '取消' : this.characterImportTarget === 'story' ? '仅保存到故事' : '仅保存' },
+			characterImportPrimaryLabel() { return this.isCharacterCardUpdate ? '确认更新' : this.characterImportTarget === 'story' ? '导入并开始故事' : '导入并新建聊天' },
 			canSend() {
 				return !this.composerDraft.sending && (canSendMessage(this.ui, this.draftMessage, Boolean(this.activeProvider), this.pendingAttachments.length, this.attachmentProcessing) ||
 					this.canStoryContinue)
@@ -2211,66 +2218,133 @@
 			openStoryCharacterCardPicker(source = 'file') {
 				this.openCharacterCardPicker(source, 'story')
 			},
-			openCharacterCardPicker(source = 'file', target = 'contacts') {
-				if (this.characterImportBusy) return
+			requestCharacterCardUpdate({ characterId } = {}) {
+				if (this.characterImportBusy || this.characterSaveBusy) return
+				const character = this.characterItems.find(item => item.id === characterId && !item.deletedAt)
+				if (!character || this.customCharacterDraft) return
+				if (this.characterCardUpdateBlocked()) return
+				this.openCharacterCardPicker('file', 'contacts', character)
+			},
+			characterCardUpdateBlocked() {
+				if (!this.ui.generating && !this.services?.chatService?.activeRequest) return false
+				this.showToast('请等待当前回复完成，或停止生成后再更新角色卡')
+				return true
+			},
+			isCurrentCharacterImport(session) {
+				return Boolean(session && session === this.characterImportSession && session.services === this.services && session.revision === this.dataLoadRevision)
+			},
+			resetCharacterImport() {
+				this.characterImportSession = null
+				this.characterImportPreview = null
+				this.characterImportConfirmed = false
+				this.characterImportTarget = 'contacts'
+				this.characterImportBusy = false
+				this.characterImportStage = ''
+			},
+			openCharacterCardPicker(source = 'file', target = 'contacts', character = null) {
+				if (this.characterImportBusy || !this.services?.repository) return
+				this.resetCharacterImport()
 				this.characterImportTarget = target === 'story' ? 'story' : 'contacts'
-				if (this.services?.nativeCharacterCardPicker) {
-					this.pickNativeCharacterCard(source)
+				const session = markRaw({
+					services: this.services,
+					revision: this.dataLoadRevision,
+					target: this.characterImportTarget,
+					characterId: character?.id || null,
+					characterName: character?.name || '',
+					expectedCharacter: null,
+					// 在选择文件前读取原卡，用于发现预览期间的编辑、删除或同步冲突。
+					snapshot: character ? this.services.repository.getCharacter(character.id).then(
+						value => ({ character: value }), error => ({ error })
+					) : null
+				})
+				this.characterImportSession = session
+				if (session.services.nativeCharacterCardPicker) {
+					this.pickNativeCharacterCard(source, session)
 					return
 				}
 				this.$nextTick(() => {
+					if (!this.isCurrentCharacterImport(session)) return
 					const target = this.$refs.characterCardInput
 					const input = Array.isArray(target) ? target[0] : target
 					if (input?.click) input.click()
-					else this.handleError(new Error('当前环境无法打开角色卡文件选择器'), '角色卡选择失败')
+					else {
+						this.resetCharacterImport()
+						this.handleError(new Error('当前环境无法打开角色卡文件选择器'), '角色卡选择失败')
+					}
 				})
 			},
-			async pickNativeCharacterCard(source) {
+			async pickNativeCharacterCard(source, session = this.characterImportSession) {
+				if (!this.isCurrentCharacterImport(session)) return
 				this.characterImportBusy = true
 				this.characterImportStage = 'selecting'
 				this.errorMessage = ''
 				try {
-					const file = await this.services.nativeCharacterCardPicker.pick(source)
-					if (file) await this.inspectSelectedCharacterCard(file)
+					const file = await session.services.nativeCharacterCardPicker.pick(source)
+					if (!this.isCurrentCharacterImport(session)) return
+					if (file) await this.inspectSelectedCharacterCard(file, session)
+					else this.resetCharacterImport()
 				} catch (error) {
-					this.handleError(error, '角色卡识别失败')
+					if (this.isCurrentCharacterImport(session)) {
+						this.resetCharacterImport()
+						this.handleError(error, '角色卡识别失败')
+					}
 				} finally {
-					this.characterImportBusy = false
-					this.characterImportStage = ''
+					if (this.isCurrentCharacterImport(session)) {
+						this.characterImportBusy = false
+						this.characterImportStage = ''
+					}
 				}
 			},
 			async handleCharacterCardSelection(event) {
 				const input = event?.target
 				const file = input?.files?.[0]
-				if (!file || this.characterImportBusy) return
+				const session = this.characterImportSession
+				if (!file || this.characterImportBusy || !this.isCurrentCharacterImport(session)) return
 				this.characterImportBusy = true
 				this.characterImportStage = 'parsing'
 				this.errorMessage = ''
 				try {
-					await this.inspectSelectedCharacterCard(file)
+					await this.inspectSelectedCharacterCard(file, session)
 				} catch (error) {
-					this.handleError(error, '角色卡识别失败')
+					if (this.isCurrentCharacterImport(session)) {
+						this.resetCharacterImport()
+						this.handleError(error, '角色卡识别失败')
+					}
 				} finally {
-					this.characterImportBusy = false
-					this.characterImportStage = ''
+					if (this.isCurrentCharacterImport(session)) {
+						this.characterImportBusy = false
+						this.characterImportStage = ''
+					}
 					if (input) input.value = ''
 				}
 			},
-			async inspectSelectedCharacterCard(file) {
+			async inspectSelectedCharacterCard(file, session = this.characterImportSession) {
+				if (!this.isCurrentCharacterImport(session)) return
 				this.characterImportStage = 'parsing'
 				await this.$nextTick()
 				await new Promise(resolve => setTimeout(resolve, 16))
-				this.characterImportPreview = markRaw(await inspectCharacterCard(file))
+				if (!this.isCurrentCharacterImport(session)) return
+				if (session.snapshot) {
+					const snapshot = await session.snapshot
+					if (!this.isCurrentCharacterImport(session)) return
+					if (snapshot.error) throw snapshot.error
+					if (!snapshot.character || snapshot.character.deletedAt) throw new Error('原角色已被删除，请返回联系人重新选择')
+					session.expectedCharacter = snapshot.character
+				}
+				const preview = await inspectCharacterCard(file)
+				if (!this.isCurrentCharacterImport(session)) return
+				this.characterImportPreview = markRaw(preview)
 				this.characterImportConfirmed = !this.characterImportPreview.requiresSensitiveExtensionConfirmation
 			},
 			closeCharacterImportPreview() {
 				if (this.characterImportBusy) return
-				this.characterImportPreview = null
-				this.characterImportConfirmed = false
-				this.characterImportTarget = 'contacts'
+				this.resetCharacterImport()
 			},
 			async commitCharacterPreview(openChatAfterImport) {
 				if (!this.characterImportPreview || this.characterImportBusy) return
+				const session = this.characterImportSession
+				if (!this.isCurrentCharacterImport(session)) { this.resetCharacterImport(); return }
+				if (session.characterId && this.characterCardUpdateBlocked()) return
 				if (this.characterImportPreview.requiresSensitiveExtensionConfirmation && !this.characterImportConfirmed) {
 					this.showToast('请先确认高级扩展将保持禁用')
 					return
@@ -2278,13 +2352,34 @@
 				this.characterImportBusy = true
 				this.characterImportStage = 'saving'
 				this.errorMessage = ''
-				const importTarget = this.characterImportTarget
-				const storyImport = importTarget === 'story'
+				const storyImport = session.target === 'story'
+				let updated = false
 				try {
 					await this.$nextTick()
 					await new Promise(resolve => setTimeout(resolve, 16))
+					if (!this.isCurrentCharacterImport(session)) return
+					if (session.characterId) {
+						if (this.characterCardUpdateBlocked()) return
+						await commitCharacterUpdate(this.characterImportPreview, {
+							repository: session.services.repository,
+							characterId: session.characterId,
+							expectedCharacter: session.expectedCharacter,
+							allowSensitiveExtensions: this.characterImportConfirmed
+						})
+						updated = true
+						if (!this.isCurrentCharacterImport(session)) return
+						this.characterImportPreview = null
+						// 等待更新前的读取结束，再读取新版本，避免复用旧列表请求。
+						await Promise.allSettled([this.characterLoadPromise, this.worldBookLoadPromise, this.conversationLoadPromise].filter(Boolean))
+						if (!this.isCurrentCharacterImport(session)) return
+						await Promise.all([this.loadCharacters(), this.loadWorldBooks()])
+						if (!this.isCurrentCharacterImport(session)) return
+						await this.loadConversations()
+						if (this.isCurrentCharacterImport(session)) this.showToast('角色卡已更新，已有对话已保留')
+						return
+					}
 					const result = await commitCharacterImport(this.characterImportPreview, {
-						repository: this.services.repository,
+						repository: session.services.repository,
 						allowSensitiveExtensions: this.characterImportConfirmed,
 						...(storyImport ? {
 							characterScope: 'story',
@@ -2298,12 +2393,14 @@
 							}
 						} : {})
 					})
+					if (!this.isCurrentCharacterImport(session)) return
 					this.characterImportPreview = null
 					this.characterImportConfirmed = false
 					this.characterImportTarget = 'contacts'
 					await Promise.all(storyImport
 						? [this.loadCharacters(), this.loadWorldBooks()]
 						: [this.loadCharacters()])
+					if (!this.isCurrentCharacterImport(session)) return
 					if (openChatAfterImport) {
 						if (storyImport) await this.startStoryFromCharacter(result.character)
 						else await this.startCharacterChat(result.character)
@@ -2313,10 +2410,13 @@
 						this.showToast(result.duplicateOfCharacterIds.length ? '已另存为新角色联系人' : '角色已保存到联系人')
 					}
 				} catch (error) {
-					this.handleError(error, '角色卡导入失败')
+					if (this.isCurrentCharacterImport(session)) this.handleError(error, updated ? '角色卡已更新，列表刷新失败，请重新进入' : session.characterId ? '角色卡更新失败' : '角色卡导入失败')
 				} finally {
-					this.characterImportBusy = false
-					this.characterImportStage = ''
+					if (this.isCurrentCharacterImport(session)) {
+						this.characterImportBusy = false
+						this.characterImportStage = ''
+						if (!this.characterImportPreview) this.resetCharacterImport()
+					}
 				}
 			},
 			async startCharacterChat(character) {
@@ -2562,6 +2662,7 @@
 				if (!this.conversationItems.length && this.providerItems[0]) await this.addConversation(false)
 			},
 			resetWorkspaceViewState() {
+				this.resetCharacterImport()
 				this.resetJsonShareState()
 				this.backupMenuOpen = false
 				this.dataLoadRevision += 1
@@ -2658,6 +2759,9 @@
 						latestMessages.map(message => [message.conversationId, message])
 					)
 					const items = conversations.map(conversation => {
+						// 列表展示当前角色信息，不改写会话快照、标题或历史消息。
+						const character = this.characterItems.find(item => item.id === conversation.characterId && !item.deletedAt)
+						const characterAvatarAssetId = character ? character.avatarAssetId : conversation.characterAvatarAssetId
 						const groupParticipants = isGroupConversation(conversation)
 							? normalizeGroupParticipants(conversation.participants).map(participant => {
 								if (groupParticipantKind(participant) === 'provider') {
@@ -2669,16 +2773,22 @@
 										avatarDataUrl: provider?.logo || participant.avatarSource || ''
 									}
 								}
+								const member = this.characterItems.find(item => item.id === participant.characterId && !item.deletedAt)
+								const avatarAssetId = member ? member.avatarAssetId : participant.avatarAssetId
 								return {
 									...participant,
-									avatarDataUrl: this.characterAvatarSources.get(participant.avatarAssetId) || ''
+									nameSnapshot: member?.name || participant.nameSnapshot,
+									avatarAssetId,
+									avatarDataUrl: this.characterAvatarSources.get(avatarAssetId) || ''
 								}
 							})
 							: []
 						return markRaw({
 							...summarizeConversation(conversation, latestByConversation.get(conversation.id)),
 							participants: groupParticipants.length ? groupParticipants : conversation.participants,
-							characterAvatarDataUrl: this.characterAvatarSources.get(conversation.characterAvatarAssetId) || ''
+							characterNameSnapshot: character?.name || conversation.characterNameSnapshot,
+							characterAvatarAssetId,
+							characterAvatarDataUrl: this.characterAvatarSources.get(characterAvatarAssetId) || ''
 						})
 					})
 					if (this.services?.repository === repository && this.dataLoadRevision === revision) {
@@ -8385,6 +8495,8 @@
 		min-height: 0;
 		padding: 4px 16px 12px;
 		flex: 1;
+		overflow-y: auto;
+		overscroll-behavior-y: contain;
 	}
 
 	.character-preview-identity {
@@ -8431,6 +8543,27 @@
 		color: #666970;
 		-webkit-box-orient: vertical;
 		-webkit-line-clamp: 4;
+	}
+
+	.character-update-notice {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		margin-bottom: 18px;
+		padding: 14px;
+		border: 1px solid var(--paper-line);
+		border-radius: 16px;
+		background: var(--paper-soft);
+		font-size: 13px;
+		line-height: 1.65;
+		color: var(--paper-muted);
+		overflow-wrap: anywhere;
+	}
+
+	.character-update-notice > text:first-child {
+		font-size: 15px;
+		font-weight: 650;
+		color: var(--paper-accent);
 	}
 
 	.character-preview-facts {

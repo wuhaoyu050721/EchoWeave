@@ -136,6 +136,7 @@
 
 				<view v-if="!creating" class="character-detail-section character-management-section">
 					<text class="character-section-title">角色管理</text>
+					<button class="character-management-row character-update-row" :disabled="saving" @click="emitCharacterAction('update-card')"><RefreshCw :size="19" /><view><text>更新角色卡</text><text>导入新版 PNG，保留已有对话</text></view><ChevronRight :size="18" /></button>
 					<button class="character-management-row" :disabled="saving" @click="emitCharacterAction('export-json')"><FileText :size="19" /><text>导出角色卡 JSON</text><Download :size="18" /></button>
 					<button class="character-management-row" :disabled="saving" @click="emitCharacterAction('export-png')"><Image :size="19" /><text>导出角色卡 PNG</text><Download :size="18" /></button>
 					<button class="character-management-row character-management-danger" :disabled="saving" @click="deleteConfirmationOpen = true"><Trash2 :size="19" /><text>删除角色</text><ChevronRight :size="18" /></button>
@@ -171,13 +172,13 @@
 </template>
 
 <script>
-	import { ArrowLeft, Camera, Check, ChevronDown, ChevronRight, Contact, Download, FileText, Image, MessageCircle, Plus, Trash2 } from './app-icons.js'
+	import { ArrowLeft, Camera, Check, ChevronDown, ChevronRight, Contact, Download, FileText, Image, MessageCircle, Plus, RefreshCw, Trash2 } from './app-icons.js'
 	import ProviderLogo from './provider-logo.js'
 	import { createCharacterEditForm } from '../features/character-editor.js'
 	import { CHARACTER_MANAGEMENT_EVENTS } from '../features/character-management.js'
 
 	export default {
-		components: { ArrowLeft, Camera, Check, ChevronDown, ChevronRight, Contact, Download, FileText, Image, MessageCircle, Plus, ProviderLogo, Trash2 },
+		components: { ArrowLeft, Camera, Check, ChevronDown, ChevronRight, Contact, Download, FileText, Image, MessageCircle, Plus, ProviderLogo, RefreshCw, Trash2 },
 		props: {
 			character: { type: Object, default: null },
 			worldBooks: { type: Array, default: () => [] },
@@ -194,6 +195,7 @@
 			'request-avatar-change': payload => ['gallery', 'file'].includes(payload?.source) && Boolean(payload?.characterId),
 			'export-json': payload => Boolean(payload?.characterId),
 			'export-png': payload => Boolean(payload?.characterId),
+			'update-card': payload => Boolean(payload?.characterId),
 			'delete-character': payload => Boolean(payload?.characterId)
 		},
 		data() {
@@ -298,7 +300,7 @@
 				this.$emit(CHARACTER_MANAGEMENT_EVENTS.requestAvatarChange, { characterId: this.character.id, source })
 			},
 			emitCharacterAction(eventName) {
-				if (this.saving || !this.character?.id || ![CHARACTER_MANAGEMENT_EVENTS.exportJson, CHARACTER_MANAGEMENT_EVENTS.exportPng].includes(eventName)) return
+				if (this.saving || !this.character?.id || ![CHARACTER_MANAGEMENT_EVENTS.exportJson, CHARACTER_MANAGEMENT_EVENTS.exportPng, CHARACTER_MANAGEMENT_EVENTS.updateCard].includes(eventName)) return
 				this.$emit(eventName, { characterId: this.character.id })
 			},
 			confirmDelete() {
@@ -385,6 +387,8 @@
 		display: block;
 		min-height: 0;
 		flex: 1;
+		overflow-y: auto;
+		overscroll-behavior-y: contain;
 	}
 
 	.character-profile {
@@ -796,6 +800,30 @@
 
 	.character-management-row > :last-child {
 		color: #929399;
+	}
+
+	.character-update-row {
+		min-height: 66px;
+		color: var(--paper-accent, #7761a9);
+	}
+
+	.character-update-row > view {
+		display: flex;
+		min-width: 0;
+		flex-direction: column;
+		gap: 5px;
+		padding: 10px 0;
+		font-size: 14px;
+		font-weight: 600;
+		line-height: 20px;
+		color: var(--paper-ink, #2e2f34);
+	}
+
+	.character-update-row > view > text:last-child {
+		font-size: 12px;
+		font-weight: 400;
+		line-height: 18px;
+		color: var(--paper-muted, #8e9096);
 	}
 
 	.character-management-row:active {

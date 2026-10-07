@@ -3,6 +3,7 @@ import { exportCharacterCardJson, exportCharacterCardPng } from './exportCharact
 
 export const CHARACTER_MANAGEMENT_EVENTS = Object.freeze({
   requestAvatarChange: 'request-avatar-change',
+  updateCard: 'update-card',
   exportJson: 'export-json',
   exportPng: 'export-png',
   deleteCharacter: 'delete-character'

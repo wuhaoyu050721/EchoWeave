@@ -898,23 +898,29 @@ export class PlusSqliteRepository {
     })))
   }
 
-  async importRecordsIfUnchanged({ entityType, entityId, expectedSnapshot, records }) {
-    const target = SYNC_TABLE_BY_ENTITY[entityType]
-    if (!target) throw new Error('Unsupported sync entity type')
-    const [table, keyColumn] = target
+  async importRecordsIfUnchanged({ entityType, entityId, expectedSnapshot, records, additionalSnapshots = [] }) {
+    const snapshots = [{ entityType, entityId, expectedSnapshot }, ...additionalSnapshots].map(snapshot => {
+      if (!Object.prototype.hasOwnProperty.call(SYNC_TABLE_BY_ENTITY, snapshot.entityType)) throw new Error('Unsupported sync entity type')
+      const [table, keyColumn] = SYNC_TABLE_BY_ENTITY[snapshot.entityType]
+      return { ...snapshot, table, keyColumn }
+    })
     return this.#enqueueWrite(async () => {
       await this.#transaction('begin')
       try {
-        const rows = await this.#select(
-          `SELECT payload FROM ${table} WHERE ${keyColumn} = ${sqlText(entityId)} LIMIT 1`
-        )
-        const exists = Boolean(rows[0])
-        const value = exists
-          ? await this.#decodeStoredPayload(table, entityId, rows[0].payload)
-          : null
-        if (!matchesSyncSnapshot(exists, value, expectedSnapshot)) {
-          await this.#transaction('commit')
-          return false
+        // 同一事务先校验全部依赖快照，任何冲突都不能留下角色或资源的部分写入。
+        for (const snapshot of snapshots) {
+          const { table, keyColumn } = snapshot
+          const rows = await this.#select(
+            `SELECT payload FROM ${table} WHERE ${keyColumn} = ${sqlText(snapshot.entityId)} LIMIT 1`
+          )
+          const exists = Boolean(rows[0])
+          const value = exists
+            ? await this.#decodeStoredPayload(table, snapshot.entityId, rows[0].payload)
+            : null
+          if (!matchesSyncSnapshot(exists, value, snapshot.expectedSnapshot)) {
+            await this.#transaction('commit')
+            return false
+          }
         }
         const statements = importStatements(records)
         if (statements.length) await this.#execute(statements)
